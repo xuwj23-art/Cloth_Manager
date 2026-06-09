@@ -1,0 +1,48 @@
+CTPL_DEMO1.1.5
+	©¦
+	©¦  .gitignore
+	©¦  build.gradle
+	©¦  gradle.properties
+	©¦  gradlew
+	©¦  gradlew.bat
+	©¦  local.properties
+	©¦  settings.gradle
+	©¦  
+	©À©¤.gradle
+	©¦          
+	©À©¤app
+	©¦  ©¦  .gitignore
+	©¦  ©¦  build.gradle
+	©¦  ©¦  proguard-rules.pro
+	©¦  ©¦  
+	©¦  ©À©¤.gradle
+	©¦  ©À©¤apk
+	©¦  ©¦   ©¸©¤app-debug.apk
+	©¦  ©¦      
+	©¦  ©À©¤libs
+	©¦  ©¦      ctaiotCtpl1.1.5.jar
+	©¦  ©¦      
+	©¦  ©¸©¤src
+	©¦      ©¸©¤main
+	©¦          ©¦  AndroidManifest.xml
+	©¦          ©¦  
+	©¦          ©À©¤java
+	©¦          ©¦  ©¸©¤com
+	©¦          ©¦      ©¸©¤ctaiot
+	©¦          ©¦          ©¸©¤ctprinter
+	©¦          ©¦              ©¸©¤ctpl_demo
+	©¦          ©¦                      ApiException.java
+	©¦          ©¦                      App.java
+	©¦          ©¦                      BinModel.java
+	©¦          ©¦                      DensityUtil.java
+	©¦          ©¦                      FunctionActivity.java
+	©¦          ©¦                      MainActivity.java
+	©¦          ©¦                      RespObj.java
+	©¦          ©¦                      SearchBluetoothActivity.java
+	©¦          ©¦                      UpgradeActivity.java
+	©¦          ©¦                      UpgradeHttp.java
+	©¦          ©¦                      
+	©¦          ©¸©¤res
+	©¦                      
+	©¸©¤gradle
+		©¸©¤wrapper

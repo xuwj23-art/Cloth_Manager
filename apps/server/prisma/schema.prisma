@@ -1,0 +1,159 @@
+// 服装进销存 —— 数据模型
+// 设计要点：SKU 为库存核心键；库存通过 StockMovement 增量流水累加，便于离线多端同步。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  owner
+  staff
+}
+
+enum StockMovementType {
+  in
+  out
+  adjust
+  transfer
+}
+
+enum SaleOrderStatus {
+  draft
+  completed
+  voided
+}
+
+model Shop {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users      User[]
+  categories Category[]
+  products   Product[]
+  saleOrders SaleOrder[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  shopId       String
+  name         String
+  phone        String   @unique
+  passwordHash String
+  role         UserRole @default(staff)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  shop           Shop            @relation(fields: [shopId], references: [id])
+  saleOrders     SaleOrder[]
+  stockMovements StockMovement[]
+
+  @@index([shopId])
+}
+
+model Category {
+  id     String @id @default(uuid())
+  shopId String
+  name   String
+
+  shop     Shop      @relation(fields: [shopId], references: [id])
+  products Product[]
+
+  @@index([shopId])
+}
+
+model Product {
+  id         String    @id @default(uuid())
+  shopId     String
+  name       String
+  categoryId String?
+  coverImage String?
+  images     String[]  @default([])
+  // 软下架/归档时间（null = 在售）。售罄自动归档，店主可手动下架/恢复。
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  shop     Shop      @relation(fields: [shopId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
+  skus     Sku[]
+
+  @@index([shopId])
+}
+
+model Sku {
+  id        String   @id @default(uuid())
+  productId String
+  color     String
+  size      String
+  // QR 内容 / 条码，全局唯一，是扫码匹配的核心键
+  barcode   String   @unique
+  costPrice Int      @default(0) // 进价（分）
+  salePrice Int      @default(0) // 售价（分）
+  stock     Int      @default(0) // 当前库存（由流水累加维护）
+  version   Int      @default(0) // 乐观锁 / 同步版本
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  movements StockMovement[]
+  saleItems SaleItem[]
+
+  @@index([productId])
+  @@index([barcode])
+}
+
+model StockMovement {
+  id         String            @id @default(uuid())
+  skuId      String
+  type       StockMovementType
+  quantity   Int // 带正负：入库为正、出库为负
+  refOrderId String?
+  operatorId String?
+  // 客户端生成的幂等键：同一 opId 只生效一次，防止离线重传重复扣减
+  opId       String            @unique
+  createdAt  DateTime          @default(now())
+
+  sku      Sku   @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  operator User? @relation(fields: [operatorId], references: [id])
+
+  @@index([skuId])
+}
+
+model SaleOrder {
+  id          String          @id @default(uuid())
+  shopId      String
+  operatorId  String?
+  status      SaleOrderStatus @default(completed)
+  totalAmount Int             @default(0)
+  // 客户端幂等键，防止重复提交销售单
+  opId        String          @unique
+  createdAt   DateTime        @default(now())
+
+  shop     Shop       @relation(fields: [shopId], references: [id])
+  operator User?      @relation(fields: [operatorId], references: [id])
+  items    SaleItem[]
+
+  @@index([shopId])
+}
+
+model SaleItem {
+  id       String @id @default(uuid())
+  orderId  String
+  skuId    String
+  quantity Int
+  price    Int // 成交单价（分）
+  subtotal Int
+
+  order SaleOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sku   Sku       @relation(fields: [skuId], references: [id])
+
+  @@index([orderId])
+  @@index([skuId])
+}

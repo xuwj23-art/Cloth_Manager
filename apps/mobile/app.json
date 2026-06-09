@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "服装进销存",
+    "slug": "cloth-scan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.clothscan.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "用于扫描服装吊牌二维码以匹配商品信息"
+      }
+    },
+    "android": {
+      "package": "com.clothscan.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "用于扫描服装吊牌二维码以匹配商品信息"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "用于选择服装图片建档",
+          "cameraPermission": "用于拍摄服装图片建档"
+        }
+      ],
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-audio"
+    ]
+  }
+}

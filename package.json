@@ -1,0 +1,24 @@
+{
+  "name": "cloth-scan",
+  "version": "0.1.0",
+  "private": true,
+  "description": "服装进销存 App（QR 吊牌 / 离线优先）—— 全栈 TypeScript Monorepo",
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "server": "pnpm --filter @cloth-scan/server",
+    "mobile": "pnpm --filter @cloth-scan/mobile",
+    "shared": "pnpm --filter @cloth-scan/shared"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}

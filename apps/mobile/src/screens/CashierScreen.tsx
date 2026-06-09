@@ -1,0 +1,743 @@
+import { useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Haptics from "expo-haptics";
+import { useAudioPlayer } from "expo-audio";
+import {
+  addToCartQty,
+  cartItemCount,
+  cartToSaleInput,
+  cartTotalCents,
+  removeFromCart,
+  setLinePrice,
+  setQuantity,
+  type CartLine,
+} from "@cloth-scan/shared";
+import {
+  applyLocalStockDelta,
+  getCachedSkuByBarcode,
+  toScannedSku,
+  type CachedSku,
+} from "../db/catalog";
+import { enqueueSale } from "../db/outbox";
+import { imageUrl } from "../api";
+import { useSync } from "../sync/sync-context";
+
+function yuan(cents: number): string {
+  return `¥${(cents / 100).toFixed(2)}`;
+}
+
+/** 生成客户端幂等 opId（设备本地唯一即可） */
+function genOpId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** 触感反馈（部分设备不支持时静默忽略） */
+function haptic(kind: "success" | "error" | "light") {
+  try {
+    if (kind === "success") {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (kind === "error") {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } else {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  } catch {
+    // 忽略
+  }
+}
+
+export function CashierScreen({ onBack }: { onBack: () => void }) {
+  const [permission, requestPermission] = useCameraPermissions();
+  const { online, pendingCount, syncNow, refreshPending } = useSync();
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [hint, setHint] = useState<string>("对准吊牌二维码扫描");
+  const [submitting, setSubmitting] = useState(false);
+  const [torch, setTorch] = useState(false);
+
+  // 扫码确认卡：扫中后暂停继续识别，由用户确认数量后再加入
+  const [pending, setPending] = useState<CachedSku | null>(null);
+  const [pendingQty, setPendingQty] = useState(1);
+  const [notFound, setNotFound] = useState<string | null>(null);
+  // 手动输入条码（吊牌破损兜底）
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  // 议价/改价：正在编辑的购物车行
+  const [priceEdit, setPriceEdit] = useState<CartLine | null>(null);
+  const [priceValue, setPriceValue] = useState("");
+  // 任一弹卡打开时暂停扫码（onBarcodeScanned 会高频触发）
+  const sheetOpenRef = useRef(false);
+
+  // 扫码成功提示音
+  const beep = useAudioPlayer(require("../../assets/beep.wav"));
+  function playBeep() {
+    try {
+      beep.seekTo(0);
+      beep.play();
+    } catch {
+      // 忽略（部分环境不支持音频）
+    }
+  }
+
+  function closeSheet() {
+    setPending(null);
+    setNotFound(null);
+    setPendingQty(1);
+    sheetOpenRef.current = false;
+  }
+
+  async function lookupAndPrompt(barcode: string) {
+    const cached = await getCachedSkuByBarcode(barcode);
+    if (!cached) {
+      haptic("error");
+      setNotFound(barcode);
+      return;
+    }
+    playBeep();
+    haptic("success");
+    setPendingQty(1);
+    setPending(cached);
+  }
+
+  async function handleScanned(barcode: string) {
+    if (sheetOpenRef.current) return; // 已有弹卡，暂停识别
+    sheetOpenRef.current = true; // 立即上锁，避免同一画面重复触发
+    await lookupAndPrompt(barcode);
+  }
+
+  function submitManual() {
+    const code = manualCode.trim();
+    if (!code) return;
+    setManualOpen(false);
+    setManualCode("");
+    sheetOpenRef.current = true; // 进入确认流程前上锁
+    void lookupAndPrompt(code);
+  }
+
+  function openPriceEdit(line: CartLine) {
+    setPriceEdit(line);
+    setPriceValue((line.price / 100).toFixed(2));
+  }
+
+  function confirmPriceEdit() {
+    if (!priceEdit) return;
+    const n = Number(priceValue);
+    if (!Number.isFinite(n) || n < 0) {
+      Alert.alert("价格有误", "请输入有效的金额");
+      return;
+    }
+    setCart((prev) => setLinePrice(prev, priceEdit.skuId, Math.round(n * 100)));
+    setPriceEdit(null);
+  }
+
+  /** 当前购物车中该 SKU 已有数量 */
+  function inCartQty(skuId: string): number {
+    return cart.find((l) => l.skuId === skuId)?.quantity ?? 0;
+  }
+
+  function confirmAdd() {
+    if (!pending) return;
+    haptic("light");
+    setCart((prev) => addToCartQty(prev, toScannedSku(pending), pendingQty));
+    setHint(`已加入：${pending.productName} ${pending.color}/${pending.size} ×${pendingQty}`);
+    closeSheet();
+  }
+
+  async function checkout() {
+    if (cart.length === 0) return;
+    setSubmitting(true);
+    try {
+      const input = cartToSaleInput(cart, genOpId());
+      await enqueueSale(input);
+      for (const line of cart) {
+        await applyLocalStockDelta(line.skuId, -line.quantity);
+      }
+      setCart([]);
+      await refreshPending();
+      void syncNow();
+      Alert.alert(
+        "已结算",
+        online
+          ? "销售已记录并正在同步到云端"
+          : "当前离线，已记录在本地，联网后自动同步",
+      );
+      setHint("对准吊牌二维码扫描");
+    } catch (e) {
+      Alert.alert("结算失败", (e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!permission) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+  if (!permission.granted) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.tip}>需要相机权限才能扫码</Text>
+        <Pressable style={styles.btn} onPress={requestPermission}>
+          <Text style={styles.btnText}>授予相机权限</Text>
+        </Pressable>
+        <Pressable onPress={onBack}>
+          <Text style={styles.link}>返回</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const total = cartTotalCents(cart);
+  const count = cartItemCount(cart);
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.topbar}>
+        <Pressable onPress={onBack}>
+          <Text style={styles.link}>返回</Text>
+        </Pressable>
+        <Text style={styles.title}>扫码收银</Text>
+        <Text style={[styles.netDot, online ? styles.online : styles.offline]}>
+          {online ? "在线" : "离线"}
+          {pendingCount > 0 ? ` · 待同步${pendingCount}` : ""}
+        </Text>
+      </View>
+
+      <View style={styles.cameraWrap}>
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          enableTorch={torch}
+          barcodeScannerSettings={{ barcodeTypes: ["qr", "ean13", "code128"] }}
+          onBarcodeScanned={(e) => void handleScanned(e.data)}
+        />
+        <View style={styles.frame} pointerEvents="none" />
+        <Pressable
+          style={[styles.torchBtn, torch && styles.torchOn]}
+          onPress={() => setTorch((t) => !t)}
+        >
+          <Text style={styles.torchText}>{torch ? "💡 关灯" : "🔦 补光"}</Text>
+        </Pressable>
+      </View>
+      <View style={styles.hintRow}>
+        <Text style={styles.hint}>{hint}</Text>
+        <Pressable onPress={() => setManualOpen(true)} hitSlop={8}>
+          <Text style={styles.manualLink}>手动输入</Text>
+        </Pressable>
+      </View>
+
+      <FlatList
+        style={styles.cart}
+        data={cart}
+        keyExtractor={(l) => l.skuId}
+        ListEmptyComponent={<Text style={styles.empty}>购物车为空，扫码添加商品</Text>}
+        renderItem={({ item }) => (
+          <View style={styles.line}>
+            <Pressable style={styles.lineInfo} onPress={() => openPriceEdit(item)}>
+              <Text style={styles.lineName}>{item.productName}</Text>
+              <Text style={styles.lineMeta}>
+                {item.color}/{item.size} · {yuan(item.price)}
+                <Text style={styles.editPriceHint}>　改价›</Text>
+              </Text>
+            </Pressable>
+            <View style={styles.stepper}>
+              <Pressable
+                style={styles.stepBtn}
+                onPress={() =>
+                  setCart((prev) =>
+                    setQuantity(prev, item.skuId, item.quantity - 1),
+                  )
+                }
+              >
+                <Text style={styles.stepText}>−</Text>
+              </Pressable>
+              <Text style={styles.qty}>{item.quantity}</Text>
+              <Pressable
+                style={styles.stepBtn}
+                onPress={() =>
+                  setCart((prev) =>
+                    setQuantity(prev, item.skuId, item.quantity + 1),
+                  )
+                }
+              >
+                <Text style={styles.stepText}>＋</Text>
+              </Pressable>
+              <Pressable
+                style={styles.removeBtn}
+                onPress={() => setCart((prev) => removeFromCart(prev, item.skuId))}
+              >
+                <Text style={styles.removeText}>删</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+      />
+
+      <View style={styles.footer}>
+        <View>
+          <Text style={styles.totalLabel}>合计（{count} 件）</Text>
+          <Text style={styles.total}>{yuan(total)}</Text>
+        </View>
+        <Pressable
+          style={[styles.checkout, (cart.length === 0 || submitting) && styles.disabled]}
+          disabled={cart.length === 0 || submitting}
+          onPress={checkout}
+        >
+          {submitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.checkoutText}>结算</Text>
+          )}
+        </Pressable>
+      </View>
+
+      {/* 扫码确认卡 */}
+      <Modal
+        visible={pending !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={closeSheet}
+      >
+        <Pressable style={styles.backdrop} onPress={closeSheet} />
+        {pending ? (
+          (() => {
+            const already = inCartQty(pending.skuId);
+            const maxAddable = Math.max(pending.stock - already, 0);
+            const canAdd = maxAddable > 0;
+            const qty = Math.min(pendingQty, Math.max(maxAddable, 1));
+            return (
+              <View style={styles.sheet}>
+                <View style={styles.sheetHeader}>
+                  <View style={styles.sheetCover}>
+                    {pending.coverImage ? (
+                      <Image
+                        source={{ uri: imageUrl(pending.coverImage) }}
+                        style={styles.sheetCoverImg}
+                      />
+                    ) : (
+                      <Text style={styles.coverPlaceholder}>无图</Text>
+                    )}
+                  </View>
+                  <View style={styles.sheetInfo}>
+                    <Text style={styles.sheetName} numberOfLines={2}>
+                      {pending.productName}
+                    </Text>
+                    <Text style={styles.sheetSpec}>
+                      {pending.color}/{pending.size}
+                    </Text>
+                    <Text style={styles.sheetPrice}>{yuan(pending.salePrice)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.sheetRow}>
+                  <Text
+                    style={[
+                      styles.stockText,
+                      pending.stock <= 3 && styles.stockLow,
+                    ]}
+                  >
+                    库存 {pending.stock}
+                    {already > 0 ? ` · 购物车已有 ${already} 件` : ""}
+                  </Text>
+                  <View style={styles.sheetStepper}>
+                    <Pressable
+                      style={[styles.stepBtnLg, qty <= 1 && styles.disabled]}
+                      disabled={qty <= 1}
+                      onPress={() => setPendingQty(Math.max(1, qty - 1))}
+                    >
+                      <Text style={styles.stepTextLg}>−</Text>
+                    </Pressable>
+                    <Text style={styles.sheetQty}>{canAdd ? qty : 0}</Text>
+                    <Pressable
+                      style={[
+                        styles.stepBtnLg,
+                        qty >= maxAddable && styles.disabled,
+                      ]}
+                      disabled={qty >= maxAddable}
+                      onPress={() => setPendingQty(Math.min(maxAddable, qty + 1))}
+                    >
+                      <Text style={styles.stepTextLg}>＋</Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {!canAdd ? (
+                  <Text style={styles.warnText}>
+                    购物车已达该商品库存上限
+                  </Text>
+                ) : null}
+
+                <View style={styles.sheetActions}>
+                  <Pressable style={styles.cancelBtn} onPress={closeSheet}>
+                    <Text style={styles.cancelText}>取消</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.addBtn, !canAdd && styles.disabled]}
+                    disabled={!canAdd}
+                    onPress={confirmAdd}
+                  >
+                    <Text style={styles.addText}>
+                      加入购物车 · {canAdd ? yuan(pending.salePrice * qty) : "—"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })()
+        ) : null}
+      </Modal>
+
+      {/* 未找到条码提示卡 */}
+      <Modal
+        visible={notFound !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSheet}
+      >
+        <Pressable style={styles.backdrop} onPress={closeSheet} />
+        <View style={styles.notFoundSheet}>
+          <Text style={styles.notFoundTitle}>未找到该条码</Text>
+          <Text style={styles.notFoundCode}>{notFound}</Text>
+          <Text style={styles.notFoundHint}>
+            可能是别的店铺的吊牌，或商品尚未同步。请在有网时「立即同步」后重试。
+          </Text>
+          <Pressable style={styles.addBtn} onPress={closeSheet}>
+            <Text style={styles.addText}>知道了</Text>
+          </Pressable>
+        </View>
+      </Modal>
+
+      {/* 手动输入条码（吊牌破损兜底） */}
+      <Modal
+        visible={manualOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setManualOpen(false)}
+      >
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setManualOpen(false)}
+        />
+        <View style={styles.notFoundSheet}>
+          <Text style={styles.notFoundTitle}>手动输入条码</Text>
+          <TextInput
+            style={styles.manualInput}
+            placeholder="输入吊牌上的条码/编号"
+            autoFocus
+            autoCapitalize="characters"
+            value={manualCode}
+            onChangeText={setManualCode}
+            onSubmitEditing={submitManual}
+          />
+          <View style={styles.sheetActions}>
+            <Pressable
+              style={styles.cancelBtn}
+              onPress={() => setManualOpen(false)}
+            >
+              <Text style={styles.cancelText}>取消</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.addBtn, !manualCode.trim() && styles.disabled]}
+              disabled={!manualCode.trim()}
+              onPress={submitManual}
+            >
+              <Text style={styles.addText}>查找</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 议价/改价 */}
+      <Modal
+        visible={priceEdit !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPriceEdit(null)}
+      >
+        <Pressable style={styles.backdrop} onPress={() => setPriceEdit(null)} />
+        {priceEdit ? (
+          <View style={styles.notFoundSheet}>
+            <Text style={styles.notFoundTitle}>修改成交价</Text>
+            <Text style={styles.notFoundCode}>
+              {priceEdit.productName} {priceEdit.color}/{priceEdit.size}
+            </Text>
+            <View style={styles.priceInputRow}>
+              <Text style={styles.priceYuan}>¥</Text>
+              <TextInput
+                style={styles.priceInput}
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+                autoFocus
+                value={priceValue}
+                onChangeText={setPriceValue}
+                onSubmitEditing={confirmPriceEdit}
+              />
+            </View>
+            <Text style={styles.notFoundHint}>每件成交单价，用于讨价还价/优惠。</Text>
+            <View style={styles.sheetActions}>
+              <Pressable
+                style={styles.cancelBtn}
+                onPress={() => setPriceEdit(null)}
+              >
+                <Text style={styles.cancelText}>取消</Text>
+              </Pressable>
+              <Pressable style={styles.addBtn} onPress={confirmPriceEdit}>
+                <Text style={styles.addText}>确定</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fff" },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    padding: 24,
+  },
+  topbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  title: { fontSize: 18, fontWeight: "800", color: "#111" },
+  link: { color: "#2563eb", fontSize: 16 },
+  netDot: { fontSize: 13, fontWeight: "600" },
+  online: { color: "#16a34a" },
+  offline: { color: "#f59e0b" },
+  cameraWrap: {
+    height: 220,
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+    marginHorizontal: 16,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  frame: {
+    width: 150,
+    height: 150,
+    borderWidth: 3,
+    borderColor: "#4ade80",
+    borderRadius: 12,
+  },
+  torchBtn: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  torchOn: { backgroundColor: "rgba(245,158,11,0.85)" },
+  torchText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  hintRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    paddingVertical: 8,
+  },
+  hint: { color: "#6b7280" },
+  manualLink: { color: "#2563eb", fontSize: 14, fontWeight: "700" },
+  editPriceHint: { color: "#2563eb", fontSize: 12 },
+  manualInput: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 18,
+    textAlign: "center",
+  },
+  priceInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  priceYuan: { fontSize: 24, fontWeight: "800", color: "#111" },
+  priceInput: {
+    borderBottomWidth: 2,
+    borderBottomColor: "#2563eb",
+    minWidth: 140,
+    fontSize: 28,
+    fontWeight: "800",
+    textAlign: "center",
+    paddingVertical: 4,
+    color: "#111",
+  },
+  cart: { flex: 1, paddingHorizontal: 16 },
+  empty: { textAlign: "center", color: "#9ca3af", marginTop: 24 },
+  line: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+  },
+  lineInfo: { flex: 1 },
+  lineName: { fontSize: 16, fontWeight: "600", color: "#111" },
+  lineMeta: { fontSize: 13, color: "#6b7280", marginTop: 2 },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 6 },
+  stepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "#eef2ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepText: { fontSize: 20, color: "#2563eb", fontWeight: "700" },
+  qty: { minWidth: 28, textAlign: "center", fontSize: 16, fontWeight: "700" },
+  removeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "#fee2e2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 4,
+  },
+  removeText: { color: "#dc2626", fontSize: 14 },
+  footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+  },
+  totalLabel: { fontSize: 13, color: "#6b7280" },
+  total: { fontSize: 24, fontWeight: "800", color: "#e11d48" },
+  checkout: {
+    backgroundColor: "#2563eb",
+    paddingVertical: 16,
+    paddingHorizontal: 48,
+    borderRadius: 12,
+  },
+  disabled: { opacity: 0.5 },
+  checkoutText: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  btn: {
+    backgroundColor: "#2563eb",
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+  },
+  btnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  tip: { fontSize: 16, color: "#333" },
+
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" },
+  sheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    gap: 16,
+  },
+  sheetHeader: { flexDirection: "row", gap: 14 },
+  sheetCover: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  sheetCoverImg: { width: "100%", height: "100%" },
+  coverPlaceholder: { color: "#9ca3af", fontSize: 12 },
+  sheetInfo: { flex: 1, justifyContent: "center", gap: 4 },
+  sheetName: { fontSize: 18, fontWeight: "800", color: "#111" },
+  sheetSpec: { fontSize: 14, color: "#6b7280" },
+  sheetPrice: { fontSize: 20, fontWeight: "800", color: "#e11d48" },
+  sheetRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  stockText: { fontSize: 14, color: "#6b7280" },
+  stockLow: { color: "#f59e0b", fontWeight: "700" },
+  sheetStepper: { flexDirection: "row", alignItems: "center", gap: 12 },
+  stepBtnLg: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: "#eef2ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepTextLg: { fontSize: 26, color: "#2563eb", fontWeight: "800" },
+  sheetQty: {
+    minWidth: 40,
+    textAlign: "center",
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#111",
+  },
+  warnText: { color: "#f59e0b", fontSize: 13, textAlign: "center" },
+  sheetActions: { flexDirection: "row", gap: 12 },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+    alignItems: "center",
+  },
+  cancelText: { fontSize: 16, fontWeight: "700", color: "#6b7280" },
+  addBtn: {
+    flex: 2,
+    backgroundColor: "#2563eb",
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  addText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  notFoundSheet: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    top: "35%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 24,
+    gap: 10,
+    alignItems: "center",
+  },
+  notFoundTitle: { fontSize: 18, fontWeight: "800", color: "#dc2626" },
+  notFoundCode: { fontSize: 14, color: "#374151", fontWeight: "600" },
+  notFoundHint: {
+    fontSize: 13,
+    color: "#6b7280",
+    textAlign: "center",
+    lineHeight: 19,
+  },
+});

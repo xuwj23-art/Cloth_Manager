@@ -1,0 +1,7 @@
+{
+  "name": "ct-printer",
+  "version": "0.1.0",
+  "description": "驰腾(CTPL)蓝牙标签打印机本地原生模块",
+  "main": "index.ts",
+  "private": true
+}

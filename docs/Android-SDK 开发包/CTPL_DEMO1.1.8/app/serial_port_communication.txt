@@ -1,0 +1,567 @@
+#include <stdio.h>
+
+#include <string.h>
+
+#include <sys/types.h>
+
+#include <errno.h>
+
+#include <sys/stat.h>
+
+#include <fcntl.h>
+
+#include <unistd.h>
+
+#include <termios.h>
+
+#include <stdlib.h>
+
+#include <pthread.h>
+
+
+
+
+
+
+
+/**
+
+ * open port
+
+ * @param fd
+
+ * @param comport 想要打开的串口号
+
+ * @return
+
+ */
+
+int open_port(int fd, int comport)
+
+{
+
+  char *dev[] = {"/dev/ttyUSB0", "/dev/ttyS1", "/dev/ttyS2"};
+
+
+
+  if (comport == 1) // 串口1
+
+  {
+
+    fd = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY | O_NDELAY);
+
+    if (-1 == fd)
+
+    {
+
+      perror("Can't Open Serial Port");
+
+      return (-1);
+
+    }
+
+  }
+
+  else if (comport == 2) // 串口2
+
+  {
+
+    fd = open("/dev/ttyS1", O_RDWR | O_NOCTTY | O_NDELAY);
+
+    if (-1 == fd)
+
+    {
+
+      perror("Can't Open Serial Port");
+
+      return (-1);
+
+    }
+
+  }
+
+  else if (comport == 3) // 串口3
+
+  {
+
+    fd = open("/dev/ttyS2", O_RDWR | O_NOCTTY | O_NDELAY);
+
+    if (-1 == fd)
+
+    {
+
+      perror("Can't Open Serial Port");
+
+      return (-1);
+
+    }
+
+  }
+
+  /*恢复串口为阻塞状态*/
+
+  if (fcntl(fd, F_SETFL, 0) < 0)
+
+    printf("fcntl failed!\n");
+
+  else
+
+    printf("fcntl=%d\n", fcntl(fd, F_SETFL, 0));
+
+	
+
+  /*测试是否为终端设备*/
+
+  if (isatty(STDIN_FILENO) == 0)
+
+    printf("standard input is not a terminal device\n");
+
+  else
+
+    printf("isatty success!\n");
+
+	
+
+  printf("fd-open=%d\n", fd);
+
+	
+
+  return fd;
+
+}
+
+
+
+
+
+/* 
+
+	设置串口属性： 
+
+	fd: 文件描述符 
+
+	nSpeed: 波特率 
+
+	nBits: 数据位 
+
+	nEvent: 奇偶校验 
+
+	nStop: 停止位 
+
+*/ 
+
+
+
+int set_opt(int fd, int nSpeed, int nBits, char nEvent, int nStop)
+
+{
+
+  struct termios newtio, oldtio;
+
+	
+
+  /*保存测试现有串口参数设置，在这里如果串口号等出错，会有相关的出错信息*/
+
+  if (tcgetattr(fd, &oldtio) != 0)
+
+  {
+
+    perror("SetupSerial 1");
+
+    printf("tcgetattr( fd,&oldtio) -> %d\n", tcgetattr(fd, &oldtio));
+
+    return -1;
+
+  }
+
+	
+
+  bzero(&newtio, sizeof(newtio));
+
+	
+
+  /*步骤一，设置字符大小*/
+
+  newtio.c_cflag |= CLOCAL | CREAD;
+
+  newtio.c_cflag &= ~CSIZE;
+
+	
+
+  /*设置数据位*/
+
+  switch (nBits)
+
+  {
+
+  case 7:
+
+    newtio.c_cflag |= CS7;
+
+    break;
+
+  case 8:
+
+    newtio.c_cflag |= CS8;
+
+    break;
+
+  }
+
+	
+
+  /*设置奇偶校验位*/
+
+  switch (nEvent)
+
+  {
+
+  case 'o':
+
+  case 'O': // 奇校验
+
+    newtio.c_cflag |= PARENB;
+
+    newtio.c_cflag |= PARODD;
+
+    newtio.c_iflag |= (INPCK | ISTRIP);
+
+    break;
+
+  case 'e':
+
+  case 'E': // 偶校验
+
+    newtio.c_iflag |= (INPCK | ISTRIP);
+
+    newtio.c_cflag |= PARENB;
+
+    newtio.c_cflag &= ~PARODD;
+
+    break;
+
+  case 'n':
+
+  case 'N': // 无奇偶校验位
+
+    newtio.c_cflag &= ~PARENB;
+
+    break;
+
+  default:
+
+    break;
+
+  }
+
+	
+
+  /*设置波特率*/
+
+  switch (nSpeed)
+
+  {
+
+  case 2400:
+
+    cfsetispeed(&newtio, B2400);
+
+    cfsetospeed(&newtio, B2400);
+
+    break;
+
+  case 4800:
+
+    cfsetispeed(&newtio, B4800);
+
+    cfsetospeed(&newtio, B4800);
+
+    break;
+
+  case 9600:
+
+    cfsetispeed(&newtio, B9600);
+
+    cfsetospeed(&newtio, B9600);
+
+    break;
+
+  case 115200:
+
+    cfsetispeed(&newtio, B115200);
+
+    cfsetospeed(&newtio, B115200);
+
+    break;
+
+  case 460800:
+
+    cfsetispeed(&newtio, B460800);
+
+    cfsetospeed(&newtio, B460800);
+
+    break;
+
+  default:
+
+    cfsetispeed(&newtio, B9600);
+
+    cfsetospeed(&newtio, B9600);
+
+    break;
+
+  }
+
+	
+
+  /*设置停止位*/
+
+  if (nStop == 1)
+
+    newtio.c_cflag &= ~CSTOPB;
+
+  else if (nStop == 2)
+
+    newtio.c_cflag |= CSTOPB;
+
+	
+
+  /*设置等待时间和最小接收字符*/
+
+  newtio.c_cc[VTIME] = 0;
+
+  newtio.c_cc[VMIN] = 0;
+
+	
+
+  /*处理未接收字符*/
+
+  tcflush(fd, TCIFLUSH);
+
+	
+
+  /*激活新配置*/
+
+  if ((tcsetattr(fd, TCSANOW, &newtio)) != 0)
+
+  {
+
+    perror("com set error");
+
+    return -1;
+
+  }
+
+	
+
+  printf("set done!\n");
+
+	
+
+  return 0;
+
+}
+
+
+
+void *serial_process(void* input)
+
+{
+
+	int i = 0;
+
+	int tfd = *(int *)input;
+
+
+
+	if(tfd > 0)
+
+	{
+
+		while(1)
+
+		{
+
+			char buf[20];
+
+			char str[] = "oooooooooo";
+
+
+
+			if(i < 10)
+
+			{
+
+				str[i] = '*';
+
+			}
+
+			else
+
+			{
+
+				str[19 - i] = '*';
+
+			}
+
+
+
+			i %= 20;
+
+
+
+			sprintf(buf, "%s\r\n", str);
+
+			write(tfd, buf, strlen(buf));
+
+
+
+			usleep(100000);
+
+		}
+
+	}
+
+
+
+	return 0;
+
+}
+
+
+
+
+
+
+
+/*读串口程序*/
+
+int main(void)
+
+{
+
+  int fd;
+
+  int nread, nwrite, i;
+
+  char buff[128] = "Hello\n";
+
+	fd_set rfd;
+
+	pthread_t p_id;
+
+	
+
+	// 打开串口
+
+  if ((fd = open_port(fd, 1)) < 0)
+
+  { 
+
+    perror("open_port error");
+
+    return;
+
+  }
+
+  else
+
+  {
+
+    printf("open_port success\n");
+
+  }
+
+	
+
+	// 初始化,设置串口	
+
+  if ((i = set_opt(fd, 115200, 8, 'N', 1)) < 0)
+
+  { 
+
+    perror("set_opt error");
+
+    return;
+
+  }
+
+
+
+	/*创建线程*/
+
+	pthread_create(&p_id, NULL, serial_process, &fd);
+
+
+
+	FD_ZERO(&rfd);
+
+	FD_SET(fd, &rfd);
+
+	while(FD_ISSET(fd, &rfd))
+
+	{
+
+		if(select(fd+1, &rfd, NULL, NULL, NULL) < 0)
+
+		{
+
+			perror("select");
+
+		}
+
+		else
+
+		{
+
+			memset(buff, 0, 128);
+
+
+
+			while((nread = read(fd, buff, 128)) > 0)
+
+			{
+
+				printf("nread = %d, %s\n", nread, buff);
+
+
+
+				/*回显*/
+
+				write(fd, buff, strlen(buff));
+
+ 
+
+			}
+
+		}
+
+	}
+
+	close(fd);	
+
+
+
+#if 0
+
+  printf("fd=%d\n", fd);
+
+  fd = 3;
+
+  nread = read(fd, buff, 8); // 读串口
+
+  printf("nread=%d,%s\n", nread, buff);
+
+  nwrite = write(fd, buff, 8); // 写串口
+
+  printf("nread=%d,%s\n", nread, buff);
+
+  close(fd);
+
+#endif
+
+
+
+  return 0;
+
+}
