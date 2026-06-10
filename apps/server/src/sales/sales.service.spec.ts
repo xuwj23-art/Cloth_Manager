@@ -207,6 +207,127 @@ describe("SalesService.report", () => {
   });
 });
 
+describe("SalesService.deleteOrder", () => {
+  it("整单删除会把库存加回并删除单据", async () => {
+    const tx = {
+      sku: { update: vi.fn().mockResolvedValue({ productId: "p1" }) },
+      stockMovement: { deleteMany: vi.fn().mockResolvedValue({}) },
+      saleOrder: { delete: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      saleOrder: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "o1",
+          shopId: SHOP,
+          items: [{ skuId: "s1", quantity: 2 }],
+        }),
+      },
+      $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
+    } as any;
+    const service = new SalesService(prisma, productsStub);
+
+    const res = await service.deleteOrder(SHOP, "o1");
+
+    expect(res).toEqual({ ok: true });
+    expect(tx.sku.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "s1" },
+        data: expect.objectContaining({ stock: { increment: 2 } }),
+      }),
+    );
+    expect(tx.stockMovement.deleteMany).toHaveBeenCalledWith({
+      where: { refOrderId: "o1" },
+    });
+    expect(tx.saleOrder.delete).toHaveBeenCalledWith({ where: { id: "o1" } });
+  });
+});
+
+describe("SalesService.editOrder", () => {
+  it("减少数量会回滚库存并重算总价", async () => {
+    const editable = {
+      id: "o1",
+      shopId: SHOP,
+      items: [
+        {
+          id: "i1",
+          skuId: "s1",
+          quantity: 2,
+          price: 5000,
+          subtotal: 10000,
+          sku: { id: "s1", productId: "p1", stock: 3, barcode: "B" },
+        },
+      ],
+    };
+    const detail = {
+      id: "o1",
+      shopId: SHOP,
+      operatorId: null,
+      operator: null,
+      status: "completed",
+      totalAmount: 5000,
+      createdAt: new Date(),
+      items: [
+        {
+          id: "i1",
+          skuId: "s1",
+          quantity: 1,
+          price: 5000,
+          subtotal: 5000,
+          sku: {
+            color: "白",
+            size: "M",
+            barcode: "B",
+            product: { name: "T恤", coverImage: null },
+          },
+        },
+      ],
+    };
+    const tx = {
+      sku: { update: vi.fn().mockResolvedValue({}) },
+      stockMovement: { create: vi.fn().mockResolvedValue({}) },
+      saleItem: {
+        delete: vi.fn(),
+        update: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn().mockResolvedValue([{ subtotal: 5000 }]),
+      },
+      saleOrder: { update: vi.fn().mockResolvedValue({}), delete: vi.fn() },
+    };
+    const prisma = {
+      saleOrder: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce(editable)
+          .mockResolvedValueOnce(detail),
+      },
+      $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
+    } as any;
+    const service = new SalesService(prisma, productsStub);
+
+    const result = await service.editOrder(SHOP, "o1", {
+      items: [{ id: "i1", quantity: 1, price: 5000 }],
+    });
+
+    // 数量 2→1：库存 +1（increment -delta，delta=-1）
+    expect(tx.sku.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "s1" },
+        data: expect.objectContaining({ stock: { increment: 1 } }),
+      }),
+    );
+    expect(tx.saleItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "i1" },
+        data: expect.objectContaining({ quantity: 1, subtotal: 5000 }),
+      }),
+    );
+    expect(tx.saleOrder.update).toHaveBeenCalledWith({
+      where: { id: "o1" },
+      data: { totalAmount: 5000 },
+    });
+    expect(result.totalAmount).toBe(5000);
+  });
+});
+
 describe("SalesService.getOrder", () => {
   const orderRow = {
     id: "order-1",

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -71,6 +72,13 @@ export class ProductsController {
   @Roles("owner")
   unarchive(@CurrentUser() user: RequestUser, @Param("id") id: string) {
     return this.products.setArchived(user.shopId, id, false);
+  }
+
+  /** 删除商品（仅店主，且需先售罄/下架）：清理图片释放磁盘 */
+  @Delete("products/:id")
+  @Roles("owner")
+  remove(@CurrentUser() user: RequestUser, @Param("id") id: string) {
+    return this.products.deleteProduct(user.shopId, id);
   }
 
   @Get("skus/by-barcode/:barcode")

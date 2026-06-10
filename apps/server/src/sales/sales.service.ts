@@ -6,6 +6,7 @@ import {
 import { randomUUID } from "node:crypto";
 import type {
   CreateSaleOrderInput,
+  EditSaleOrderInput,
   SaleOrderDetail,
   SalesBucket,
   SalesRange,
@@ -157,6 +158,122 @@ export class SalesService {
       take: 500,
     });
     return orders.map((o) => this.toDetail(o));
+  }
+
+  /**
+   * 删除整单（误操作兜底）：把每件已扣的库存加回，删除该单的库存流水与单据，
+   * 并刷新受影响商品的售罄归档状态。事务保证一致。
+   */
+  async deleteOrder(shopId: string, id: string): Promise<{ ok: true }> {
+    const order = await this.prisma.saleOrder.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+    if (!order || order.shopId !== shopId) {
+      throw new NotFoundException("单据不存在");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const affected = new Set<string>();
+      for (const it of order.items) {
+        const sku = await tx.sku.update({
+          where: { id: it.skuId },
+          data: {
+            stock: { increment: it.quantity },
+            version: { increment: 1 },
+          },
+        });
+        affected.add(sku.productId);
+      }
+      // 删除该单的库存流水（出库记录），再删单据（明细随单据级联删除）
+      await tx.stockMovement.deleteMany({ where: { refOrderId: id } });
+      await tx.saleOrder.delete({ where: { id } });
+      for (const productId of affected) {
+        await this.products.recomputeArchive(tx, productId);
+      }
+    });
+
+    return { ok: true };
+  }
+
+  /**
+   * 编辑账单：改价 / 改数量 / 删某件（quantity=0）。不支持加商品。
+   * 库存按新旧数量差额回滚或扣减（扣减时校验库存）；总价与售罄状态同步刷新。
+   * 若改后全单为空，则整单删除。
+   */
+  async editOrder(
+    shopId: string,
+    id: string,
+    input: EditSaleOrderInput,
+  ): Promise<SaleOrderDetail> {
+    const order = await this.prisma.saleOrder.findUnique({
+      where: { id },
+      include: { items: { include: { sku: true } } },
+    });
+    if (!order || order.shopId !== shopId) {
+      throw new NotFoundException("单据不存在");
+    }
+    const byId = new Map(order.items.map((it) => [it.id, it]));
+    for (const r of input.items) {
+      if (!byId.has(r.id)) {
+        throw new NotFoundException(`明细不存在：${r.id}`);
+      }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const affected = new Set<string>();
+      for (const r of input.items) {
+        const existing = byId.get(r.id)!;
+        affected.add(existing.sku.productId);
+        const delta = r.quantity - existing.quantity; // >0 多卖（扣库存），<0 退回（加库存）
+        if (delta > 0 && existing.sku.stock < delta) {
+          throw new BadRequestException(
+            `库存不足：${existing.sku.barcode} 现有 ${existing.sku.stock}，需再扣 ${delta}`,
+          );
+        }
+        if (delta !== 0) {
+          await tx.sku.update({
+            where: { id: existing.skuId },
+            data: {
+              stock: { increment: -delta },
+              version: { increment: 1 },
+            },
+          });
+          await tx.stockMovement.create({
+            data: {
+              skuId: existing.skuId,
+              type: "adjust",
+              quantity: -delta,
+              refOrderId: id,
+              opId: randomUUID(),
+            },
+          });
+        }
+        if (r.quantity === 0) {
+          await tx.saleItem.delete({ where: { id: r.id } });
+        } else {
+          await tx.saleItem.update({
+            where: { id: r.id },
+            data: { quantity: r.quantity, price: r.price, subtotal: r.price * r.quantity },
+          });
+        }
+      }
+
+      // 重算总价（取该单剩余明细）
+      const remaining = await tx.saleItem.findMany({ where: { orderId: id } });
+      if (remaining.length === 0) {
+        throw new BadRequestException(
+          "账单不能为空，请保留至少一件商品，或使用「删除整单」",
+        );
+      }
+      const total = remaining.reduce((s, it) => s + it.subtotal, 0);
+      await tx.saleOrder.update({ where: { id }, data: { totalAmount: total } });
+      for (const productId of affected) {
+        await this.products.recomputeArchive(tx, productId);
+      }
+    });
+
+    return this.getOrder(shopId, id);
   }
 
   /** 单据详情 */

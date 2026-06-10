@@ -51,12 +51,19 @@ function estimateQrModules(dataLen: number): number {
 export function buildCtPrintJob(
   product: ProductWithSkus,
   qtyBySku: Record<string, number>,
-  opts?: { size?: LabelSizeMm; dpi?: number; qrCell?: number },
+  opts?: {
+    size?: LabelSizeMm;
+    dpi?: number;
+    qrCell?: number;
+    qrXAdjustMm?: number;
+  },
 ): CtPrintJob {
   const size = opts?.size ?? DEFAULT_LABEL_SIZE;
   const dpi = opts?.dpi ?? 203;
   const dotsPerMm = dpi / 25.4;
   const qrCell = opts?.qrCell ?? 6; // 单元格点数，越大二维码越大
+  // 二维码水平微调（mm，正=右移）。估算的二维码尺寸会让其略偏左，默认右移一点居中
+  const qrXAdjustMm = opts?.qrXAdjustMm ?? 2.5;
 
   // 用一个待打印的条码估算二维码尺寸（同款各 SKU 条码长度相近）
   const sample =
@@ -66,7 +73,7 @@ export function buildCtPrintJob(
   const qrSizeMm = (estimateQrModules(sample.length) * qrCell) / dotsPerMm;
 
   const qrYMm = 3;
-  const qrXMm = Math.max(1, (size.widthMm - qrSizeMm) / 2);
+  const qrXMm = Math.max(1, (size.widthMm - qrSizeMm) / 2 + qrXAdjustMm);
   const codeYMm = qrYMm + qrSizeMm + 1.5; // 二维码下方
   const priceYMm = codeYMm + 4.5; // 最下方价格
 

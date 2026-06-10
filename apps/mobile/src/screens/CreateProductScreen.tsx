@@ -71,6 +71,8 @@ export function CreateProductScreen({
   const [customCategory, setCustomCategory] = useState("");
   const [materialsExpanded, setMaterialsExpanded] = useState(false);
   const [categoriesExpanded, setCategoriesExpanded] = useState(false);
+  // 详细设置（品名/颜色/尺码）默认折叠：一般服装只填价格库存即可建档
+  const [detailExpanded, setDetailExpanded] = useState(false);
 
   function selectMaterial(m: string) {
     const next = material === m ? "" : m;
@@ -111,7 +113,12 @@ export function CreateProductScreen({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const skuCount = colors.length * sizes.length;
+  // 未填写时的默认规格：保证至少生成一个 SKU
+  const effColors = colors.length ? colors : ["默认"];
+  const effSizes = sizes.length ? sizes : ["均码"];
+  const skuCount = effColors.length * effSizes.length;
+  const effName =
+    name.trim() || (material || category ? `${material}${category}` : "未命名商品");
 
   function toggle(list: string[], setList: (v: string[]) => void, value: string) {
     setList(
@@ -156,33 +163,34 @@ export function CreateProductScreen({
   }
 
   const preview = useMemo(() => {
-    if (skuCount === 0) return "请选择颜色和尺码";
-    return `将生成 ${skuCount} 个 SKU（${colors.join("/")} × ${sizes.join("/")}）`;
-  }, [skuCount, colors, sizes]);
+    const hasSpec = colors.length > 0 || sizes.length > 0;
+    const specText = hasSpec
+      ? `${effColors.join("/")} × ${effSizes.join("/")}`
+      : "默认 / 均码";
+    return `「${effName}」· 将生成 ${skuCount} 个规格（${specText}）`;
+  }, [skuCount, effColors, effSizes, effName, colors.length, sizes.length]);
 
   async function submit() {
     setError(null);
-    const cost = toCents(costPrice);
+    const cost = costPrice.trim() === "" ? 0 : toCents(costPrice);
     const sale = toCents(salePrice);
-    const stock = Number(initialStock);
+    const stock = initialStock.trim() === "" ? 0 : Number(initialStock);
 
-    if (!name.trim()) return setError("请填写品名");
-    if (colors.length === 0 || sizes.length === 0)
-      return setError("请至少选择一个颜色和一个尺码");
-    if (Number.isNaN(cost) || Number.isNaN(sale)) return setError("请填写有效价格");
+    if (Number.isNaN(sale)) return setError("请填写有效的售价");
+    if (Number.isNaN(cost) || cost < 0) return setError("进价格式有误");
     if (!Number.isInteger(stock) || stock < 0)
-      return setError("初始库存需为非负整数");
+      return setError("库存需为非负整数");
 
     const skus = expandSkuMatrix({
-      colors,
-      sizes,
+      colors: effColors,
+      sizes: effSizes,
       costPrice: cost,
       salePrice: sale,
       initialStock: stock,
     });
 
     const payload = {
-      name: name.trim(),
+      name: effName,
       coverImage: coverPath,
       skus,
     };
@@ -241,11 +249,58 @@ export function CreateProductScreen({
         </View>
       </View>
 
+      {/* 价格 / 库存（必填，普通服装填这三项即可建档） */}
+      <View style={styles.row}>
+        <View style={styles.flex1}>
+          <Text style={styles.label}>进价（元）</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+            value={costPrice}
+            onChangeText={setCostPrice}
+          />
+        </View>
+        <View style={styles.flex1}>
+          <Text style={styles.label}>售价（元）</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+            value={salePrice}
+            onChangeText={setSalePrice}
+          />
+        </View>
+      </View>
+      <Text style={styles.label}>库存</Text>
+      <TextInput
+        style={styles.input}
+        keyboardType="number-pad"
+        placeholder="0"
+        value={initialStock}
+        onChangeText={setInitialStock}
+      />
+
+      {/* 详细设置（品名 / 颜色 / 尺码）：默认折叠 */}
+      <Pressable
+        style={styles.detailToggle}
+        onPress={() => setDetailExpanded((v) => !v)}
+      >
+        <Text style={styles.detailToggleText}>
+          详细设置（品名 / 颜色 / 尺码，选填）
+        </Text>
+        <Text style={styles.expandLink}>
+          {detailExpanded ? "收起 ▴" : "展开 ▾"}
+        </Text>
+      </Pressable>
+
+      {detailExpanded ? (
+        <>
       {/* 品名 */}
       <Text style={styles.label}>品名</Text>
       <TextInput
         style={styles.input}
-        placeholder="如：纯棉圆领T恤"
+        placeholder="留空将按材质+品类或「未命名商品」自动命名"
         value={name}
         onChangeText={setName}
       />
@@ -410,44 +465,18 @@ export function CreateProductScreen({
           <Text style={styles.addBtnText}>添加</Text>
         </Pressable>
       </View>
-
-      {/* 价格库存 */}
-      <View style={styles.row}>
-        <View style={styles.flex1}>
-          <Text style={styles.label}>进价（元）</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            value={costPrice}
-            onChangeText={setCostPrice}
-          />
-        </View>
-        <View style={styles.flex1}>
-          <Text style={styles.label}>售价（元）</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            value={salePrice}
-            onChangeText={setSalePrice}
-          />
-        </View>
-      </View>
-      <Text style={styles.label}>每个 SKU 初始库存</Text>
-      <TextInput
-        style={styles.input}
-        keyboardType="number-pad"
-        value={initialStock}
-        onChangeText={setInitialStock}
-      />
+        </>
+      ) : null}
 
       <Text style={styles.preview}>{preview}</Text>
       {error && <Text style={styles.error}>{error}</Text>}
 
       <Pressable
-        style={[styles.submit, (submitting || skuCount === 0) && styles.disabled]}
-        disabled={submitting || skuCount === 0}
+        style={[
+          styles.submit,
+          (submitting || salePrice.trim() === "") && styles.disabled,
+        ]}
+        disabled={submitting || salePrice.trim() === ""}
         onPress={submit}
       >
         {submitting ? (
@@ -539,6 +568,19 @@ const styles = StyleSheet.create({
     color: "#374151",
   },
   expandLink: { fontSize: 13, color: "#2563eb", fontWeight: "600" },
+  detailToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: "#f8fafc",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#eef2f7",
+  },
+  detailToggleText: { fontSize: 15, fontWeight: "700", color: "#374151" },
   miniInput: { paddingVertical: 7, fontSize: 14 },
   miniAddBtn: {
     backgroundColor: "#e5edff",

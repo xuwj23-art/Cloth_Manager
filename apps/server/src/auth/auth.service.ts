@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
@@ -125,6 +126,21 @@ export class AuthService {
       role: u.role,
       createdAt: u.createdAt.toISOString(),
     }));
+  }
+
+  /** 老板删除店员账号（不能删除店主，也不能删自己） */
+  async deleteStaff(shopId: string, targetId: string): Promise<{ ok: true }> {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetId },
+    });
+    if (!target || target.shopId !== shopId) {
+      throw new NotFoundException("成员不存在");
+    }
+    if (target.role === "owner") {
+      throw new ForbiddenException("不能删除店主账号");
+    }
+    await this.prisma.user.delete({ where: { id: targetId } });
+    return { ok: true };
   }
 
   async getMe(userId: string) {

@@ -186,20 +186,6 @@ export function SalesScreen({
                 <>
                   <TotalCard total={report.total} />
                   <BucketChart report={report} />
-                  {report.topSkus.length > 0 ? (
-                    <View style={styles.topBox}>
-                      <Text style={styles.topTitle}>热销 TOP</Text>
-                      {report.topSkus.map((t, i) => (
-                        <View key={t.skuId} style={styles.topRow}>
-                          <Text style={styles.topRank}>{i + 1}</Text>
-                          <Text style={styles.topName} numberOfLines={1}>
-                            {t.productName} {t.color}/{t.size}
-                          </Text>
-                          <Text style={styles.topQty}>{t.quantity} 件</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
                 </>
               ) : null}
               <Text style={styles.sectionTitle}>流水（最近 500 笔）</Text>
@@ -305,25 +291,6 @@ const styles = StyleSheet.create({
   barValues: { width: 96, alignItems: "flex-end" },
   barRevenue: { fontSize: 12, fontWeight: "700", color: "#111" },
   barProfit: { fontSize: 11 },
-  topBox: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#eee",
-    padding: 12,
-    marginBottom: 10,
-    gap: 6,
-  },
-  topTitle: { fontSize: 14, fontWeight: "700", color: "#111", marginBottom: 2 },
-  topRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  topRank: {
-    width: 20,
-    textAlign: "center",
-    fontWeight: "800",
-    color: "#f59e0b",
-  },
-  topName: { flex: 1, fontSize: 14, color: "#374151" },
-  topQty: { fontSize: 13, color: "#6b7280" },
   sectionTitle: {
     fontSize: 14,
     fontWeight: "700",

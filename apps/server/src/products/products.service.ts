@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type {
   CreateProductInput,
@@ -109,8 +113,13 @@ export class ProductsService {
   }
 
   async listProducts(shopId: string, scope: ProductScope = "active") {
-    const where: { shopId: string; archivedAt?: null | { not: null } } = {
+    const where: {
+      shopId: string;
+      deletedAt: null;
+      archivedAt?: null | { not: null };
+    } = {
       shopId,
+      deletedAt: null, // 已删除的不出现在任何列表
     };
     if (scope === "active") where.archivedAt = null;
     else if (scope === "archived") where.archivedAt = { not: null };
@@ -119,6 +128,27 @@ export class ProductsService {
       include: { skus: true },
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  /**
+   * 删除商品（仅限已售罄/已下架）：软删除（置 deletedAt），从所有列表隐藏。
+   * 保留 Product/Sku 行与图片：维持销售历史外键，历史账单仍能看到图片。
+   */
+  async deleteProduct(shopId: string, id: string) {
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (!product || product.shopId !== shopId || product.deletedAt) {
+      throw new NotFoundException("商品不存在");
+    }
+    if (!product.archivedAt) {
+      throw new BadRequestException("请先让商品售罄或手动下架后再删除");
+    }
+
+    await this.prisma.product.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+
+    return { ok: true };
   }
 
   /** 编辑商品：改名/改封面/改价/盘点改库存（库存差额写 adjust 流水），并刷新售罄归档状态 */
@@ -204,8 +234,10 @@ export class ProductsService {
     const total = agg._sum.stock ?? 0;
     const p = await tx.product.findUnique({
       where: { id: productId },
-      select: { archivedAt: true },
+      select: { archivedAt: true, deletedAt: true },
     });
+    // 已删除商品保持删除态：回滚库存到它身上时不要把它「复活」成在售
+    if (p?.deletedAt) return;
     if (total <= 0 && !p?.archivedAt) {
       await tx.product.update({
         where: { id: productId },
@@ -225,7 +257,7 @@ export class ProductsService {
       where: { barcode },
       include: { product: true },
     });
-    if (!sku || sku.product.shopId !== shopId) {
+    if (!sku || sku.product.shopId !== shopId || sku.product.deletedAt) {
       throw new NotFoundException(`未找到条码对应的商品：${barcode}`);
     }
     return sku;

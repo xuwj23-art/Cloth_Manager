@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import {
   CreateStaffInput,
   LoginInput,
@@ -51,5 +59,13 @@ export class AuthController {
     @Body(new ZodValidationPipe(CreateStaffInput)) body: CreateStaffInput,
   ) {
     return this.auth.createStaff(user.shopId, body);
+  }
+
+  /** 仅老板可删除店员 */
+  @Delete("staff/:id")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("owner")
+  deleteStaff(@CurrentUser() user: RequestUser, @Param("id") id: string) {
+    return this.auth.deleteStaff(user.shopId, id);
   }
 }

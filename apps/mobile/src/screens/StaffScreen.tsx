@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import type { ShopMember } from "@cloth-scan/shared";
-import { apiCreateStaff, apiListStaff } from "../api";
+import { apiCreateStaff, apiDeleteStaff, apiListStaff } from "../api";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -66,6 +66,28 @@ export function StaffScreen({ onBack }: { onBack: () => void }) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const confirmDelete = (member: ShopMember) => {
+    Alert.alert(
+      "删除店员",
+      `确认删除店员「${member.name}」？\n删除后该账号无法登录，已产生的销售记录会保留（收银员显示为空）。`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "删除",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await apiDeleteStaff(member.id);
+              await load();
+            } catch (e) {
+              Alert.alert("删除失败", (e as Error).message);
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -143,6 +165,15 @@ export function StaffScreen({ onBack }: { onBack: () => void }) {
                 {item.phone} · 加入 {formatDate(item.createdAt)}
               </Text>
             </View>
+            {item.role !== "owner" ? (
+              <Pressable
+                style={styles.deleteBtn}
+                onPress={() => confirmDelete(item)}
+                hitSlop={8}
+              >
+                <Text style={styles.deleteText}>删除</Text>
+              </Pressable>
+            ) : null}
           </View>
         )}
       />
@@ -192,12 +223,25 @@ const styles = StyleSheet.create({
   empty: { textAlign: "center", color: "#9ca3af", marginTop: 24 },
   error: { color: "#dc2626" },
   memberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: 14,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#eee",
   },
-  memberInfo: { gap: 3 },
+  memberInfo: { flex: 1, gap: 3 },
+  deleteBtn: {
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginLeft: 8,
+  },
+  deleteText: { color: "#dc2626", fontSize: 13, fontWeight: "700" },
   memberName: { fontSize: 16, fontWeight: "700", color: "#111" },
   memberMeta: { fontSize: 13, color: "#6b7280" },
   ownerTag: { fontSize: 12, color: "#d97706", fontWeight: "700" },

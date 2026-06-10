@@ -1,13 +1,15 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { CreateSaleOrderInput } from "@cloth-scan/shared";
+import { CreateSaleOrderInput, EditSaleOrderInput } from "@cloth-scan/shared";
 import type { SalesRange } from "@cloth-scan/shared";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -59,5 +61,23 @@ export class SalesController {
   @Roles("owner")
   detail(@CurrentUser() user: RequestUser, @Param("id") id: string) {
     return this.sales.getOrder(user.shopId, id);
+  }
+
+  /** 编辑账单（改价/改数量/删某件）：店主专属 */
+  @Patch(":id")
+  @Roles("owner")
+  edit(
+    @CurrentUser() user: RequestUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(EditSaleOrderInput)) body: EditSaleOrderInput,
+  ) {
+    return this.sales.editOrder(user.shopId, id, body);
+  }
+
+  /** 删除整单：店主专属（库存回滚） */
+  @Delete(":id")
+  @Roles("owner")
+  remove(@CurrentUser() user: RequestUser, @Param("id") id: string) {
+    return this.sales.deleteOrder(user.shopId, id);
   }
 }

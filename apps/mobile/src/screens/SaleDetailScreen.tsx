@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import type { SaleOrderDetail } from "@cloth-scan/shared";
-import { getSale, imageUrl, thumbUrl } from "../api";
+import {
+  deleteSaleOrder,
+  editSaleOrder,
+  getSale,
+  imageUrl,
+  thumbUrl,
+} from "../api";
 import { ImageViewer } from "../components/ImageViewer";
 
 function yuan(cents: number): string {
@@ -24,17 +32,35 @@ function formatTime(iso: string): string {
   )}:${p(d.getMinutes())}`;
 }
 
+/** 编辑草稿行：priceStr 为元字符串，便于输入 */
+interface DraftLine {
+  id: string;
+  productName: string;
+  color: string;
+  size: string;
+  barcode: string;
+  coverImage: string | null;
+  quantity: number;
+  priceStr: string;
+}
+
 export function SaleDetailScreen({
   orderId,
   onBack,
+  onChanged,
 }: {
   orderId: string;
   onBack: () => void;
+  onChanged?: () => void;
 }) {
   const [order, setOrder] = useState<SaleOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<DraftLine[]>([]);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,14 +78,102 @@ export function SaleDetailScreen({
     void load();
   }, [load]);
 
+  function startEdit() {
+    if (!order) return;
+    setDraft(
+      order.items.map((it) => ({
+        id: it.id,
+        productName: it.productName,
+        color: it.color,
+        size: it.size,
+        barcode: it.barcode,
+        coverImage: it.coverImage,
+        quantity: it.quantity,
+        priceStr: (it.price / 100).toFixed(2),
+      })),
+    );
+    setEditing(true);
+  }
+
+  function setQty(id: string, q: number) {
+    setDraft((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, quantity: Math.max(0, q) } : l)),
+    );
+  }
+  function setPrice(id: string, v: string) {
+    setDraft((prev) => prev.map((l) => (l.id === id ? { ...l, priceStr: v } : l)));
+  }
+
+  const draftTotal = draft.reduce((s, l) => {
+    const p = Math.round(Number(l.priceStr) * 100);
+    return s + (Number.isFinite(p) && l.quantity > 0 ? p * l.quantity : 0);
+  }, 0);
+  const keptCount = draft.filter((l) => l.quantity > 0).length;
+
+  async function save() {
+    const items = draft.map((l) => ({
+      id: l.id,
+      quantity: l.quantity,
+      price: Math.round(Number(l.priceStr) * 100),
+    }));
+    if (items.some((i) => !Number.isFinite(i.price) || i.price < 0)) {
+      Alert.alert("价格有误", "请检查每件商品的成交价");
+      return;
+    }
+    if (keptCount === 0) {
+      Alert.alert("不能清空账单", "请保留至少一件商品，或使用「删除整单」");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await editSaleOrder(orderId, items);
+      setOrder(updated);
+      setEditing(false);
+      onChanged?.();
+    } catch (e) {
+      Alert.alert("保存失败", (e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function confirmDeleteOrder() {
+    Alert.alert(
+      "删除整单",
+      "确认删除这笔销售？已售出的库存会自动加回，此操作不可撤销。",
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "删除",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteSaleOrder(orderId);
+              onChanged?.();
+              onBack();
+            } catch (e) {
+              Alert.alert("删除失败", (e as Error).message);
+            }
+          },
+        },
+      ],
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={onBack} hitSlop={8}>
-          <Text style={styles.back}>返回</Text>
+        <Pressable onPress={editing ? () => setEditing(false) : onBack} hitSlop={8}>
+          <Text style={styles.back}>{editing ? "取消" : "返回"}</Text>
         </Pressable>
-        <Text style={styles.title}>单据详情</Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.title}>{editing ? "编辑账单" : "单据详情"}</Text>
+        {order && !editing ? (
+          <Pressable onPress={startEdit} hitSlop={8}>
+            <Text style={styles.editLink}>编辑</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.placeholder} />
+        )}
       </View>
 
       {loading ? (
@@ -74,49 +188,145 @@ export function SaleDetailScreen({
           </Pressable>
         </View>
       ) : order ? (
-        <ScrollView contentContainerStyle={styles.body}>
-          <View style={styles.summaryBox}>
-            <Text style={styles.amount}>{yuan(order.totalAmount)}</Text>
-            <Text style={styles.metaLine}>{formatTime(order.createdAt)}</Text>
-            <Text style={styles.metaLine}>
-              收银员：{order.operatorName ?? "—"} · 共 {order.itemCount} 件
-            </Text>
-          </View>
+        <>
+          <ScrollView contentContainerStyle={styles.body}>
+            <View style={styles.summaryBox}>
+              <Text style={styles.amount}>
+                {yuan(editing ? draftTotal : order.totalAmount)}
+              </Text>
+              <Text style={styles.metaLine}>{formatTime(order.createdAt)}</Text>
+              <Text style={styles.metaLine}>
+                收银员：{order.operatorName ?? "—"} ·{" "}
+                {editing ? `保留 ${keptCount} 项` : `共 ${order.itemCount} 件`}
+              </Text>
+            </View>
 
-          <Text style={styles.sectionTitle}>商品明细</Text>
-          {order.items.map((it) => (
-            <View key={it.id} style={styles.itemRow}>
+            <Text style={styles.sectionTitle}>商品明细</Text>
+
+            {!editing
+              ? order.items.map((it) => (
+                  <View key={it.id} style={styles.itemRow}>
+                    <Pressable
+                      style={styles.cover}
+                      onPress={() => {
+                        const u = imageUrl(it.coverImage);
+                        if (u) setViewerUri(u);
+                      }}
+                    >
+                      {it.coverImage ? (
+                        <Image
+                          source={{ uri: thumbUrl(it.coverImage) }}
+                          style={styles.coverImg}
+                        />
+                      ) : (
+                        <Text style={styles.coverPlaceholder}>无图</Text>
+                      )}
+                    </Pressable>
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemName} numberOfLines={1}>
+                        {it.productName}
+                      </Text>
+                      <Text style={styles.itemSpec}>
+                        {it.color}/{it.size} · {it.barcode}
+                      </Text>
+                      <Text style={styles.itemCalc}>
+                        {yuan(it.price)} × {it.quantity}
+                      </Text>
+                    </View>
+                    <Text style={styles.itemSubtotal}>{yuan(it.subtotal)}</Text>
+                  </View>
+                ))
+              : draft.map((l) => {
+                  const removed = l.quantity === 0;
+                  return (
+                    <View
+                      key={l.id}
+                      style={[styles.itemRow, removed && styles.itemRemoved]}
+                    >
+                      <View style={styles.editInfo}>
+                        <Text
+                          style={[styles.itemName, removed && styles.struck]}
+                          numberOfLines={1}
+                        >
+                          {l.productName}
+                        </Text>
+                        <Text style={styles.itemSpec}>
+                          {l.color}/{l.size}
+                        </Text>
+                        {removed ? (
+                          <Pressable onPress={() => setQty(l.id, 1)}>
+                            <Text style={styles.restoreText}>已删除 · 点此撤销</Text>
+                          </Pressable>
+                        ) : (
+                          <View style={styles.priceRow}>
+                            <Text style={styles.priceYuan}>¥</Text>
+                            <TextInput
+                              style={styles.priceInput}
+                              keyboardType="decimal-pad"
+                              value={l.priceStr}
+                              onChangeText={(v) => setPrice(l.id, v)}
+                            />
+                          </View>
+                        )}
+                      </View>
+                      {!removed ? (
+                        <View style={styles.editControls}>
+                          <View style={styles.stepper}>
+                            <Pressable
+                              style={styles.stepBtn}
+                              onPress={() => setQty(l.id, l.quantity - 1)}
+                            >
+                              <Text style={styles.stepText}>−</Text>
+                            </Pressable>
+                            <Text style={styles.qty}>{l.quantity}</Text>
+                            <Pressable
+                              style={styles.stepBtn}
+                              onPress={() => setQty(l.id, l.quantity + 1)}
+                            >
+                              <Text style={styles.stepText}>＋</Text>
+                            </Pressable>
+                          </View>
+                          <Pressable
+                            style={styles.lineDelete}
+                            onPress={() => setQty(l.id, 0)}
+                          >
+                            <Text style={styles.lineDeleteText}>删除</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+
+            {!editing ? (
+              <Pressable style={styles.deleteOrderBtn} onPress={confirmDeleteOrder}>
+                <Text style={styles.deleteOrderText}>删除整单</Text>
+              </Pressable>
+            ) : null}
+          </ScrollView>
+
+          {editing ? (
+            <View style={styles.editFooter}>
               <Pressable
-                style={styles.cover}
-                onPress={() => {
-                  const u = imageUrl(it.coverImage);
-                  if (u) setViewerUri(u);
-                }}
+                style={styles.cancelBtn}
+                onPress={() => setEditing(false)}
               >
-                {it.coverImage ? (
-                  <Image
-                    source={{ uri: thumbUrl(it.coverImage) }}
-                    style={styles.coverImg}
-                  />
+                <Text style={styles.cancelText}>取消</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.saveBtn, saving && styles.disabled]}
+                disabled={saving}
+                onPress={save}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.coverPlaceholder}>无图</Text>
+                  <Text style={styles.saveText}>保存（{yuan(draftTotal)}）</Text>
                 )}
               </Pressable>
-              <View style={styles.itemInfo}>
-                <Text style={styles.itemName} numberOfLines={1}>
-                  {it.productName}
-                </Text>
-                <Text style={styles.itemSpec}>
-                  {it.color}/{it.size} · {it.barcode}
-                </Text>
-                <Text style={styles.itemCalc}>
-                  {yuan(it.price)} × {it.quantity}
-                </Text>
-              </View>
-              <Text style={styles.itemSubtotal}>{yuan(it.subtotal)}</Text>
             </View>
-          ))}
-        </ScrollView>
+          ) : null}
+        </>
       ) : null}
 
       <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
@@ -136,6 +346,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f0f0f0",
   },
   back: { color: "#2563eb", fontSize: 16 },
+  editLink: { color: "#2563eb", fontSize: 16, fontWeight: "700" },
   title: { fontSize: 18, fontWeight: "800", color: "#111" },
   placeholder: { width: 32 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
@@ -164,6 +375,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#eee",
   },
+  itemRemoved: { backgroundColor: "#fafafa", borderColor: "#f0f0f0" },
   cover: {
     width: 52,
     height: 52,
@@ -180,6 +392,69 @@ const styles = StyleSheet.create({
   itemSpec: { fontSize: 12, color: "#9ca3af" },
   itemCalc: { fontSize: 13, color: "#6b7280" },
   itemSubtotal: { fontSize: 16, fontWeight: "700", color: "#111" },
+  editInfo: { flex: 1, gap: 4 },
+  struck: { textDecorationLine: "line-through", color: "#9ca3af" },
+  restoreText: { color: "#2563eb", fontSize: 13, fontWeight: "600" },
+  priceRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  priceYuan: { fontSize: 15, fontWeight: "700", color: "#111" },
+  priceInput: {
+    minWidth: 78,
+    borderBottomWidth: 1.5,
+    borderBottomColor: "#2563eb",
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111",
+    paddingVertical: 2,
+  },
+  editControls: { alignItems: "flex-end", gap: 6 },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 6 },
+  stepBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: "#eef2ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepText: { fontSize: 18, color: "#2563eb", fontWeight: "700" },
+  qty: { minWidth: 26, textAlign: "center", fontSize: 16, fontWeight: "700" },
+  lineDelete: { paddingHorizontal: 8, paddingVertical: 2 },
+  lineDeleteText: { color: "#dc2626", fontSize: 12, fontWeight: "700" },
+  deleteOrderBtn: {
+    marginTop: 16,
+    borderWidth: 1.5,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  deleteOrderText: { color: "#dc2626", fontSize: 16, fontWeight: "800" },
+  editFooter: {
+    flexDirection: "row",
+    gap: 12,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+    alignItems: "center",
+  },
+  cancelText: { fontSize: 16, fontWeight: "700", color: "#6b7280" },
+  saveBtn: {
+    flex: 2,
+    backgroundColor: "#2563eb",
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  disabled: { opacity: 0.5 },
+  saveText: { color: "#fff", fontSize: 16, fontWeight: "800" },
   error: { color: "#dc2626" },
   retry: {
     borderWidth: 1,

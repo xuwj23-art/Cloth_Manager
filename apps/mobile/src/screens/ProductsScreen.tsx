@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Pressable,
@@ -9,7 +10,7 @@ import {
   View,
 } from "react-native";
 import type { ProductScope, ProductWithSkus } from "@cloth-scan/shared";
-import { imageUrl, listProducts, thumbUrl } from "../api";
+import { deleteProduct, imageUrl, listProducts, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
 
 function yuan(cents: number): string {
@@ -46,6 +47,31 @@ export function ProductsScreen({
   useEffect(() => {
     void load();
   }, [load]);
+
+  const confirmDelete = useCallback(
+    (product: ProductWithSkus) => {
+      Alert.alert(
+        "删除商品",
+        `确认删除「${product.name}」？\n删除后将从列表移除（图片与历史账单均保留）。已售出的历史记录不受影响。`,
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "删除",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await deleteProduct(product.id);
+                await load();
+              } catch (e) {
+                Alert.alert("删除失败", (e as Error).message);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [load],
+  );
 
   return (
     <View style={styles.container}>
@@ -133,7 +159,17 @@ export function ProductsScreen({
                   </Text>
                   <Text style={styles.price}>{yuan(minPrice)} 起</Text>
                 </View>
-                <Text style={styles.editArrow}>编辑 ›</Text>
+                {scope === "archived" ? (
+                  <Pressable
+                    style={styles.deleteBtn}
+                    onPress={() => confirmDelete(item)}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.deleteText}>删除</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.editArrow}>编辑 ›</Text>
+                )}
               </Pressable>
             );
           }}
@@ -175,6 +211,16 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 14, color: "#6b7280", fontWeight: "600" },
   tabTextActive: { color: "#fff" },
   editArrow: { color: "#9ca3af", fontSize: 13, alignSelf: "center" },
+  deleteBtn: {
+    alignSelf: "center",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  deleteText: { color: "#dc2626", fontSize: 13, fontWeight: "700" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   list: { padding: 12, gap: 10 },
   empty: { textAlign: "center", color: "#9ca3af", marginTop: 48 },

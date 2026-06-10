@@ -4,6 +4,7 @@ import type {
   CreateProductInput,
   CreateSaleOrderInput,
   CreateStaffInput,
+  EditSaleOrderInput,
   LoginInput,
   Product,
   ProductScope,
@@ -110,6 +111,11 @@ export function apiCreateStaff(input: CreateStaffInput): Promise<AuthResponse> {
   });
 }
 
+/** 删除店员账号（仅店主） */
+export function apiDeleteStaff(id: string): Promise<{ ok: true }> {
+  return request(`/auth/staff/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 /* ------------------------------- 业务 ------------------------------- */
 
 export function getHealth(): Promise<{ status: string; db: string; time: string }> {
@@ -149,6 +155,11 @@ export function updateProduct(
   });
 }
 
+/** 删除商品（仅店主，需先售罄/下架）：清理图片释放磁盘 */
+export function deleteProduct(id: string): Promise<{ ok: true }> {
+  return request(`/products/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 /** 手动下架 / 恢复在售 */
 export function setProductArchived(
   id: string,
@@ -186,6 +197,22 @@ export function listSales(): Promise<SaleOrderDetail[]> {
 /** 单据详情 */
 export function getSale(id: string): Promise<SaleOrderDetail> {
   return request(`/sales/${encodeURIComponent(id)}`);
+}
+
+/** 编辑账单（改价/改数量/删某件，仅店主）：库存自动回滚或扣减 */
+export function editSaleOrder(
+  id: string,
+  items: EditSaleOrderInput["items"],
+): Promise<SaleOrderDetail> {
+  return request(`/sales/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ items }),
+  });
+}
+
+/** 删除整单（仅店主）：库存回滚 */
+export function deleteSaleOrder(id: string): Promise<{ ok: true }> {
+  return request(`/sales/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 /** 销售报表汇总（今日/本周 + 近 7 天热销） */

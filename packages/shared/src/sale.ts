@@ -45,6 +45,25 @@ export const CreateSaleOrderInput = z.object({
 });
 export type CreateSaleOrderInput = z.infer<typeof CreateSaleOrderInput>;
 
+/* ----------------------------- 编辑账单 DTO ----------------------------- */
+
+/** 编辑账单中的一行：按 SaleItem.id 定位；quantity=0 表示删除该行，库存会回滚 */
+export const EditSaleItemInput = z.object({
+  id: z.string().uuid(),
+  quantity: z.number().int().nonnegative(),
+  price: Money,
+});
+export type EditSaleItemInput = z.infer<typeof EditSaleItemInput>;
+
+/**
+ * 编辑账单：传入要调整的明细行（改价 / 改数量 / 删某件）。
+ * 不支持往旧单加商品。库存按新旧差额自动回滚或扣减。
+ */
+export const EditSaleOrderInput = z.object({
+  items: z.array(EditSaleItemInput).min(1),
+});
+export type EditSaleOrderInput = z.infer<typeof EditSaleOrderInput>;
+
 /* --------------------- 销售记录 / 报表（服务端 → 客户端响应类型） --------------------- */
 
 /** 单据明细行（含商品/规格名称，便于展示） */

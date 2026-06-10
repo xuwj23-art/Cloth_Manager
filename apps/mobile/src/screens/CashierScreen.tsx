@@ -157,7 +157,19 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
     closeSheet();
   }
 
-  async function checkout() {
+  function checkout() {
+    if (cart.length === 0 || submitting) return;
+    Alert.alert(
+      "确认结算",
+      `共 ${count} 件商品，合计 ${yuan(total)}\n确认收款并记录这笔销售？`,
+      [
+        { text: "再看看", style: "cancel" },
+        { text: "确认结算", onPress: () => void doCheckout() },
+      ],
+    );
+  }
+
+  async function doCheckout() {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
