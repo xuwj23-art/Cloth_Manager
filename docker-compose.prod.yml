@@ -38,6 +38,8 @@ services:
     volumes:
       # 上传的图片持久化，避免重建容器丢失
       - cloth_scan_uploads:/app/apps/server/uploads
+      # APK 下载目录：把新包放到服务器主机 ./apk/app.apk 即可对外下载（/download）
+      - ./apk:/app/apps/server/download
 
 volumes:
   cloth_scan_pgdata:

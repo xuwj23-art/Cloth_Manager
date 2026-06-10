@@ -134,4 +134,42 @@ python -m http.server 8000 --bind 0.0.0.0
 
 ---
 
+## 7. 通过服务器下载页对外分发（推荐，给别人装）
+
+局域网下载只适合自己人、同一 WiFi。要让别人（异地店员等）随时下载，把 APK 挂到阿里云服务器，浏览器打开下载页即可。内存/硬盘几乎无负担（静态文件流式发送，每次下载只占几十 KB 内存）。
+
+**一次性：服务器目录已由 `docker-compose.prod.yml` 绑定挂载**
+
+```
+服务器主机目录  ./apk/        →  容器内 /app/apps/server/download
+```
+
+即仓库根目录下的 `apk/` 文件夹。`git pull` 拿到新版后 `docker compose -f docker-compose.prod.yml up -d --build` 一次即可。
+
+**每次更新（本地打好包后）**
+
+1. 本地把 APK 传到服务器（在本机 PowerShell，IP/路径换成你的）：
+
+```powershell
+scp "E:\Project\cloth_scan\apps\mobile\android\app\build\outputs\apk\release\app-release.apk" root@<服务器IP>:/opt/Cloth_Manager/apk/app.apk
+```
+
+2. （可选）写个版本号，会显示在下载页上：
+
+```bash
+echo "1.0.0" > /opt/Cloth_Manager/apk/version.txt
+```
+
+3. 别人访问下载页（带二维码 + 下载按钮 + 安装说明）：
+
+```
+http://<服务器IP>:3000/download
+```
+
+> - 文件名固定 `app.apk`，覆盖式更新，永远只保留最新一个，不占额外硬盘。
+> - 下载快慢取决于服务器公网带宽（入门带宽 1–3Mbps，60MB 约 2–8 分钟），不影响服务器稳定。
+> - 从「云端 EAS 版」换到「本地版」需先卸载旧 App（签名不同）；本地版之间可直接覆盖。
+
+---
+
 有任何一步卡住，把命令和报错原样发我即可。
