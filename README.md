@@ -3,7 +3,8 @@
 面向小型服装零售商铺的进销存 App：**扫吊牌二维码（QR）秒匹配商品，售出自动扣库存**。  
 全栈统一 **TypeScript**，方便零基础 + AI 辅助开发。
 
-> 完整研发方案见 [`docs/服装进销存App-MVP研发方案.md`](docs/服装进销存App-MVP研发方案.md)
+> 👉 **接手开发（人或 AI）请先读 [`AGENTS.md`](AGENTS.md)** —— 项目向导、黄金规则、架构、部署、踩坑清单的统一入口。
+> 完整研发方案见 [`docs/服装进销存App-MVP研发方案.md`](docs/服装进销存App-MVP研发方案.md)，开发日志见 [`docs/进度记录.md`](docs/进度记录.md)。
 
 ---
 
@@ -41,10 +42,12 @@ pnpm --filter @cloth-scan/shared build
 
 ```bash
 # 1) 启动本地数据库（需已安装 Docker Desktop）
-docker compose up -d
+docker compose up -d   # 注意：宿主机端口是 55432
 
 # 2) 准备后端环境变量
-#    复制 apps/server/.env.example 为 apps/server/.env（默认值即可配合 docker compose 使用）
+#    复制 apps/server/.env.example 为 apps/server/.env
+#    用本地 docker compose 时把 DATABASE_URL 端口改成 55432
+#    若要测试注册，需再加一行 REGISTER_CODE=任意码（不设=关闭注册）
 
 # 3) 生成 Prisma 客户端 + 建表
 pnpm --filter @cloth-scan/server prisma:generate
@@ -94,15 +97,18 @@ pnpm --filter @cloth-scan/mobile start
 
 ---
 
-## 已实现（脚手架阶段）
+## 已实现（试运行版）
 
-- ✅ Monorepo + 全栈 TypeScript + 共享类型/校验
-- ✅ 数据模型（Prisma）：门店/用户/商品/SKU/库存流水/销售单
-- ✅ 后端接口：健康检查、商品建档、**按条码扫码匹配**、**销售开单（事务扣库存 + 幂等防超卖）**
-- ✅ 手机 App：首页 + **摄像头扫 QR 匹配商品** 演示
+- ✅ 鉴权：注册（邀请码）/登录/JWT/角色（店主·店员）/门店隔离
+- ✅ 商品：拍照建档 + 批量 SKU、编辑/盘点、售罄自动归档、软删除（不删图）
+- ✅ 收银：摄像头扫 QR 匹配、购物车、结算确认、离线优先 + 同步引擎（SQLite + outbox）
+- ✅ 销售：事务扣库存 + 幂等防超卖、流水、报表（今日/本周/本月 + 利润下钻）、账单编辑/删除
+- ✅ 蓝牙标签打印（驰腾 X1 / CTPL，本地原生模块，Expo Go 降级 PDF）
+- ✅ 部署：阿里云 Docker 生产环境、EAS OTA 热更新、本地 APK 打包、`/download` 下载页
 
-## 下一步（待开发）
-- 登录鉴权（替换接口里临时的 `shopId` 传参）
-- 建档界面（拍照 + 批量 SKU）
-- 离线优先本地库 + 同步引擎
-- 报表、权限、新手引导、监控与部署
+详细进度见 [`docs/进度记录.md`](docs/进度记录.md)。
+
+## 后续可选方向
+- HTTPS / 域名、对象存储（OSS）、CI/CD
+- 大库存找货能力（搜索 / 扫码找货 / 入库时间筛选，已设计待开发）
+- 应用商店上架

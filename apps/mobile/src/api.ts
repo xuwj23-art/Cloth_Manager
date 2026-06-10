@@ -189,7 +189,7 @@ export function createSale(
   });
 }
 
-/** 销售流水（最近 100 笔，含明细名称与操作人） */
+/** 销售流水（最近 500 笔，含明细名称与操作人） */
 export function listSales(): Promise<SaleOrderDetail[]> {
   return request("/sales");
 }
