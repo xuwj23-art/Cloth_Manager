@@ -108,7 +108,7 @@ export function CreateProductScreen({
 
   const [costPrice, setCostPrice] = useState("");
   const [salePrice, setSalePrice] = useState("");
-  const [initialStock, setInitialStock] = useState("0");
+  const [initialStock, setInitialStock] = useState("1");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -276,26 +276,32 @@ export function CreateProductScreen({
       <TextInput
         style={styles.input}
         keyboardType="number-pad"
-        placeholder="0"
+        placeholder="1"
         value={initialStock}
         onChangeText={setInitialStock}
       />
 
       {/* 详细设置（品名 / 颜色 / 尺码）：默认折叠 */}
       <Pressable
-        style={styles.detailToggle}
+        style={[styles.detailToggle, detailExpanded && styles.detailToggleActive]}
         onPress={() => setDetailExpanded((v) => !v)}
       >
-        <Text style={styles.detailToggleText}>
-          详细设置（品名 / 颜色 / 尺码，选填）
-        </Text>
-        <Text style={styles.expandLink}>
-          {detailExpanded ? "收起 ▴" : "展开 ▾"}
-        </Text>
+        <View style={styles.detailToggleLeft}>
+          <Text style={styles.detailToggleText}>详细设置</Text>
+          <Text style={styles.detailToggleSub}>品名 / 颜色 / 尺码（选填）</Text>
+        </View>
+        <View style={styles.detailToggleRight}>
+          <Text style={styles.detailToggleAction}>
+            {detailExpanded ? "收起" : "展开"}
+          </Text>
+          <Text style={styles.detailToggleAction}>
+            {detailExpanded ? "▴" : "▾"}
+          </Text>
+        </View>
       </Pressable>
 
       {detailExpanded ? (
-        <>
+        <View style={styles.detailBody}>
       {/* 品名 */}
       <Text style={styles.label}>品名</Text>
       <TextInput
@@ -465,7 +471,7 @@ export function CreateProductScreen({
           <Text style={styles.addBtnText}>添加</Text>
         </Pressable>
       </View>
-        </>
+        </View>
       ) : null}
 
       <Text style={styles.preview}>{preview}</Text>
@@ -576,11 +582,35 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     backgroundColor: "#f8fafc",
-    borderRadius: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  detailToggleActive: {
+    backgroundColor: "#eff6ff",
+    borderColor: "#bfdbfe",
+  },
+  detailToggleLeft: { flex: 1, paddingRight: 12 },
+  detailToggleText: { fontSize: 15, fontWeight: "700", color: "#1f2937" },
+  detailToggleSub: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+  detailToggleRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexShrink: 0,
+  },
+  detailToggleAction: { fontSize: 14, color: "#2563eb", fontWeight: "700" },
+  detailBody: {
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 2,
+    backgroundColor: "#fcfdff",
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#eef2f7",
+    gap: 6,
   },
-  detailToggleText: { fontSize: 15, fontWeight: "700", color: "#374151" },
   miniInput: { paddingVertical: 7, fontSize: 14 },
   miniAddBtn: {
     backgroundColor: "#e5edff",
