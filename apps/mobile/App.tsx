@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { Component, useState, type ReactNode } from "react";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { AuthProvider, useAuth } from "./src/auth-context";
@@ -150,20 +150,58 @@ function Root() {
   );
 }
 
+/**
+ * 全局错误边界：渲染期一旦抛错，显示可读的错误文本而不是「全是空白」。
+ * 这样真机/安装版出问题时能直接看到原因，便于排查。
+ */
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      const err = this.state.error;
+      return (
+        <View style={styles.errRoot}>
+          <ScrollView contentContainerStyle={styles.errScroll}>
+            <Text style={styles.errTitle}>应用启动出错</Text>
+            <Text style={styles.errMsg}>{String(err?.message ?? err)}</Text>
+            {!!err?.stack && <Text style={styles.errStack}>{err.stack}</Text>}
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
-          <StatusBar style="auto" />
-          <Root />
-        </SafeAreaView>
-      </AuthProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
+            <StatusBar style="auto" />
+            <Root />
+          </SafeAreaView>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#fff" },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  errRoot: { flex: 1, backgroundColor: "#fff", paddingTop: 60 },
+  errScroll: { padding: 20 },
+  errTitle: { fontSize: 18, fontWeight: "700", color: "#c00", marginBottom: 12 },
+  errMsg: { fontSize: 15, color: "#222", marginBottom: 16 },
+  errStack: { fontSize: 12, color: "#666", fontFamily: "monospace" },
 });

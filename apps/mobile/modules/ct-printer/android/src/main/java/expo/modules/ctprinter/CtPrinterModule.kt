@@ -33,9 +33,8 @@ class CtPrinterModule : Module() {
 
     Events("onConnect", "onData")
 
-    OnCreate {
-      ensureInit()
-    }
+    // 注意：不在 OnCreate 里初始化 SDK，避免启动期触发厂商 SDK 导致崩溃/白屏。
+    // 初始化延迟到首次 connect() 时进行（ensureInit 内部幂等）。
 
     // 已配对(经典蓝牙)设备列表 —— 先在系统蓝牙里配对打印机，再在 App 里选择
     Function("getBondedDevices") {

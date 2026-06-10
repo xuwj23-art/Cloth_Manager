@@ -6,17 +6,25 @@ import type {
   CtPrintJob,
 } from "../../modules/ct-printer/src/CtPrinter.types";
 
-/** 原生模块（Expo Go 中为 null，APK 中可用） */
-const Native = requireOptionalNativeModule("CtPrinter") as
-  | {
-      getBondedDevices: () => CtBondedDevice[];
-      isConnected: () => boolean;
-      disconnect: () => void;
-      connect: (mac: string, port: CtPort) => Promise<number>;
-      queryStatus: () => boolean;
-      printLabels: (job: CtPrintJob) => Promise<boolean>;
-    }
-  | null;
+type CtNativeModule = {
+  getBondedDevices: () => CtBondedDevice[];
+  isConnected: () => boolean;
+  disconnect: () => void;
+  connect: (mac: string, port: CtPort) => Promise<number>;
+  queryStatus: () => boolean;
+  printLabels: (job: CtPrintJob) => Promise<boolean>;
+};
+
+/**
+ * 原生模块（Expo Go 中为 null，APK 中可用）。
+ * 用 try/catch 兜底：即使原生模块加载异常，也绝不能让 App 启动期崩溃白屏。
+ */
+let Native: CtNativeModule | null = null;
+try {
+  Native = (requireOptionalNativeModule("CtPrinter") as CtNativeModule | null) ?? null;
+} catch {
+  Native = null;
+}
 
 /** 当前构建是否带蓝牙打印能力（Expo Go 为 false） */
 export const isPrinterAvailable = Native != null;
