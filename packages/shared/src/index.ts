@@ -1,9 +1,9 @@
-export * from "./enums.js";
-export * from "./auth.js";
-export * from "./product.js";
-export * from "./inventory.js";
-export * from "./sale.js";
-export * from "./cart.js";
+export * from "./enums";
+export * from "./auth";
+export * from "./product";
+export * from "./inventory";
+export * from "./sale";
+export * from "./cart";
 
 /** 共享常量 */
 export const API_PREFIX = "/api/v1";

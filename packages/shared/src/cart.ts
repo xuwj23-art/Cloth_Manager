@@ -1,4 +1,4 @@
-import type { CreateSaleOrderInput } from "./sale.js";
+import type { CreateSaleOrderInput } from "./sale";
 
 /** 购物车中的一行（一个 SKU） */
 export interface CartLine {

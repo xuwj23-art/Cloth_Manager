@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expandSkuMatrix, CreateProductInput } from "./product.js";
+import { expandSkuMatrix, CreateProductInput } from "./product";
 
 describe("expandSkuMatrix", () => {
   it("展开颜色 × 尺码 的笛卡尔积", () => {

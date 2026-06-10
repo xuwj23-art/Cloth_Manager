@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { UserRole } from "./enums.js";
+import { UserRole } from "./enums";
 
 /** 手机号：中国大陆 11 位 */
 export const Phone = z

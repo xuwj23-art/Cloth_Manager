@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { StockMovementType } from "./enums.js";
+import { StockMovementType } from "./enums";
 
 /**
  * 库存流水：库存以「增量累加」记录，而非覆盖绝对值。

@@ -10,7 +10,7 @@ import {
   setQuantity,
   type CartLine,
   type ScannedSku,
-} from "./cart.js";
+} from "./cart";
 
 const skuA: ScannedSku = {
   skuId: "a",

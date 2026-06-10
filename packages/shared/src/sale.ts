@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { Money } from "./product.js";
-import { SaleOrderStatus } from "./enums.js";
+import { Money } from "./product";
+import { SaleOrderStatus } from "./enums";
 
 export const SaleItemSchema = z.object({
   id: z.string().uuid(),

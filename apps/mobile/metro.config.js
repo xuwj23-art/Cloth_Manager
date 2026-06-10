@@ -7,8 +7,8 @@ const workspaceRoot = path.resolve(projectRoot, "../..");
 
 const config = getDefaultConfig(projectRoot);
 
-// 监听整个 workspace，以便 @cloth-scan/shared 改动能热更新
-config.watchFolders = [workspaceRoot];
+// 监听整个 workspace（在 Expo 默认项之上追加），以便 @cloth-scan/shared 改动能热更新
+config.watchFolders = [...(config.watchFolders ?? []), workspaceRoot];
 
 // 同时从本包与根目录解析 node_modules（pnpm 结构）
 config.resolver.nodeModulesPaths = [
