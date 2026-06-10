@@ -7,8 +7,12 @@ import {
   Text,
   View,
 } from "react-native";
-import type { SaleOrderDetail, SalesSummary } from "@cloth-scan/shared";
-import { getSalesSummary, listSales } from "../api";
+import type {
+  SaleOrderDetail,
+  SalesRange,
+  SalesReport,
+} from "@cloth-scan/shared";
+import { getSalesReport, listSales } from "../api";
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
@@ -22,20 +26,75 @@ function formatTime(iso: string): string {
   )}`;
 }
 
-function StatCard({
-  label,
-  stats,
-}: {
-  label: string;
-  stats: { revenue: number; orders: number; quantity: number };
-}) {
+const RANGES: { key: SalesRange; label: string }[] = [
+  { key: "today", label: "今日" },
+  { key: "week", label: "本周" },
+  { key: "month", label: "本月" },
+];
+
+/** 合计卡：营业额 + 毛利（含毛利率）+ 单数/件数 */
+function TotalCard({ total }: { total: SalesReport["total"] }) {
+  const margin =
+    total.revenue > 0 ? Math.round((total.profit / total.revenue) * 100) : 0;
   return (
-    <View style={styles.statCard}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statRevenue}>{yuan(stats.revenue)}</Text>
-      <Text style={styles.statMeta}>
-        {stats.orders} 单 · {stats.quantity} 件
+    <View style={styles.totalCard}>
+      <View style={styles.totalTop}>
+        <View>
+          <Text style={styles.totalLabel}>营业额</Text>
+          <Text style={styles.totalRevenue}>{yuan(total.revenue)}</Text>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={styles.totalLabel}>毛利</Text>
+          <Text
+            style={[
+              styles.totalProfit,
+              { color: total.profit >= 0 ? "#16a34a" : "#dc2626" },
+            ]}
+          >
+            {yuan(total.profit)}
+          </Text>
+          <Text style={styles.totalMargin}>毛利率 {margin}%</Text>
+        </View>
+      </View>
+      <Text style={styles.totalMeta}>
+        {total.orders} 单 · {total.quantity} 件
       </Text>
+    </View>
+  );
+}
+
+/** 下钻迷你条形图：本周按天、本月按周；空数据也展示 */
+function BucketChart({ report }: { report: SalesReport }) {
+  if (report.buckets.length === 0) return null;
+  const max = Math.max(1, ...report.buckets.map((b) => b.revenue));
+  const title = report.range === "week" ? "每日营业额" : "每周营业额";
+  return (
+    <View style={styles.chartBox}>
+      <Text style={styles.chartTitle}>{title}</Text>
+      {report.buckets.map((b) => (
+        <View key={b.key} style={styles.barRow}>
+          <Text style={styles.barLabel}>{b.label}</Text>
+          <View style={styles.barTrack}>
+            <View
+              style={[
+                styles.barFill,
+                { width: `${Math.max(2, (b.revenue / max) * 100)}%` },
+              ]}
+            />
+          </View>
+          <View style={styles.barValues}>
+            <Text style={styles.barRevenue}>{yuan(b.revenue)}</Text>
+            <Text
+              style={[
+                styles.barProfit,
+                { color: b.profit >= 0 ? "#16a34a" : "#dc2626" },
+              ]}
+            >
+              利 {yuan(b.profit)}
+            </Text>
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -47,28 +106,35 @@ export function SalesScreen({
   onBack: () => void;
   onOpenOrder: (id: string) => void;
 }) {
+  const [range, setRange] = useState<SalesRange>("today");
   const [orders, setOrders] = useState<SaleOrderDetail[]>([]);
-  const [summary, setSummary] = useState<SalesSummary | null>(null);
+  const [report, setReport] = useState<SalesReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [s, list] = await Promise.all([getSalesSummary(), listSales()]);
-      setSummary(s);
-      setOrders(list);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (r: SalesRange) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [rep, list] = await Promise.all([
+          getSalesReport(r),
+          listSales(),
+        ]);
+        setReport(rep);
+        setOrders(list);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(range);
+  }, [load, range]);
 
   return (
     <View style={styles.container}>
@@ -80,6 +146,22 @@ export function SalesScreen({
         <View style={styles.placeholder} />
       </View>
 
+      <View style={styles.tabs}>
+        {RANGES.map((t) => (
+          <Pressable
+            key={t.key}
+            style={[styles.tab, range === t.key && styles.tabActive]}
+            onPress={() => setRange(t.key)}
+          >
+            <Text
+              style={[styles.tabText, range === t.key && styles.tabTextActive]}
+            >
+              {t.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" />
@@ -87,7 +169,7 @@ export function SalesScreen({
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.error}>{error}</Text>
-          <Pressable style={styles.retry} onPress={load}>
+          <Pressable style={styles.retry} onPress={() => load(range)}>
             <Text style={styles.retryText}>重试</Text>
           </Pressable>
         </View>
@@ -95,21 +177,19 @@ export function SalesScreen({
         <FlatList
           data={orders}
           keyExtractor={(o) => o.id}
-          onRefresh={load}
+          onRefresh={() => load(range)}
           refreshing={loading}
           contentContainerStyle={styles.list}
           ListHeaderComponent={
             <View>
-              {summary ? (
+              {report ? (
                 <>
-                  <View style={styles.statRow}>
-                    <StatCard label="今日" stats={summary.today} />
-                    <StatCard label="本周" stats={summary.week} />
-                  </View>
-                  {summary.topSkus.length > 0 ? (
+                  <TotalCard total={report.total} />
+                  <BucketChart report={report} />
+                  {report.topSkus.length > 0 ? (
                     <View style={styles.topBox}>
-                      <Text style={styles.topTitle}>近 7 天热销 TOP</Text>
-                      {summary.topSkus.map((t, i) => (
+                      <Text style={styles.topTitle}>热销 TOP</Text>
+                      {report.topSkus.map((t, i) => (
                         <View key={t.skuId} style={styles.topRow}>
                           <Text style={styles.topRank}>{i + 1}</Text>
                           <Text style={styles.topName} numberOfLines={1}>
@@ -122,7 +202,7 @@ export function SalesScreen({
                   ) : null}
                 </>
               ) : null}
-              <Text style={styles.sectionTitle}>流水（最近 100 笔）</Text>
+              <Text style={styles.sectionTitle}>流水（最近 500 笔）</Text>
             </View>
           }
           ListEmptyComponent={
@@ -160,25 +240,71 @@ const styles = StyleSheet.create({
   back: { color: "#2563eb", fontSize: 16 },
   title: { fontSize: 18, fontWeight: "800", color: "#111" },
   placeholder: { width: 32 },
+  tabs: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "#f1f5f9",
+    alignItems: "center",
+  },
+  tabActive: { backgroundColor: "#2563eb" },
+  tabText: { fontSize: 15, fontWeight: "700", color: "#475569" },
+  tabTextActive: { color: "#fff" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   list: { padding: 12, gap: 10 },
-  statRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
-  statCard: {
-    flex: 1,
+  totalCard: {
     backgroundColor: "#f8fafc",
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 14,
     borderWidth: 1,
     borderColor: "#eef2f7",
+    marginBottom: 10,
   },
-  statLabel: { fontSize: 13, color: "#6b7280" },
-  statRevenue: {
-    fontSize: 22,
+  totalTop: { flexDirection: "row", justifyContent: "space-between" },
+  totalLabel: { fontSize: 12, color: "#6b7280" },
+  totalRevenue: {
+    fontSize: 26,
     fontWeight: "800",
     color: "#2563eb",
-    marginTop: 4,
+    marginTop: 2,
   },
-  statMeta: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+  totalProfit: { fontSize: 20, fontWeight: "800", marginTop: 2 },
+  totalMargin: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
+  totalMeta: { fontSize: 13, color: "#6b7280", marginTop: 8 },
+  chartBox: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#eee",
+    padding: 12,
+    marginBottom: 10,
+    gap: 8,
+  },
+  chartTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111",
+    marginBottom: 2,
+  },
+  barRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  barLabel: { width: 44, fontSize: 13, color: "#374151" },
+  barTrack: {
+    flex: 1,
+    height: 14,
+    backgroundColor: "#eef2f7",
+    borderRadius: 7,
+    overflow: "hidden",
+  },
+  barFill: { height: 14, backgroundColor: "#60a5fa", borderRadius: 7 },
+  barValues: { width: 96, alignItems: "flex-end" },
+  barRevenue: { fontSize: 12, fontWeight: "700", color: "#111" },
+  barProfit: { fontSize: 11 },
   topBox: {
     backgroundColor: "#fff",
     borderRadius: 12,

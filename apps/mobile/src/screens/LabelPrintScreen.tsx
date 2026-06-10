@@ -59,8 +59,7 @@ function refToDataURL(ref: { toDataURL?: (cb: (d: string) => void) => void } | u
 
 interface LabelItem {
   qr: string;
-  name: string;
-  spec: string;
+  code: string;
   price: string;
 }
 
@@ -70,24 +69,22 @@ function buildLabelsHtml(labels: LabelItem[], size: LabelSize): string {
       (l) => `
     <div class="label" style="width:${size.w}mm;height:${size.h}mm;">
       <img class="qr" src="data:image/png;base64,${l.qr}"/>
-      <div class="info">
-        <div class="name">${escapeHtml(l.name)}</div>
-        <div class="spec">${escapeHtml(l.spec)}</div>
-        <div class="price">${escapeHtml(l.price)}</div>
-      </div>
+      <div class="code">${escapeHtml(l.code)}</div>
+      <div class="price">${escapeHtml(l.price)}</div>
     </div>`,
     )
     .join("");
+  // 居中竖排：大二维码（主视觉）→ SKU 条码 → 价格
   return `<!doctype html><html><head><meta charset="utf-8"/>
   <style>
     *{box-sizing:border-box;}
     body{margin:0;padding:4mm;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;}
-    .label{display:flex;align-items:center;border:1px dashed #bbb;padding:1.5mm;margin:1mm;float:left;overflow:hidden;}
-    .qr{height:100%;width:auto;aspect-ratio:1;}
-    .info{padding-left:1.5mm;flex:1;min-width:0;}
-    .name{font-size:8pt;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .spec{font-size:7pt;color:#444;margin:0.5mm 0;}
-    .price{font-size:11pt;font-weight:800;}
+    .label{display:flex;flex-direction:column;align-items:center;justify-content:center;
+      border:1px dashed #bbb;padding:1.5mm;margin:1mm;float:left;overflow:hidden;}
+    .qr{height:58%;width:auto;aspect-ratio:1;}
+    .code{font-size:7pt;letter-spacing:0.3px;color:#222;margin-top:1mm;
+      max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .price{font-size:14pt;font-weight:800;margin-top:0.6mm;}
   </style></head><body>${cells}</body></html>`;
 }
 
@@ -128,8 +125,7 @@ export function LabelPrintScreen({
       if (!data) continue;
       const item: LabelItem = {
         qr: data,
-        name: product.name,
-        spec: `${sku.color}/${sku.size}`,
+        code: sku.barcode,
         price: yuan(sku.salePrice),
       };
       for (let i = 0; i < q; i++) labels.push(item);

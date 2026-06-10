@@ -149,6 +149,7 @@ model SaleItem {
   skuId    String
   quantity Int
   price    Int // 成交单价（分）
+  cost     Int    @default(0) // 开单时的进价快照（分），用于历史利润，改进价不影响
   subtotal Int
 
   order SaleOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)

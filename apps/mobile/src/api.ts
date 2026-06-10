@@ -12,6 +12,8 @@ import type {
   UpdateProductInput,
   SaleOrderDetail,
   SaleOrderWithItems,
+  SalesRange,
+  SalesReport,
   SalesSummary,
   ShopMember,
   Sku,
@@ -36,6 +38,17 @@ export function imageUrl(path: string | null | undefined): string | undefined {
   if (!path) return undefined;
   if (path.startsWith("http")) return path;
   return `${API_HOST}${path}`;
+}
+
+/**
+ * 缩略图地址：服务器上传时会额外生成同名的 `.thumb.jpg`，
+ * 列表/卡片用它省流量、加载更快。大图查看仍用 imageUrl。
+ */
+export function thumbUrl(path: string | null | undefined): string | undefined {
+  if (!path) return undefined;
+  if (path.startsWith("http")) return path;
+  const thumb = path.replace(/\.[^./]+$/, ".thumb.jpg");
+  return `${API_HOST}${thumb}`;
 }
 
 let authToken: string | null = null;
@@ -178,6 +191,11 @@ export function getSale(id: string): Promise<SaleOrderDetail> {
 /** 销售报表汇总（今日/本周 + 近 7 天热销） */
 export function getSalesSummary(): Promise<SalesSummary> {
   return request("/sales/summary");
+}
+
+/** 销售报表（含利润 + 日期下钻）：range=today|week|month */
+export function getSalesReport(range: SalesRange): Promise<SalesReport> {
+  return request(`/sales/report?range=${range}`);
 }
 
 /** 上传图片，返回相对路径（如 /uploads/xxx.jpg） */

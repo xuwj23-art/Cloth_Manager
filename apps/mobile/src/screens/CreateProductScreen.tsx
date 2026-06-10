@@ -17,36 +17,34 @@ import { createProduct, imageUrl, uploadImage } from "../api";
 const PRESET_COLORS = ["黑", "白", "灰", "红", "蓝", "绿", "黄", "粉", "卡其"];
 const PRESET_SIZES = ["S", "M", "L", "XL", "XXL", "均码"];
 
-/** 材质（左侧快选，单选） */
+/**
+ * 材质（单选）。女装热门排在最前（默认两行展示），其余折叠。
+ */
 const PRESET_MATERIALS = [
-  "纯棉", "棉麻", "亚麻", "苎麻", "涤纶", "锦纶", "氨纶", "莫代尔", "天丝", "粘纤",
-  "真丝", "桑蚕丝", "雪纺", "羊毛", "羊绒", "羊羔毛", "马海毛", "灯芯绒", "牛仔", "帆布",
-  "皮革", "PU皮", "麂皮绒", "针织", "毛呢", "摇粒绒", "法兰绒", "珊瑚绒", "天鹅绒", "丝绒",
-  "蕾丝", "网纱", "醋酸", "冰丝", "桃皮绒", "太空棉", "罗纹", "混纺", "化纤", "羽绒",
+  // —— 热门（默认显示）——
+  "纯棉", "雪纺", "牛仔", "针织", "真丝", "羊毛", "蕾丝", "莫代尔", "棉麻", "羊绒",
+  // —— 折叠 ——
+  "亚麻", "苎麻", "涤纶", "锦纶", "氨纶", "天丝", "粘纤", "桑蚕丝", "羊羔毛", "马海毛",
+  "灯芯绒", "皮革", "麂皮绒", "毛呢", "法兰绒", "珊瑚绒", "天鹅绒", "丝绒", "网纱", "醋酸",
+  "冰丝", "太空棉", "罗纹", "混纺", "化纤", "羽绒",
 ];
 
-/** 服装品类（右侧快选，单选）—— 按 上装/裙装/下装/外套/套装/内衣家居/配饰/童装 顺序排列 */
+/**
+ * 服装品类（单选）。女装热门排在最前（默认两行展示），其余折叠。
+ */
 const PRESET_CATEGORIES = [
-  // 上装
-  "T恤", "短袖", "长袖", "Polo衫", "衬衫", "雪纺衫", "卫衣", "连帽卫衣", "针织衫", "毛衣",
-  "打底衫", "吊带", "背心", "马甲", "文化衫",
-  // 裙装
-  "连衣裙", "半身裙", "包臀裙", "A字裙", "百褶裙", "短裙", "长裙", "吊带裙", "背带裙", "旗袍",
-  // 下装
-  "牛仔裤", "休闲裤", "西裤", "工装裤", "阔腿裤", "直筒裤", "小脚裤", "哈伦裤", "打底裤", "运动裤",
-  "卫裤", "短裤", "五分裤", "七分裤", "九分裤", "背带裤", "踩脚裤",
-  // 外套
-  "夹克", "外套", "风衣", "大衣", "西装", "小西装", "棉服", "棉袄", "羽绒服", "皮衣",
-  "牛仔外套", "冲锋衣", "开衫", "披风", "斗篷",
-  // 套装
-  "套装", "两件套", "三件套", "连体裤", "运动套装", "睡衣套装",
-  // 内衣家居
-  "内衣", "文胸", "内裤", "睡衣", "家居服", "保暖内衣", "秋衣秋裤", "吊带睡裙", "浴袍", "泳衣",
-  // 配饰
-  "帽子", "围巾", "丝巾", "手套", "袜子", "腰带", "领带",
-  // 童装
-  "童装T恤", "童装裤", "童装套装", "连体衣", "爬服", "校服",
+  // —— 热门（默认显示）——
+  "连衣裙", "T恤", "衬衫", "卫衣", "半身裙", "阔腿裤", "牛仔裤", "针织衫", "毛衣", "外套",
+  // —— 折叠 ——
+  "短袖", "长袖", "Polo衫", "打底衫", "吊带", "背心", "马甲", "休闲裤", "西裤", "工装裤",
+  "直筒裤", "小脚裤", "哈伦裤", "打底裤", "运动裤", "卫裤", "短裤", "五分裤", "七分裤", "九分裤",
+  "背带裤", "风衣", "大衣", "西装", "棉服", "棉袄", "羽绒服", "皮衣", "套装", "连体裤",
+  "睡衣套装", "内衣", "保暖内衣", "围巾",
 ];
+
+/** 默认展示的热门数量（约两行） */
+const HOT_MATERIAL_COUNT = 10;
+const HOT_CATEGORY_COUNT = 10;
 
 /** 元 → 分 */
 function toCents(yuan: string): number {
@@ -71,6 +69,8 @@ export function CreateProductScreen({
   const [extraCategories, setExtraCategories] = useState<string[]>([]);
   const [customMaterial, setCustomMaterial] = useState("");
   const [customCategory, setCustomCategory] = useState("");
+  const [materialsExpanded, setMaterialsExpanded] = useState(false);
+  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
 
   function selectMaterial(m: string) {
     const next = material === m ? "" : m;
@@ -250,74 +250,101 @@ export function CreateProductScreen({
         onChangeText={setName}
       />
 
-      {/* 快速命名：左材质 + 右品类，自动组合 */}
+      {/* 快速命名：材质 + 品类，自动组合写入品名 */}
       <Text style={styles.quickHint}>
-        快速命名：左选材质 + 右选品类，自动组合（上方品名仍可直接编辑）
+        快速命名：选「材质」+「品类」自动组合（上方品名仍可手动编辑）
       </Text>
-      <View style={styles.pickerRow}>
-        <View style={styles.pickerCol}>
-          <Text style={styles.pickerColTitle}>材质</Text>
-          <ScrollView
-            style={styles.pickerScroll}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={styles.chips}>
-              {[...PRESET_MATERIALS, ...extraMaterials].map((m) => (
-                <Chip
-                  key={m}
-                  label={m}
-                  active={material === m}
-                  onPress={() => selectMaterial(m)}
-                />
-              ))}
-            </View>
-          </ScrollView>
-          <View style={styles.addRow}>
-            <TextInput
-              style={[styles.input, styles.flex1, styles.miniInput]}
-              placeholder="自定义材质"
-              value={customMaterial}
-              onChangeText={setCustomMaterial}
-              onSubmitEditing={addCustomMaterial}
-            />
-            <Pressable style={styles.miniAddBtn} onPress={addCustomMaterial}>
-              <Text style={styles.addBtnText}>+</Text>
-            </Pressable>
-          </View>
-        </View>
 
-        <View style={styles.pickerCol}>
-          <Text style={styles.pickerColTitle}>品类</Text>
-          <ScrollView
-            style={styles.pickerScroll}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
+      {/* 材质 */}
+      <View style={styles.pickerHeader}>
+        <Text style={styles.pickerColTitle}>材质</Text>
+        {PRESET_MATERIALS.length > HOT_MATERIAL_COUNT ? (
+          <Pressable
+            onPress={() => setMaterialsExpanded((v) => !v)}
+            hitSlop={8}
           >
-            <View style={styles.chips}>
-              {[...PRESET_CATEGORIES, ...extraCategories].map((c) => (
-                <Chip
-                  key={c}
-                  label={c}
-                  active={category === c}
-                  onPress={() => selectCategory(c)}
-                />
-              ))}
-            </View>
-          </ScrollView>
-          <View style={styles.addRow}>
-            <TextInput
-              style={[styles.input, styles.flex1, styles.miniInput]}
-              placeholder="自定义品类"
-              value={customCategory}
-              onChangeText={setCustomCategory}
-              onSubmitEditing={addCustomCategory}
-            />
-            <Pressable style={styles.miniAddBtn} onPress={addCustomCategory}>
-              <Text style={styles.addBtnText}>+</Text>
-            </Pressable>
-          </View>
-        </View>
+            <Text style={styles.expandLink}>
+              {materialsExpanded ? "收起 ▴" : "展开更多 ▾"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <View style={styles.chips}>
+        {(() => {
+          const all = [...PRESET_MATERIALS, ...extraMaterials];
+          if (materialsExpanded) return all;
+          const base = [
+            ...PRESET_MATERIALS.slice(0, HOT_MATERIAL_COUNT),
+            ...extraMaterials,
+          ];
+          if (material && !base.includes(material)) base.push(material);
+          return base;
+        })().map((m) => (
+          <Chip
+            key={m}
+            label={m}
+            active={material === m}
+            onPress={() => selectMaterial(m)}
+          />
+        ))}
+      </View>
+      <View style={styles.addRow}>
+        <TextInput
+          style={[styles.input, styles.flex1, styles.miniInput]}
+          placeholder="自定义材质"
+          value={customMaterial}
+          onChangeText={setCustomMaterial}
+          onSubmitEditing={addCustomMaterial}
+        />
+        <Pressable style={styles.miniAddBtn} onPress={addCustomMaterial}>
+          <Text style={styles.addBtnText}>+</Text>
+        </Pressable>
+      </View>
+
+      {/* 品类 */}
+      <View style={styles.pickerHeader}>
+        <Text style={styles.pickerColTitle}>品类</Text>
+        {PRESET_CATEGORIES.length > HOT_CATEGORY_COUNT ? (
+          <Pressable
+            onPress={() => setCategoriesExpanded((v) => !v)}
+            hitSlop={8}
+          >
+            <Text style={styles.expandLink}>
+              {categoriesExpanded ? "收起 ▴" : "展开更多 ▾"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <View style={styles.chips}>
+        {(() => {
+          const all = [...PRESET_CATEGORIES, ...extraCategories];
+          if (categoriesExpanded) return all;
+          const base = [
+            ...PRESET_CATEGORIES.slice(0, HOT_CATEGORY_COUNT),
+            ...extraCategories,
+          ];
+          if (category && !base.includes(category)) base.push(category);
+          return base;
+        })().map((c) => (
+          <Chip
+            key={c}
+            label={c}
+            active={category === c}
+            onPress={() => selectCategory(c)}
+          />
+        ))}
+      </View>
+      <View style={styles.addRow}>
+        <TextInput
+          style={[styles.input, styles.flex1, styles.miniInput]}
+          placeholder="自定义品类"
+          value={customCategory}
+          onChangeText={setCustomCategory}
+          onSubmitEditing={addCustomCategory}
+        />
+        <Pressable style={styles.miniAddBtn} onPress={addCustomCategory}>
+          <Text style={styles.addBtnText}>+</Text>
+        </Pressable>
       </View>
 
       {/* 颜色 */}
@@ -500,22 +527,18 @@ const styles = StyleSheet.create({
   smallBtnText: { color: "#2563eb", fontWeight: "600" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   quickHint: { fontSize: 12, color: "#9ca3af", marginTop: 8, lineHeight: 17 },
-  pickerRow: { flexDirection: "row", gap: 10, marginTop: 6 },
-  pickerCol: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 10,
-    padding: 8,
-    backgroundColor: "#fafafa",
+  pickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
   },
   pickerColTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "700",
     color: "#374151",
-    marginBottom: 2,
   },
-  pickerScroll: { maxHeight: 220 },
+  expandLink: { fontSize: 13, color: "#2563eb", fontWeight: "600" },
   miniInput: { paddingVertical: 7, fontSize: 14 },
   miniAddBtn: {
     backgroundColor: "#e5edff",

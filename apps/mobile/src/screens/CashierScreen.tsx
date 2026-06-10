@@ -31,7 +31,8 @@ import {
   type CachedSku,
 } from "../db/catalog";
 import { enqueueSale } from "../db/outbox";
-import { imageUrl } from "../api";
+import { imageUrl, thumbUrl } from "../api";
+import { ImageViewer } from "../components/ImageViewer";
 import { useSync } from "../sync/sync-context";
 
 function yuan(cents: number): string {
@@ -76,6 +77,8 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   // 议价/改价：正在编辑的购物车行
   const [priceEdit, setPriceEdit] = useState<CartLine | null>(null);
   const [priceValue, setPriceValue] = useState("");
+  // 点击商品图放大查看
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   // 任一弹卡打开时暂停扫码（onBarcodeScanned 会高频触发）
   const sheetOpenRef = useRef(false);
 
@@ -321,16 +324,22 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
             return (
               <View style={styles.sheet}>
                 <View style={styles.sheetHeader}>
-                  <View style={styles.sheetCover}>
+                  <Pressable
+                    style={styles.sheetCover}
+                    onPress={() => {
+                      const u = imageUrl(pending.coverImage);
+                      if (u) setViewerUri(u);
+                    }}
+                  >
                     {pending.coverImage ? (
                       <Image
-                        source={{ uri: imageUrl(pending.coverImage) }}
+                        source={{ uri: thumbUrl(pending.coverImage) }}
                         style={styles.sheetCoverImg}
                       />
                     ) : (
                       <Text style={styles.coverPlaceholder}>无图</Text>
                     )}
-                  </View>
+                  </Pressable>
                   <View style={styles.sheetInfo}>
                     <Text style={styles.sheetName} numberOfLines={2}>
                       {pending.productName}
@@ -501,6 +510,8 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
           </View>
         ) : null}
       </Modal>
+
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }

@@ -20,6 +20,7 @@ export function LoginScreen() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +31,7 @@ export function LoginScreen() {
       if (mode === "login") {
         await login({ phone, password });
       } else {
-        await register({ shopName, name, phone, password });
+        await register({ shopName, name, phone, password, inviteCode });
       }
     } catch (e) {
       setError((e as Error).message);
@@ -81,6 +82,21 @@ export function LoginScreen() {
         value={password}
         onChangeText={setPassword}
       />
+
+      {mode === "register" && (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="注册邀请码"
+            autoCapitalize="none"
+            value={inviteCode}
+            onChangeText={setInviteCode}
+          />
+          <Text style={styles.inviteHint}>
+            注册需邀请码，请向管理员获取。
+          </Text>
+        </>
+      )}
 
       {error && <Text style={styles.error}>{error}</Text>}
 
@@ -147,5 +163,6 @@ const styles = StyleSheet.create({
   btnText: { color: "#fff", fontSize: 18, fontWeight: "700" },
   switchBtn: { alignItems: "center", paddingVertical: 12 },
   switchText: { color: "#2563eb", fontSize: 15 },
+  inviteHint: { color: "#9ca3af", fontSize: 12, marginTop: -6 },
   error: { color: "#dc2626", textAlign: "center" },
 });

@@ -1,8 +1,16 @@
-import { Component, useState, type ReactNode } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Component, useEffect, useState, type ReactNode } from "react";
+import {
+  ActivityIndicator,
+  BackHandler,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { AuthProvider, useAuth } from "./src/auth-context";
+import { useOwnerSaleAlerts } from "./src/notify/saleAlerts";
 import { SyncProvider } from "./src/sync/sync-context";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { CashierScreen } from "./src/screens/CashierScreen";
@@ -28,10 +36,42 @@ type Screen =
   | "labelPrint";
 
 function AuthedApp() {
+  const { user } = useAuth();
   const [screen, setScreen] = useState<Screen>("home");
   const [orderId, setOrderId] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProductWithSkus | null>(null);
   const [labelProduct, setLabelProduct] = useState<ProductWithSkus | null>(null);
+
+  // 老板：新结账弹窗 + 铃声 + 通知栏提醒
+  useOwnerSaleAlerts(user?.role === "owner", user?.id ?? null);
+
+  // 系统返回键 / 手势返回：在 App 内逐级返回，而不是直接退出
+  useEffect(() => {
+    const onBack = () => {
+      switch (screen) {
+        case "home":
+          return false; // 已在首页，交给系统（退出/回桌面）
+        case "editProduct":
+          setScreen("products");
+          return true;
+        case "labelPrint":
+          setScreen(editing ? "editProduct" : "products");
+          return true;
+        case "saleDetail":
+          setScreen("sales");
+          return true;
+        case "create":
+          setScreen("products");
+          return true;
+        default:
+          // scan / products / sales / staff → 回首页
+          setScreen("home");
+          return true;
+      }
+    };
+    const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+    return () => sub.remove();
+  }, [screen, editing]);
 
   switch (screen) {
     case "scan":

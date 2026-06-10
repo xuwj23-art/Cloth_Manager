@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JwtService } from "@nestjs/jwt";
-import { UnauthorizedException, ConflictException } from "@nestjs/common";
+import {
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+} from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { AuthService } from "./auth.service";
 import type { PrismaService } from "../prisma/prisma.service";
@@ -36,6 +40,7 @@ describe("AuthService", () => {
 
   beforeEach(() => {
     jwt = new JwtService({ secret: "test-secret", signOptions: { expiresIn: "1h" } });
+    process.env.REGISTER_CODE = "test-code";
   });
 
   it("注册：创建门店+老板，返回 token 且密码被哈希", async () => {
@@ -47,6 +52,7 @@ describe("AuthService", () => {
       name: "张三",
       phone: "13800000000",
       password: "123456",
+      inviteCode: "test-code",
     });
 
     expect(res.token).toBeTruthy();
@@ -63,8 +69,28 @@ describe("AuthService", () => {
     });
     const service = new AuthService(prisma, jwt);
     await expect(
-      service.register({ shopName: "店", name: "李四", phone: "13800000001", password: "123456" }),
+      service.register({
+        shopName: "店",
+        name: "李四",
+        phone: "13800000001",
+        password: "123456",
+        inviteCode: "test-code",
+      }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("注册：邀请码错误抛 ForbiddenException", async () => {
+    const prisma = makePrisma();
+    const service = new AuthService(prisma, jwt);
+    await expect(
+      service.register({
+        shopName: "店",
+        name: "李四",
+        phone: "13800000001",
+        password: "123456",
+        inviteCode: "wrong-code",
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it("登录：密码正确返回 token", async () => {

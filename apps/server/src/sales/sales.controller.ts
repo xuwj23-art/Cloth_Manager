@@ -1,5 +1,14 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 import { CreateSaleOrderInput } from "@cloth-scan/shared";
+import type { SalesRange } from "@cloth-scan/shared";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
@@ -34,6 +43,15 @@ export class SalesController {
   @Roles("owner")
   summary(@CurrentUser() user: RequestUser) {
     return this.sales.getSummary(user.shopId);
+  }
+
+  /** 报表（含利润 + 日期下钻）：店主专属。range=today|week|month */
+  @Get("report")
+  @Roles("owner")
+  report(@CurrentUser() user: RequestUser, @Query("range") range?: string) {
+    const r: SalesRange =
+      range === "week" || range === "month" ? range : "today";
+    return this.sales.report(user.shopId, r);
   }
 
   /** 单据详情：店主专属 */

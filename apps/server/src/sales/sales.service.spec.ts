@@ -110,13 +110,15 @@ describe("SalesService.getSummary", () => {
         aggregate: vi
           .fn()
           .mockResolvedValueOnce({ _sum: { totalAmount: 11800 }, _count: 2 })
-          .mockResolvedValueOnce({ _sum: { totalAmount: 30000 }, _count: 5 }),
+          .mockResolvedValueOnce({ _sum: { totalAmount: 30000 }, _count: 5 })
+          .mockResolvedValueOnce({ _sum: { totalAmount: 88000 }, _count: 12 }),
       },
       saleItem: {
         aggregate: vi
           .fn()
           .mockResolvedValueOnce({ _sum: { quantity: 3 } })
-          .mockResolvedValueOnce({ _sum: { quantity: 8 } }),
+          .mockResolvedValueOnce({ _sum: { quantity: 8 } })
+          .mockResolvedValueOnce({ _sum: { quantity: 20 } }),
         groupBy: vi
           .fn()
           .mockResolvedValue([
@@ -141,6 +143,7 @@ describe("SalesService.getSummary", () => {
 
     expect(summary.today).toEqual({ revenue: 11800, orders: 2, quantity: 3 });
     expect(summary.week).toEqual({ revenue: 30000, orders: 5, quantity: 8 });
+    expect(summary.month).toEqual({ revenue: 88000, orders: 12, quantity: 20 });
     expect(summary.topSkus).toHaveLength(1);
     expect(summary.topSkus[0]).toMatchObject({
       productName: "??T?",
@@ -169,6 +172,38 @@ describe("SalesService.getSummary", () => {
     expect(summary.today).toEqual({ revenue: 0, orders: 0, quantity: 0 });
     expect(summary.topSkus).toEqual([]);
     expect(prisma.sku.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("SalesService.report", () => {
+  it("利润 = 营业额 - 进价快照×数量（今日档，无下钻桶）", async () => {
+    const prisma = {
+      saleOrder: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "order-1",
+            totalAmount: 11800,
+            createdAt: new Date(),
+            items: [{ quantity: 2, price: 5900, cost: 3000, subtotal: 11800 }],
+          },
+        ]),
+      },
+      saleItem: { groupBy: vi.fn().mockResolvedValue([]) },
+      sku: { findMany: vi.fn() },
+    } as any;
+    const service = new SalesService(prisma, productsStub);
+
+    const report = await service.report(SHOP, "today");
+
+    expect(report.total).toEqual({
+      revenue: 11800,
+      cost: 6000,
+      profit: 5800,
+      orders: 1,
+      quantity: 2,
+    });
+    expect(report.buckets).toEqual([]);
+    expect(report.topSkus).toEqual([]);
   });
 });
 

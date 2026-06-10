@@ -30,6 +30,8 @@ services:
     environment:
       DATABASE_URL: postgresql://cloth:${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}@db:5432/cloth_scan?schema=public
       JWT_SECRET: ${JWT_SECRET:?请在 .env 设置 JWT_SECRET}
+      # 注册邀请码：未设置则关闭注册。把它告诉信任的人才能注册门店。
+      REGISTER_CODE: ${REGISTER_CODE:?请在 .env 设置 REGISTER_CODE}
       PORT: "3000"
     ports:
       - "3000:3000"

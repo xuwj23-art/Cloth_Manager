@@ -7,6 +7,10 @@ import { randomUUID } from "node:crypto";
 import type {
   CreateSaleOrderInput,
   SaleOrderDetail,
+  SalesBucket,
+  SalesRange,
+  SalesReport,
+  SalesStat,
   SalesSummary,
   SalesWindowStats,
   TopSkuStat,
@@ -27,6 +31,13 @@ function startOfWeek(): Date {
   const day = d.getDay(); // 0=周日,1=周一...
   const diff = (day + 6) % 7; // 距上一个周一的天数
   d.setDate(d.getDate() - diff);
+  return d;
+}
+
+/** 本地时区下「本月 1 号 0 点」 */
+function startOfMonth(): Date {
+  const d = startOfToday();
+  d.setDate(1);
   return d;
 }
 
@@ -62,6 +73,7 @@ export class SalesService {
         skuId: string;
         quantity: number;
         price: number;
+        cost: number;
         subtotal: number;
       }[] = [];
       const affectedProductIds = new Set<string>();
@@ -87,6 +99,7 @@ export class SalesService {
           skuId: sku.id,
           quantity: item.quantity,
           price,
+          cost: sku.costPrice, // 快照当时进价，保证历史利润不被后续改价影响
           subtotal,
         });
       }
@@ -132,7 +145,7 @@ export class SalesService {
     });
   }
 
-  /** 销售流水（最近 100 笔），含明细名称与操作人 */
+  /** 销售流水（最近 500 笔），含明细名称与操作人 */
   async listOrders(shopId: string): Promise<SaleOrderDetail[]> {
     const orders = await this.prisma.saleOrder.findMany({
       where: { shopId },
@@ -141,7 +154,7 @@ export class SalesService {
         items: { include: { sku: { include: { product: true } } } },
       },
       orderBy: { createdAt: "desc" },
-      take: 100,
+      take: 500,
     });
     return orders.map((o) => this.toDetail(o));
   }
@@ -161,14 +174,106 @@ export class SalesService {
     return this.toDetail(order);
   }
 
-  /** 报表汇总：今日/本周营业额、单数、销量 + 近 7 天热销榜 */
+  /** 报表汇总：今日/本周/本月营业额、单数、销量 + 近 7 天热销榜 */
   async getSummary(shopId: string): Promise<SalesSummary> {
-    const [today, week, topSkus] = await Promise.all([
+    const [today, week, month, topSkus] = await Promise.all([
       this.windowStats(shopId, startOfToday()),
       this.windowStats(shopId, startOfWeek()),
+      this.windowStats(shopId, startOfMonth()),
       this.topSkus(shopId, startOfWeek()),
     ]);
-    return { today, week, topSkus };
+    return { today, week, month, topSkus };
+  }
+
+  /**
+   * 报表（含利润 + 日期下钻）：
+   *  - today：仅合计，无下钻桶
+   *  - week ：本周一起，按「天」下钻（周一…今天）
+   *  - month：本月 1 号起，按「周」下钻（第1周=1~7号…第5周=29~月末）
+   * 桶顺序从早到近。利润 = 成交价合计 − 进价快照×数量。
+   */
+  async report(shopId: string, range: SalesRange): Promise<SalesReport> {
+    const now = new Date();
+    const start =
+      range === "today"
+        ? startOfToday()
+        : range === "week"
+          ? startOfWeek()
+          : startOfMonth();
+
+    const orders = await this.prisma.saleOrder.findMany({
+      where: { shopId, status: "completed", createdAt: { gte: start } },
+      include: { items: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // 预建桶（空桶也展示，便于看趋势）
+    const buckets = this.buildBuckets(range, now);
+    const byKey = new Map(buckets.map((b) => [b.key, b]));
+
+    const total: SalesStat = {
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+      orders: 0,
+      quantity: 0,
+    };
+
+    for (const o of orders) {
+      let orderQty = 0;
+      let orderCost = 0;
+      for (const it of o.items) {
+        orderQty += it.quantity;
+        orderCost += it.cost * it.quantity;
+      }
+      total.revenue += o.totalAmount;
+      total.cost += orderCost;
+      total.orders += 1;
+      total.quantity += orderQty;
+
+      const key = this.bucketKey(range, o.createdAt);
+      const b = key ? byKey.get(key) : undefined;
+      if (b) {
+        b.revenue += o.totalAmount;
+        b.profit += o.totalAmount - orderCost;
+        b.orders += 1;
+        b.quantity += orderQty;
+      }
+    }
+    total.profit = total.revenue - total.cost;
+
+    const topSkus = await this.topSkus(shopId, start);
+    return { range, total, buckets, topSkus };
+  }
+
+  /** 生成空桶（含 label），顺序从早到近 */
+  private buildBuckets(range: SalesRange, now: Date): SalesBucket[] {
+    const empty = (key: string, label: string): SalesBucket => ({
+      key,
+      label,
+      revenue: 0,
+      profit: 0,
+      orders: 0,
+      quantity: 0,
+    });
+    if (range === "today") return [];
+    if (range === "week") {
+      const names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+      const todayIdx = (now.getDay() + 6) % 7; // 周一=0
+      return names.slice(0, todayIdx + 1).map((n, i) => empty(`d${i}`, n));
+    }
+    // month：按日期段分周，最多 5 周（第5周=29~月末）
+    const maxIdx = Math.min(Math.floor((now.getDate() - 1) / 7), 4);
+    return Array.from({ length: maxIdx + 1 }, (_, i) =>
+      empty(`w${i}`, `第${i + 1}周`),
+    );
+  }
+
+  /** 某订单时间落在哪个桶 */
+  private bucketKey(range: SalesRange, date: Date): string | null {
+    if (range === "today") return null;
+    if (range === "week") return `d${(date.getDay() + 6) % 7}`;
+    return `w${Math.min(Math.floor((date.getDate() - 1) / 7), 4)}`;
   }
 
   private async windowStats(

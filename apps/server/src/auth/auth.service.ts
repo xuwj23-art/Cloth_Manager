@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -43,6 +44,15 @@ export class AuthService {
 
   /** 注册：开通门店并创建老板账号 */
   async register(input: RegisterInput): Promise<AuthResponse> {
+    // 注册邀请码校验：未配置 REGISTER_CODE 时视为关闭注册，避免陌生人占用服务器
+    const expected = process.env.REGISTER_CODE;
+    if (!expected) {
+      throw new ForbiddenException("当前未开放注册，请联系管理员");
+    }
+    if (input.inviteCode !== expected) {
+      throw new ForbiddenException("注册邀请码不正确");
+    }
+
     const exists = await this.prisma.user.findUnique({
       where: { phone: input.phone },
     });

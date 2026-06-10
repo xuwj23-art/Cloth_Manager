@@ -9,7 +9,8 @@ import {
   View,
 } from "react-native";
 import type { ProductScope, ProductWithSkus } from "@cloth-scan/shared";
-import { imageUrl, listProducts } from "../api";
+import { imageUrl, listProducts, thumbUrl } from "../api";
+import { ImageViewer } from "../components/ImageViewer";
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
@@ -28,6 +29,7 @@ export function ProductsScreen({
   const [scope, setScope] = useState<ProductScope>("active");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,16 +110,22 @@ export function ProductsScreen({
             const minPrice = Math.min(...item.skus.map((k) => k.salePrice));
             return (
               <Pressable style={styles.card} onPress={() => onEdit(item)}>
-                <View style={styles.cover}>
+                <Pressable
+                  style={styles.cover}
+                  onPress={() => {
+                    const u = imageUrl(item.coverImage);
+                    if (u) setViewerUri(u);
+                  }}
+                >
                   {item.coverImage ? (
                     <Image
-                      source={{ uri: imageUrl(item.coverImage) }}
+                      source={{ uri: thumbUrl(item.coverImage) }}
                       style={styles.coverImg}
                     />
                   ) : (
                     <Text style={styles.coverPlaceholder}>无图</Text>
                   )}
-                </View>
+                </Pressable>
                 <View style={styles.info}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
@@ -131,6 +139,8 @@ export function ProductsScreen({
           }}
         />
       )}
+
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }

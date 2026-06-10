@@ -7,6 +7,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# 本地打包产物 / 局域网分发目录（大体积 APK，不入库）
+_dist/
+*.apk
+
 # turbo
 .turbo/
 

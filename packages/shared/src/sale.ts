@@ -96,6 +96,40 @@ export interface TopSkuStat {
 export interface SalesSummary {
   today: SalesWindowStats;
   week: SalesWindowStats;
+  month: SalesWindowStats;
   /** 近 7 天热销榜 */
+  topSkus: TopSkuStat[];
+}
+
+/* --------------------- 销售报表（含利润 + 日期下钻） --------------------- */
+
+/** 报表时间档：今日 / 本周 / 本月 */
+export type SalesRange = "today" | "week" | "month";
+
+/** 一段时间的统计（含成本与毛利） */
+export interface SalesStat {
+  revenue: number; // 营业额（成交价合计，分）
+  cost: number; // 成本（进价×数量合计，分）
+  profit: number; // 毛利 = revenue - cost（分）
+  orders: number; // 单数
+  quantity: number; // 件数
+}
+
+/** 下钻桶：本周=每天，本月=每周 */
+export interface SalesBucket {
+  key: string; // 唯一键
+  label: string; // 展示名，如「周一」「第1周」
+  revenue: number;
+  profit: number;
+  orders: number;
+  quantity: number;
+}
+
+/** 报表接口返回：合计 + 下钻桶 + 该时间档热销 */
+export interface SalesReport {
+  range: SalesRange;
+  total: SalesStat;
+  /** 顺序从早到近；今日档为空数组 */
+  buckets: SalesBucket[];
   topSkus: TopSkuStat[];
 }

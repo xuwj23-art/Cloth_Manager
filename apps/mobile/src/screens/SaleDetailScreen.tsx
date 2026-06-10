@@ -9,7 +9,8 @@ import {
   View,
 } from "react-native";
 import type { SaleOrderDetail } from "@cloth-scan/shared";
-import { getSale, imageUrl } from "../api";
+import { getSale, imageUrl, thumbUrl } from "../api";
+import { ImageViewer } from "../components/ImageViewer";
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
@@ -33,6 +34,7 @@ export function SaleDetailScreen({
   const [order, setOrder] = useState<SaleOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,16 +86,22 @@ export function SaleDetailScreen({
           <Text style={styles.sectionTitle}>商品明细</Text>
           {order.items.map((it) => (
             <View key={it.id} style={styles.itemRow}>
-              <View style={styles.cover}>
+              <Pressable
+                style={styles.cover}
+                onPress={() => {
+                  const u = imageUrl(it.coverImage);
+                  if (u) setViewerUri(u);
+                }}
+              >
                 {it.coverImage ? (
                   <Image
-                    source={{ uri: imageUrl(it.coverImage) }}
+                    source={{ uri: thumbUrl(it.coverImage) }}
                     style={styles.coverImg}
                   />
                 ) : (
                   <Text style={styles.coverPlaceholder}>无图</Text>
                 )}
-              </View>
+              </Pressable>
               <View style={styles.itemInfo}>
                 <Text style={styles.itemName} numberOfLines={1}>
                   {it.productName}
@@ -110,6 +118,8 @@ export function SaleDetailScreen({
           ))}
         </ScrollView>
       ) : null}
+
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }

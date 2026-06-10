@@ -12,6 +12,8 @@ export const RegisterInput = z.object({
   name: z.string().min(1).max(20),
   phone: Phone,
   password: z.string().min(6, "密码至少 6 位").max(64),
+  /** 注册邀请码：防止陌生人随意注册占用服务器 */
+  inviteCode: z.string().min(1, "请输入注册邀请码").max(64),
 });
 export type RegisterInput = z.infer<typeof RegisterInput>;
 
