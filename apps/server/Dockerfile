@@ -2,10 +2,12 @@
 # 构建上下文为仓库根目录：docker build -f apps/server/Dockerfile .
 FROM node:20-bookworm-slim
 
-# Prisma 引擎依赖 openssl；ca-certificates 用于 https 拉取
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+# 把基础镜像(Debian)的 apt 源换成阿里云镜像，国内构建更快更稳；再装 Prisma 需要的 openssl
+RUN sed -i 's@//deb.debian.org@//mirrors.aliyun.com@g; s@//security.debian.org@//mirrors.aliyun.com@g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    sed -i 's@//deb.debian.org@//mirrors.aliyun.com@g; s@//security.debian.org@//mirrors.aliyun.com@g' /etc/apt/sources.list 2>/dev/null || true; \
+    apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # 用 corepack 固定 pnpm 版本，与本地/锁文件一致
 RUN corepack enable && corepack prepare pnpm@10.34.1 --activate
