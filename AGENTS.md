@@ -274,6 +274,7 @@ EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可�
 | 注册总是失败/被拒 | 后端没配 `REGISTER_CODE`（=关闭注册）或邀请码不匹配 |
 | 蓝牙打印在 Expo Go 不可用 | 需 dev-client/APK；Expo Go 中自动降级 PDF |
 | OTA 更新装到手机却不生效 | 本地 `gradlew` 包必须嵌入频道：`app.json` 已设 `updates.requestHeaders={"expo-channel-name":"preview"}`，改后需 `expo prebuild -p android` 再打包；验证 AndroidManifest 含 `expo-channel-name` |
+| 蓝牙打印首次连接闪退（第二次正常） | 已知待办：CTPL SDK 延迟到首次 connect 才 init 导致竞态崩溃。修法=把 init 提前到打开设备列表时。详见 `docs/进度记录.md`「已知问题」 |
 | PowerShell 报 `&&` 语法错 | 用 `;` 或分行 |
 | git push 连不上 GitHub | 多为本机代理端口问题，检查 `git config --get http.proxy` 与实际代理端口是否一致 |
 | scp 传 APK 报 `Permission denied (publickey)` | 服务器只认密钥；需把本机公钥加到服务器 `~/.ssh/authorized_keys`（见 `docs/本地打包环境部署指南-Windows.md` §7）。scp 要在**本机**跑，目标不带 `http://`/`:3000` |
