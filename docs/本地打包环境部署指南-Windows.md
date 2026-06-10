@@ -146,13 +146,38 @@ python -m http.server 8000 --bind 0.0.0.0
 
 即仓库根目录下的 `apk/` 文件夹。`git pull` 拿到新版后 `docker compose -f docker-compose.prod.yml up -d --build` 一次即可。
 
+**一次性：配置 SSH 免密，让本机 scp 能直传（重要）**
+
+服务器（阿里云）默认**只认密钥登录、关闭 root 密码直连**，所以即使你能用网页 Workbench 登录，本机 `scp` 仍会报 `Permission denied (publickey)`。解决：把本机公钥加到服务器一次，之后 scp 永久免密。
+
+1. 本机 PowerShell 生成无密码短语密钥（已有 `~/.ssh/id_ed25519` 可跳过）。**注意 PowerShell 下 `-N ""` 的空密码常被解析错**，用 `cmd /c` 最稳：
+
+```powershell
+cmd /c 'ssh-keygen -q -t ed25519 -f "%USERPROFILE%\.ssh\id_ed25519" -N "" -C cloth_scan_deploy'
+Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"   # 复制这一行公钥
+```
+
+2. 在**服务器**（Workbench 网页窗口，`root@iZ...#`）把上面那行公钥加进去（把 `粘贴公钥` 换成实际内容）：
+
+```bash
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo "粘贴公钥" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+mkdir -p /opt/Cloth_Manager/apk
+```
+
+3. 之后本机 scp 不再要密码。（公钥可公开粘贴；私钥只在本机，勿外传。）
+
 **每次更新（本地打好包后）**
 
-1. 本地把 APK 传到服务器（在本机 PowerShell，IP/路径换成你的）：
+1. 把 APK 传到服务器。**⚠️ 这条要在「你自己的 Windows 电脑」的 PowerShell 里运行，不是在 SSH 连进服务器的那个窗口里**（因为 APK 在你电脑的 `E:` 盘）。提示符是 `PS E:\...>` 才对；`root@iZ...#` 是服务器，跑这条会失败。
 
 ```powershell
 scp "E:\Project\cloth_scan\apps\mobile\android\app\build\outputs\apk\release\app-release.apk" root@39.108.186.58:/opt/Cloth_Manager/apk/app.apk
 ```
+
+> 目标格式是 `root@公网IP:路径`——**不要**写成 `root@http://...` 或加 `:3000`（那是 App 的 HTTP 端口，跟 scp/SSH 的 22 端口无关）。
+> 若提示目录不存在，先在服务器上 `mkdir -p /opt/Cloth_Manager/apk`。
 
 2. （可选）写个版本号，会显示在下载页上：
 
@@ -173,6 +198,16 @@ http://39.108.186.58:3000/download
 > - 文件名固定 `app.apk`，覆盖式更新，永远只保留最新一个，不占额外硬盘。
 > - 下载快慢取决于服务器公网带宽（入门带宽 1–3Mbps，60MB 约 2–8 分钟），不影响服务器稳定。
 > - 从「云端 EAS 版」换到「本地版」需先卸载旧 App（签名不同）；本地版之间可直接覆盖。
+
+### scp 上传排错速查
+
+| 报错 / 现象 | 原因 | 解决 |
+|---|---|---|
+| `ssh: Could not resolve hostname http` | 目标写成了 `root@http://...` | 去掉 `http://`，只留 `root@39.108.186.58:路径` |
+| 目标里带了 `:3000` 连不上 | 把 App 的 HTTP 端口当成了 SSH 端口 | scp/SSH 走 22，不要写 `:3000` |
+| 在 `root@iZ...#` 下跑 scp 失败、找不到 `E:\...` | **跑在服务器上了**；服务器没有 `E:` 盘 | 到本机 PowerShell（`PS E:\...>`）再跑 |
+| `Permission denied (publickey)` | 服务器只认密钥、没配本机公钥 | 按上面「配置 SSH 免密」加公钥 |
+| 仍提示输入 passphrase | 密钥生成时带了密码短语 | 用 `cmd /c '...-N ""'` 重新生成无密码密钥 |
 
 ---
 

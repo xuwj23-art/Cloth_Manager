@@ -273,6 +273,7 @@ EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可�
 | 蓝牙打印在 Expo Go 不可用 | 需 dev-client/APK；Expo Go 中自动降级 PDF |
 | PowerShell 报 `&&` 语法错 | 用 `;` 或分行 |
 | git push 连不上 GitHub | 多为本机代理端口问题，检查 `git config --get http.proxy` 与实际代理端口是否一致 |
+| scp 传 APK 报 `Permission denied (publickey)` | 服务器只认密钥；需把本机公钥加到服务器 `~/.ssh/authorized_keys`（见 `docs/本地打包环境部署指南-Windows.md` §7）。scp 要在**本机**跑，目标不带 `http://`/`:3000` |
 | 提交信息 heredoc 在 PowerShell 失败 | 把信息写临时文件用 `git commit -F 文件` |
 | 改 schema 不生效 | 必须新建迁移；生产靠 `prisma migrate deploy` |
 
