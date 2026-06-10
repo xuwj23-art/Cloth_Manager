@@ -151,7 +151,7 @@ python -m http.server 8000 --bind 0.0.0.0
 1. 本地把 APK 传到服务器（在本机 PowerShell，IP/路径换成你的）：
 
 ```powershell
-scp "E:\Project\cloth_scan\apps\mobile\android\app\build\outputs\apk\release\app-release.apk" root@<服务器IP>:/opt/Cloth_Manager/apk/app.apk
+scp "E:\Project\cloth_scan\apps\mobile\android\app\build\outputs\apk\release\app-release.apk" root@39.108.186.58:/opt/Cloth_Manager/apk/app.apk
 ```
 
 2. （可选）写个版本号，会显示在下载页上：
@@ -160,11 +160,15 @@ scp "E:\Project\cloth_scan\apps\mobile\android\app\build\outputs\apk\release\app
 echo "1.0.0" > /opt/Cloth_Manager/apk/version.txt
 ```
 
-3. 别人访问下载页（带二维码 + 下载按钮 + 安装说明）：
+3. 别人访问下载页（带二维码 + 下载按钮 + 安装说明）。本项目的固定地址：
 
 ```
-http://<服务器IP>:3000/download
+http://39.108.186.58:3000/download
 ```
+
+> `39.108.186.58` 是阿里云服务器的**公网 IP**（App 里 `apps/mobile/src/config.ts` 的 `API_HOST` 也用它）。
+> 别用私网 IP（`10.x` / `172.16~31.x` / `192.168.x` 开头的都是私有，外网打不开）。
+> 前提：阿里云**安全组**已放行 `3000/tcp`（App 能正常连服务器即说明已放行）。
 
 > - 文件名固定 `app.apk`，覆盖式更新，永远只保留最新一个，不占额外硬盘。
 > - 下载快慢取决于服务器公网带宽（入门带宽 1–3Mbps，60MB 约 2–8 分钟），不影响服务器稳定。
