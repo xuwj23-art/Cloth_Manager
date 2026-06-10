@@ -5,7 +5,7 @@
   "description": "服装进销存 App（QR 吊牌 / 离线优先）—— 全栈 TypeScript Monorepo",
   "packageManager": "pnpm@11.5.2",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "build": "turbo run build",
