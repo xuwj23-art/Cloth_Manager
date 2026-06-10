@@ -16,6 +16,14 @@
 
 **结论**：平时改 JS 走 OTA；只有动了原生才本地打包。本文档讲的就是“原生改动 → 本地打包 → 局域网装机”。
 
+> ⚠️ **OTA 能生效的前提：APK 必须嵌入了 `preview` 频道。**
+> 本地 `gradlew` 打的包默认**不带频道**，会导致 `eas update --channel preview` 永远收不到（表现：关掉重开 App 仍是旧界面）。
+> 已修复：`app.json` 的 `updates.requestHeaders` 写死了 `{"expo-channel-name":"preview"}`。**改了这个配置后，必须 `npx expo prebuild -p android --no-install` 再打包**，频道才会写进 `AndroidManifest.xml`。验证：
+> ```powershell
+> Select-String -Path android\app\src\main\AndroidManifest.xml -Pattern "expo-channel-name"
+> ```
+> 看到 `{"expo-channel-name":"preview"}` 即 OK。装上这个包后，以后的 JS 改动才能真正靠 OTA 更新。
+
 ---
 
 ## 1. 一次性环境（本机已完成，存档备查）

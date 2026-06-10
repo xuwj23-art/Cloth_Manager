@@ -80,7 +80,10 @@
     },
     "owner": "wesleysho",
     "updates": {
-      "url": "https://u.expo.dev/3b8070f8-ba95-4cfe-a824-cb55329d5443"
+      "url": "https://u.expo.dev/3b8070f8-ba95-4cfe-a824-cb55329d5443",
+      "requestHeaders": {
+        "expo-channel-name": "preview"
+      }
     }
   }
 }
