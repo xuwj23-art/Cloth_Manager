@@ -14,9 +14,10 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import type { ProductWithSkus } from "@cloth-scan/shared";
 import {
-  connectPrinter,
+  connectPrinterAuto,
   disconnectPrinter,
   getBondedDevices,
+  isLocationEnabled,
   isPrinterAvailable,
   isPrinterConnected,
   printJob,
@@ -189,14 +190,24 @@ export function LabelPrintScreen({
   }
 
   async function doConnect(dev: CtBondedDevice) {
+    if (busy) return;
     setBusy(true);
     try {
-      await connectPrinter(dev.mac, "SPP");
+      const { port } = await connectPrinterAuto(dev.mac);
       setConnected(true);
       setBtOpen(false);
-      Alert.alert("已连接", `打印机：${dev.name}`);
+      Alert.alert("已连接", `打印机：${dev.name}（${port}）`);
     } catch (e) {
-      Alert.alert("连接失败", (e as Error).message);
+      const msg = (e as Error).message;
+      // 若是权限/位置类失败，且系统定位没开，给出更明确指引
+      if (/权限|516|位置/.test(msg) && !isLocationEnabled()) {
+        Alert.alert(
+          "连接失败",
+          `${msg}\n\n检测到手机「位置/GPS」未打开——经典蓝牙(SPP)连接需要它。请下拉通知栏打开「位置」后重试。`,
+        );
+      } else {
+        Alert.alert("连接失败", msg);
+      }
     } finally {
       setBusy(false);
     }
