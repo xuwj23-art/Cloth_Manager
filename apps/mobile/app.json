@@ -52,7 +52,21 @@
       ],
       "expo-secure-store",
       "expo-sqlite",
-      "expo-audio"
-    ]
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3b8070f8-ba95-4cfe-a824-cb55329d5443"
+      }
+    },
+    "owner": "wesleysho",
+    "updates": {
+      "url": "https://u.expo.dev/3b8070f8-ba95-4cfe-a824-cb55329d5443"
+    }
   }
 }
