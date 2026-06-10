@@ -1,0 +1,2 @@
+# Shell 脚本必须用 LF 换行，否则在 Linux 上会因 Windows 的 \r 报错
+*.sh text eol=lf

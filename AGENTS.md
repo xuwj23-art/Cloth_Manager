@@ -251,6 +251,8 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 本地打包前提：`apps/mobile/.env` 需含 `EXPO_NO_METRO_WORKSPACE_ROOT=1`（gitignore，换机要重建）。
 EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可覆盖安装。
 
+**运维**：数据库每日自动备份脚本 `ops/db-backup.sh`（cron + gzip + 14 天滚动清理），启用与恢复见 `docs/服务器部署指南.md`「数据库备份与恢复」。2G 内存建议加 2G swap（同文档）。
+
 **文档索引（`docs/`）**：
 - `服装进销存App-MVP研发方案.md` — 总体方案/路线
 - `进度记录.md` — 各阶段完成情况（开发日志）
