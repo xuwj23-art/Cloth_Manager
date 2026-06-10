@@ -202,7 +202,7 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 | 屏幕 | 职责 |
 |------|------|
 | `LoginScreen` | 登录 / 注册门店 |
-| `HomeScreen` | 入口、今日营业额、新手引导 |
+| `HomeScreen` | 入口、今日营业额（新手引导已移除） |
 | `CashierScreen` | 扫码收银、购物车、结算确认弹窗 |
 | `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 建档 / 编辑下架 |
 | `LabelPrintScreen` | 标签打印（蓝牙 / PDF 降级） |

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../auth-context";
 import { useSync } from "../sync/sync-context";
-import { getSalesSummary, listProducts, seedDemoData } from "../api";
+import { getSalesSummary } from "../api";
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
@@ -28,18 +28,12 @@ export function HomeScreen({
     revenue: number;
     orders: number;
   } | null>(null);
-  const [productCount, setProductCount] = useState<number | null>(null);
-  const [seeding, setSeeding] = useState(false);
 
   const loadToday = useCallback(async () => {
     if (!isOwner) return; // 报表为店主专属，店员不请求
     try {
-      const [s, products] = await Promise.all([
-        getSalesSummary(),
-        listProducts(),
-      ]);
+      const s = await getSalesSummary();
       setToday({ revenue: s.today.revenue, orders: s.today.orders });
-      setProductCount(products.length);
     } catch {
       // 离线或未登录态忽略，不影响主流程
     }
@@ -49,29 +43,6 @@ export function HomeScreen({
   useEffect(() => {
     void loadToday();
   }, [loadToday, pendingCount]);
-
-  const seedDemo = async () => {
-    setSeeding(true);
-    try {
-      const res = await seedDemoData();
-      if (res.created > 0) {
-        Alert.alert(
-          "已生成体验数据",
-          `已为你创建 ${res.created} 款演示商品（含库存）。\n现在可以去「商品列表」查看，或直接「扫码收银」体验流程。`,
-        );
-      } else {
-        Alert.alert("无需生成", "门店已有商品，未重复生成。");
-      }
-      await loadToday();
-    } catch (e) {
-      Alert.alert("生成失败", (e as Error).message);
-    } finally {
-      setSeeding(false);
-    }
-  };
-
-  // 店主且确实没有商品时，展示新手引导
-  const showGuide = isOwner && productCount === 0;
 
   return (
     <View style={styles.container}>
@@ -88,30 +59,7 @@ export function HomeScreen({
         <Text style={styles.title}>服装进销存</Text>
         <Text style={styles.subtitle}>扫吊牌二维码，秒匹配商品</Text>
 
-        {showGuide ? (
-          <View style={styles.guideCard}>
-            <Text style={styles.guideTitle}>新手上路 · 3 步开张</Text>
-            <Text style={styles.guideStep}>1. 「商品建档」录入款式/颜色/尺码/价格</Text>
-            <Text style={styles.guideStep}>
-              2. 给每个 SKU 生成吊牌二维码并打印贴上
-            </Text>
-            <Text style={styles.guideStep}>3. 「扫码收银」扫吊牌即可开单、自动扣库存</Text>
-            <Pressable
-              style={[styles.guideBtn, seeding && styles.addBtnDisabled]}
-              onPress={seedDemo}
-              disabled={seeding}
-            >
-              <Text style={styles.guideBtnText}>
-                {seeding ? "生成中…" : "一键生成体验数据"}
-              </Text>
-            </Pressable>
-            <Text style={styles.guideHint}>
-              先体验流程？点上方按钮，自动创建几款带库存的演示商品。
-            </Text>
-          </View>
-        ) : null}
-
-        {isOwner && !showGuide ? (
+        {isOwner ? (
           <Pressable style={styles.todayCard} onPress={onSales}>
             <Text style={styles.todayLabel}>今日营业额</Text>
             <Text style={styles.todayRevenue}>
@@ -242,32 +190,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   todayMeta: { fontSize: 13, color: "#60a5fa", marginTop: 2 },
-  guideCard: {
-    width: "100%",
-    backgroundColor: "#fffbeb",
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#fde68a",
-    gap: 6,
-  },
-  guideTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#b45309",
-    marginBottom: 2,
-  },
-  guideStep: { fontSize: 14, color: "#92400e", lineHeight: 20 },
-  guideBtn: {
-    backgroundColor: "#f59e0b",
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  guideBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },
-  guideHint: { fontSize: 12, color: "#b45309", marginTop: 2 },
-  addBtnDisabled: { opacity: 0.6 },
   linkBtn: { paddingVertical: 8 },
   linkText: { color: "#2563eb", fontSize: 15, fontWeight: "600" },
   syncRow: { flexDirection: "row", alignItems: "center", gap: 6 },
