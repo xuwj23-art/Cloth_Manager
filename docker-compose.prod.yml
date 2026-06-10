@@ -1,0 +1,42 @@
+# 服装进销存 —— 生产部署（服务器上运行）
+# 用法：在仓库根目录放好 .env，然后：
+#   docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cloth_scan_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cloth
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
+      POSTGRES_DB: cloth_scan
+    volumes:
+      - cloth_scan_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloth -d cloth_scan"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    container_name: cloth_scan_server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://cloth:${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}@db:5432/cloth_scan?schema=public
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 设置 JWT_SECRET}
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      # 上传的图片持久化，避免重建容器丢失
+      - cloth_scan_uploads:/app/apps/server/uploads
+
+volumes:
+  cloth_scan_pgdata:
+  cloth_scan_uploads:
