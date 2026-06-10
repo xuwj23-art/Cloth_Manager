@@ -13,6 +13,9 @@ build/
 # expo
 apps/mobile/.expo/
 apps/mobile/web-build/
+# 本地打包(prebuild)生成的原生工程，由 CNG 自动再生，不入库
+apps/mobile/android/
+apps/mobile/ios/
 *.jks
 *.p8
 *.p12

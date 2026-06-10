@@ -2,9 +2,8 @@ packages:
   - "apps/*"
   - "packages/*"
 
-allowBuilds:
-  '@nestjs/core': set this to true or false
-
+# 允许这些依赖在安装时运行构建脚本（pnpm 10+ 默认拦截，需显式批准），
+# 否则 CI/EAS 安装会因 ERR_PNPM_IGNORED_BUILDS 失败。
 onlyBuiltDependencies:
   - "@nestjs/core"
   - "@prisma/client"
