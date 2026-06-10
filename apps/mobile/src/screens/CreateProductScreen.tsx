@@ -17,6 +17,37 @@ import { createProduct, imageUrl, uploadImage } from "../api";
 const PRESET_COLORS = ["黑", "白", "灰", "红", "蓝", "绿", "黄", "粉", "卡其"];
 const PRESET_SIZES = ["S", "M", "L", "XL", "XXL", "均码"];
 
+/** 材质（左侧快选，单选） */
+const PRESET_MATERIALS = [
+  "纯棉", "棉麻", "亚麻", "苎麻", "涤纶", "锦纶", "氨纶", "莫代尔", "天丝", "粘纤",
+  "真丝", "桑蚕丝", "雪纺", "羊毛", "羊绒", "羊羔毛", "马海毛", "灯芯绒", "牛仔", "帆布",
+  "皮革", "PU皮", "麂皮绒", "针织", "毛呢", "摇粒绒", "法兰绒", "珊瑚绒", "天鹅绒", "丝绒",
+  "蕾丝", "网纱", "醋酸", "冰丝", "桃皮绒", "太空棉", "罗纹", "混纺", "化纤", "羽绒",
+];
+
+/** 服装品类（右侧快选，单选）—— 按 上装/裙装/下装/外套/套装/内衣家居/配饰/童装 顺序排列 */
+const PRESET_CATEGORIES = [
+  // 上装
+  "T恤", "短袖", "长袖", "Polo衫", "衬衫", "雪纺衫", "卫衣", "连帽卫衣", "针织衫", "毛衣",
+  "打底衫", "吊带", "背心", "马甲", "文化衫",
+  // 裙装
+  "连衣裙", "半身裙", "包臀裙", "A字裙", "百褶裙", "短裙", "长裙", "吊带裙", "背带裙", "旗袍",
+  // 下装
+  "牛仔裤", "休闲裤", "西裤", "工装裤", "阔腿裤", "直筒裤", "小脚裤", "哈伦裤", "打底裤", "运动裤",
+  "卫裤", "短裤", "五分裤", "七分裤", "九分裤", "背带裤", "踩脚裤",
+  // 外套
+  "夹克", "外套", "风衣", "大衣", "西装", "小西装", "棉服", "棉袄", "羽绒服", "皮衣",
+  "牛仔外套", "冲锋衣", "开衫", "披风", "斗篷",
+  // 套装
+  "套装", "两件套", "三件套", "连体裤", "运动套装", "睡衣套装",
+  // 内衣家居
+  "内衣", "文胸", "内裤", "睡衣", "家居服", "保暖内衣", "秋衣秋裤", "吊带睡裙", "浴袍", "泳衣",
+  // 配饰
+  "帽子", "围巾", "丝巾", "手套", "袜子", "腰带", "领带",
+  // 童装
+  "童装T恤", "童装裤", "童装套装", "连体衣", "爬服", "校服",
+];
+
 /** 元 → 分 */
 function toCents(yuan: string): number {
   const n = Number(yuan);
@@ -32,6 +63,41 @@ export function CreateProductScreen({
   const [name, setName] = useState("");
   const [coverPath, setCoverPath] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  // 快速命名：材质 + 品类（各单选，自动组合写入品名）
+  const [material, setMaterial] = useState("");
+  const [category, setCategory] = useState("");
+  const [extraMaterials, setExtraMaterials] = useState<string[]>([]);
+  const [extraCategories, setExtraCategories] = useState<string[]>([]);
+  const [customMaterial, setCustomMaterial] = useState("");
+  const [customCategory, setCustomCategory] = useState("");
+
+  function selectMaterial(m: string) {
+    const next = material === m ? "" : m;
+    setMaterial(next);
+    setName(`${next}${category}`);
+  }
+  function selectCategory(c: string) {
+    const next = category === c ? "" : c;
+    setCategory(next);
+    setName(`${material}${next}`);
+  }
+  function addCustomMaterial() {
+    const v = customMaterial.trim();
+    if (!v) return;
+    if (!PRESET_MATERIALS.includes(v) && !extraMaterials.includes(v))
+      setExtraMaterials((prev) => [...prev, v]);
+    setCustomMaterial("");
+    selectMaterial(v);
+  }
+  function addCustomCategory() {
+    const v = customCategory.trim();
+    if (!v) return;
+    if (!PRESET_CATEGORIES.includes(v) && !extraCategories.includes(v))
+      setExtraCategories((prev) => [...prev, v]);
+    setCustomCategory("");
+    selectCategory(v);
+  }
 
   const [colors, setColors] = useState<string[]>([]);
   const [sizes, setSizes] = useState<string[]>([]);
@@ -183,6 +249,76 @@ export function CreateProductScreen({
         value={name}
         onChangeText={setName}
       />
+
+      {/* 快速命名：左材质 + 右品类，自动组合 */}
+      <Text style={styles.quickHint}>
+        快速命名：左选材质 + 右选品类，自动组合（上方品名仍可直接编辑）
+      </Text>
+      <View style={styles.pickerRow}>
+        <View style={styles.pickerCol}>
+          <Text style={styles.pickerColTitle}>材质</Text>
+          <ScrollView
+            style={styles.pickerScroll}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.chips}>
+              {[...PRESET_MATERIALS, ...extraMaterials].map((m) => (
+                <Chip
+                  key={m}
+                  label={m}
+                  active={material === m}
+                  onPress={() => selectMaterial(m)}
+                />
+              ))}
+            </View>
+          </ScrollView>
+          <View style={styles.addRow}>
+            <TextInput
+              style={[styles.input, styles.flex1, styles.miniInput]}
+              placeholder="自定义材质"
+              value={customMaterial}
+              onChangeText={setCustomMaterial}
+              onSubmitEditing={addCustomMaterial}
+            />
+            <Pressable style={styles.miniAddBtn} onPress={addCustomMaterial}>
+              <Text style={styles.addBtnText}>+</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.pickerCol}>
+          <Text style={styles.pickerColTitle}>品类</Text>
+          <ScrollView
+            style={styles.pickerScroll}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.chips}>
+              {[...PRESET_CATEGORIES, ...extraCategories].map((c) => (
+                <Chip
+                  key={c}
+                  label={c}
+                  active={category === c}
+                  onPress={() => selectCategory(c)}
+                />
+              ))}
+            </View>
+          </ScrollView>
+          <View style={styles.addRow}>
+            <TextInput
+              style={[styles.input, styles.flex1, styles.miniInput]}
+              placeholder="自定义品类"
+              value={customCategory}
+              onChangeText={setCustomCategory}
+              onSubmitEditing={addCustomCategory}
+            />
+            <Pressable style={styles.miniAddBtn} onPress={addCustomCategory}>
+              <Text style={styles.addBtnText}>+</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
 
       {/* 颜色 */}
       <Text style={styles.label}>颜色（可多选）</Text>
@@ -363,6 +499,33 @@ const styles = StyleSheet.create({
   },
   smallBtnText: { color: "#2563eb", fontWeight: "600" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  quickHint: { fontSize: 12, color: "#9ca3af", marginTop: 8, lineHeight: 17 },
+  pickerRow: { flexDirection: "row", gap: 10, marginTop: 6 },
+  pickerCol: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    padding: 8,
+    backgroundColor: "#fafafa",
+  },
+  pickerColTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#374151",
+    marginBottom: 2,
+  },
+  pickerScroll: { maxHeight: 220 },
+  miniInput: { paddingVertical: 7, fontSize: 14 },
+  miniAddBtn: {
+    backgroundColor: "#e5edff",
+    borderRadius: 10,
+    width: 42,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
