@@ -226,7 +226,9 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 - `src/printer/labelLayout.ts`：`buildCtPrintJob()` 用 mm 排版（默认 60×40mm，二维码居中 + SKU 条码 + 全角￥价格），原生按 DPI 换算，203/300dpi 通用。
 
 ### 7.5 EAS / app.json 要点
+- **当前版本 `1.1.0`**（`app.json` `version`，Android `versionCode=2`）。
 - `runtimeVersion.policy = "appVersion"`；`updates.url` 指向 Expo（owner `wesleysho`，projectId `3b8070f8-...`）。
+  - ⚠️ 改 `version` 会同时改 `runtimeVersion`，旧包收不到新 runtime 的 OTA；升版后须 `expo prebuild -p android`（同步 `build.gradle` 版本 + `strings.xml` 的 runtime + 重写渠道头）→ 重打包 → 再按新 runtime `eas update`。
 - channel：`development`(devClient APK) / `preview`(APK) / `production`(AAB)。
 - **`targetSdkVersion: 33`**（刻意降级，兼容驰腾蓝牙 SDK 的广播注册，规避 Android 14 行为）。
 - 权限：CAMERA、BLUETOOTH_*、LOCATION、POST_NOTIFICATIONS。
