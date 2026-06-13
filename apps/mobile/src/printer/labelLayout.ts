@@ -148,6 +148,9 @@ function buildLandscape(
 /** portrait 文本旋转角度；若实物上下颠倒/错位，在 90 / 270 间切换 */
 const PORTRAIT_TEXT_ROTATE = 90;
 
+/** portrait 二维码水平微调（mm，沿画布 Y/纵向标签左右方向；正=纵向标签里往右） */
+const PORTRAIT_QR_Y_ADJUST_MM = 3;
+
 /**
  * 纵向（旋转 90°）：在 60×40 横版画布上把内容旋转 90° 排版。
  *
@@ -175,7 +178,11 @@ function buildPortrait(
   const priceXMm = Math.max(2, (W - groupLen) / 2); // 最下（X 最小）
   const skuXMm = priceXMm + gapSkuPrice;
   const qrXMm = skuXMm + gapQrSku; // 最上（X 最大），二维码左下角
-  const qrYMm = Math.max(1, (H - qrSizeMm) / 2); // 在 H 内居中
+  // 在 H 内居中，再按微调量整体右移；保证不超出 H
+  const qrYMm = Math.min(
+    Math.max(1, H - qrSizeMm - 1),
+    Math.max(1, (H - qrSizeMm) / 2 + PORTRAIT_QR_Y_ADJUST_MM),
+  );
 
   const centerY = (lenMm: number) => Math.max(1, (H - lenMm) / 2);
 
