@@ -27,10 +27,10 @@ import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.type
 
 /** 常见服装吊牌/不干胶尺寸（mm） */
 const LABEL_SIZES = [
+  { id: "40x60", label: "40×60", w: 40, h: 60 },
   { id: "60x40", label: "60×40", w: 60, h: 40 },
   { id: "40x30", label: "40×30", w: 40, h: 30 },
   { id: "50x30", label: "50×30", w: 50, h: 30 },
-  { id: "40x60", label: "40×60", w: 40, h: 60 },
 ] as const;
 
 type LabelSize = (typeof LABEL_SIZES)[number];
@@ -81,10 +81,10 @@ function buildLabelsHtml(labels: LabelItem[], size: LabelSize): string {
     body{margin:0;padding:4mm;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;}
     .label{display:flex;flex-direction:column;align-items:center;justify-content:center;
       border:1px dashed #bbb;padding:1.5mm;margin:1mm;float:left;overflow:hidden;}
-    .qr{height:58%;width:auto;aspect-ratio:1;}
+    .qr{height:64%;width:auto;aspect-ratio:1;}
     .code{font-size:7pt;letter-spacing:0.3px;color:#222;margin-top:1mm;
       max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .price{font-size:14pt;font-weight:800;margin-top:0.6mm;}
+    .price{font-size:11pt;font-weight:800;margin-top:0.6mm;}
   </style></head><body>${cells}</body></html>`;
 }
 

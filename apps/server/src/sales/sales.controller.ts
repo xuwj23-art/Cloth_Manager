@@ -56,6 +56,24 @@ export class SalesController {
     return this.sales.report(user.shopId, r);
   }
 
+  /** 历史某月销售（按天）：店主专属。year=2026&month=5 */
+  @Get("monthly")
+  @Roles("owner")
+  monthly(
+    @CurrentUser() user: RequestUser,
+    @Query("year") year?: string,
+    @Query("month") month?: string,
+  ) {
+    const now = new Date();
+    const y = Number(year);
+    const m = Number(month);
+    const safeYear =
+      Number.isInteger(y) && y >= 2000 && y <= 2999 ? y : now.getFullYear();
+    const safeMonth =
+      Number.isInteger(m) && m >= 1 && m <= 12 ? m : now.getMonth() + 1;
+    return this.sales.monthlyReport(user.shopId, safeYear, safeMonth);
+  }
+
   /** 单据详情：店主专属 */
   @Get(":id")
   @Roles("owner")

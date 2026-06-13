@@ -99,6 +99,40 @@ export function cartTotalCents(lines: CartLine[]): number {
   return lines.reduce((sum, l) => sum + l.price * l.quantity, 0);
 }
 
+/**
+ * 整单优惠：把购物车按「目标总价（分）」等比例摊到各行成交单价上，
+ * 使各行 price×quantity 之和尽量等于 targetCents。
+ *  - 仅用于优惠：targetCents ≥ 原总价 或购物车为空时原样返回。
+ *  - 取整余数优先落到某个「数量=1」的行（服装多为单件，可分毫不差地命中目标）；
+ *    若没有单件行，则按数量整除落到第一行（可能有几分误差，实际成交以摊后合计为准）。
+ */
+export function distributeOrderTotal(
+  lines: CartLine[],
+  targetCents: number,
+): CartLine[] {
+  const orig = cartTotalCents(lines);
+  const target = Math.max(0, Math.round(targetCents));
+  if (orig <= 0 || target >= orig) return lines.map((l) => ({ ...l }));
+  const ratio = target / orig;
+  const scaled = lines.map((l) => ({
+    ...l,
+    price: Math.max(0, Math.round(l.price * ratio)),
+  }));
+  const diff = target - cartTotalCents(scaled);
+  if (diff !== 0) {
+    const idx1 = scaled.findIndex((l) => l.quantity === 1);
+    if (idx1 >= 0) {
+      const t = scaled[idx1]!;
+      scaled[idx1] = { ...t, price: Math.max(0, t.price + diff) };
+    } else {
+      const t = scaled[0]!;
+      const per = Math.round(diff / t.quantity);
+      scaled[0] = { ...t, price: Math.max(0, t.price + per) };
+    }
+  }
+  return scaled;
+}
+
 /** 购物车件数合计 */
 export function cartItemCount(lines: CartLine[]): number {
   return lines.reduce((sum, l) => sum + l.quantity, 0);

@@ -5,6 +5,7 @@ import {
   cartItemCount,
   cartToSaleInput,
   cartTotalCents,
+  distributeOrderTotal,
   removeFromCart,
   setLinePrice,
   setQuantity,
@@ -103,6 +104,34 @@ describe("cart 纯函数", () => {
     expect(cartTotalCents(c)).toBe(8000);
     c = setLinePrice(c, "a", -100);
     expect(c[0]!.price).toBe(0);
+  });
+
+  it("distributeOrderTotal 单件行可精确命中目标总价（8.8折）", () => {
+    const cart: CartLine[] = [
+      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 1, stock: 5 },
+      { skuId: "b", barcode: "B", productName: "衫", color: "白", size: "L", price: 4100, quantity: 1, stock: 5 },
+    ];
+    const orig = cartTotalCents(cart); // 10000
+    const target = Math.round(orig * 0.88); // 8800
+    const out = distributeOrderTotal(cart, target);
+    expect(cartTotalCents(out)).toBe(8800);
+  });
+
+  it("distributeOrderTotal 直接改价命中目标总价", () => {
+    const cart: CartLine[] = [
+      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 1, stock: 5 },
+      { skuId: "b", barcode: "B", productName: "衫", color: "白", size: "L", price: 4100, quantity: 1, stock: 5 },
+    ];
+    const out = distributeOrderTotal(cart, 8888);
+    expect(cartTotalCents(out)).toBe(8888);
+  });
+
+  it("distributeOrderTotal 目标≥原价时原样返回", () => {
+    const cart: CartLine[] = [
+      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 2, stock: 5 },
+    ];
+    const out = distributeOrderTotal(cart, 999999);
+    expect(out[0]!.price).toBe(5900);
   });
 
   it("cartToSaleInput 生成带 opId 的下单入参", () => {

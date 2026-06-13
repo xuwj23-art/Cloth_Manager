@@ -6,6 +6,7 @@ import type {
   CreateStaffInput,
   EditSaleOrderInput,
   LoginInput,
+  MonthlySalesReport,
   Product,
   ProductScope,
   ProductWithSkus,
@@ -220,9 +221,17 @@ export function getSalesSummary(): Promise<SalesSummary> {
   return request("/sales/summary");
 }
 
-/** 销售报表（含利润 + 日期下钻）：range=today|week|month */
+/** 销售报表（含利润 + 日期下钻 + 各店员销售额）：range=today|week|month */
 export function getSalesReport(range: SalesRange): Promise<SalesReport> {
   return request(`/sales/report?range=${range}`);
+}
+
+/** 历史某月销售（按天）：year=2026&month=5（month 1-12） */
+export function getMonthlySales(
+  year: number,
+  month: number,
+): Promise<MonthlySalesReport> {
+  return request(`/sales/monthly?year=${year}&month=${month}`);
 }
 
 /** 上传图片，返回相对路径（如 /uploads/xxx.jpg） */

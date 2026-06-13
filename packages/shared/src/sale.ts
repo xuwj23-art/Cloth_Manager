@@ -144,11 +144,42 @@ export interface SalesBucket {
   quantity: number;
 }
 
-/** 报表接口返回：合计 + 下钻桶 + 该时间档热销 */
+/** 某店员在一段时间内的销售汇总 */
+export interface OperatorSalesStat {
+  operatorId: string | null;
+  operatorName: string | null;
+  revenue: number; // 营业额（分）
+  orders: number; // 单数
+  quantity: number; // 件数
+}
+
+/** 报表接口返回：合计 + 下钻桶 + 该时间档热销 + 各店员销售额 */
 export interface SalesReport {
   range: SalesRange;
   total: SalesStat;
   /** 顺序从早到近；今日档为空数组 */
   buckets: SalesBucket[];
   topSkus: TopSkuStat[];
+  /** 各店员在该时间档内的销售额，按营业额从高到低 */
+  byOperator: OperatorSalesStat[];
+}
+
+/* --------------------- 历史每月销售（按天） --------------------- */
+
+/** 某一天的销售汇总 */
+export interface DailySalesStat {
+  date: string; // YYYY-MM-DD（本地）
+  revenue: number; // 营业额（分）
+  profit: number; // 毛利（分）
+  orders: number; // 单数
+  quantity: number; // 件数
+}
+
+/** 历史某月报表：当月合计 + 各店员 + 每天明细（从 1 号到月末，由早到近） */
+export interface MonthlySalesReport {
+  year: number;
+  month: number; // 1-12
+  total: SalesStat;
+  byOperator: OperatorSalesStat[];
+  days: DailySalesStat[];
 }

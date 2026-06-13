@@ -19,6 +19,7 @@ import {
   cartItemCount,
   cartToSaleInput,
   cartTotalCents,
+  distributeOrderTotal,
   removeFromCart,
   setLinePrice,
   setQuantity,
@@ -35,13 +36,56 @@ import { imageUrl, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
 import { useSync } from "../sync/sync-context";
 
+/** 绿色扫描框边长（dp），与样式 frame 保持一致 */
+const FRAME_SIZE = 150;
+
+/** 扫码事件中可用于定位的字段（结构化，避免依赖具体版本的类型导出） */
+type ScanResult = {
+  data: string;
+  bounds?: {
+    origin: { x: number; y: number };
+    size: { width: number; height: number };
+  };
+  cornerPoints?: { x: number; y: number }[];
+};
+
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
+}
+
+/** 取条码在预览坐标系中的中心点；拿不到坐标返回 null */
+function scanCenter(e: ScanResult): { x: number; y: number } | null {
+  const b = e.bounds;
+  if (b && b.size && b.size.width > 0 && b.size.height > 0) {
+    return { x: b.origin.x + b.size.width / 2, y: b.origin.y + b.size.height / 2 };
+  }
+  const pts = e.cornerPoints;
+  if (Array.isArray(pts) && pts.length > 0) {
+    const sx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const sy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    return { x: sx, y: sy };
+  }
+  return null;
 }
 
 /** 生成客户端幂等 opId（设备本地唯一即可） */
 function genOpId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** 计算整单优惠后的最终总价（分）。zhe=按折扣，total=按优惠后总价；夹在 [0, 原价] */
+function computeFinalTotal(
+  cart: CartLine[],
+  kind: "none" | "zhe" | "total",
+  value: number,
+): number {
+  const orig = cartTotalCents(cart);
+  if (kind === "zhe") {
+    if (!(value > 0 && value < 10)) return orig;
+    return Math.min(orig, Math.round((orig * value) / 10));
+  }
+  if (kind === "total") return Math.min(orig, Math.max(0, value));
+  return orig;
 }
 
 /** 触感反馈（部分设备不支持时静默忽略） */
@@ -66,6 +110,8 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   const [hint, setHint] = useState<string>("对准吊牌二维码扫描");
   const [submitting, setSubmitting] = useState(false);
   const [torch, setTorch] = useState(false);
+  // 相机预览实际尺寸，用于把绿框换算成坐标范围，过滤框外的扫码
+  const [camSize, setCamSize] = useState({ w: 0, h: 0 });
 
   // 扫码确认卡：扫中后暂停继续识别，由用户确认数量后再加入
   const [pending, setPending] = useState<CachedSku | null>(null);
@@ -77,6 +123,14 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   // 议价/改价：正在编辑的购物车行
   const [priceEdit, setPriceEdit] = useState<CartLine | null>(null);
   const [priceValue, setPriceValue] = useState("");
+  // 整单优惠：打折(zhe，如 8.8 折)或改价(total，优惠后总价分)
+  const [discountKind, setDiscountKind] = useState<"none" | "zhe" | "total">(
+    "none",
+  );
+  const [discountValue, setDiscountValue] = useState(0);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustTab, setAdjustTab] = useState<"zhe" | "total">("zhe");
+  const [adjustInput, setAdjustInput] = useState("");
   // 点击商品图放大查看
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   // 任一弹卡打开时暂停扫码（onBarcodeScanned 会高频触发）
@@ -113,10 +167,33 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
     setPending(cached);
   }
 
-  async function handleScanned(barcode: string) {
+  /**
+   * 条码中心是否落在绿色扫描框内。
+   * 安全降级：拿不到坐标、布局未知、或坐标明显超出预览视图范围（部分 Android 返回
+   * 图像像素坐标而非视图坐标）时一律放行，确保任何情况下都不会因过滤而扫不出码。
+   */
+  function insideFrame(c: { x: number; y: number } | null): boolean {
+    if (!c) return true;
+    const { w, h } = camSize;
+    if (w <= 0 || h <= 0) return true;
+    // 坐标不在预览视图范围内 → 不是视图坐标系，放行
+    if (c.x < 0 || c.y < 0 || c.x > w || c.y > h) return true;
+    const half = FRAME_SIZE / 2;
+    const cx = w / 2;
+    const cy = h / 2;
+    return (
+      c.x >= cx - half &&
+      c.x <= cx + half &&
+      c.y >= cy - half &&
+      c.y <= cy + half
+    );
+  }
+
+  async function handleScanned(e: ScanResult) {
     if (sheetOpenRef.current) return; // 已有弹卡，暂停识别
+    if (!insideFrame(scanCenter(e))) return; // 不在绿框内，忽略
     sheetOpenRef.current = true; // 立即上锁，避免同一画面重复触发
-    await lookupAndPrompt(barcode);
+    await lookupAndPrompt(e.data);
   }
 
   function submitManual() {
@@ -140,8 +217,68 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
       Alert.alert("价格有误", "请输入有效的金额");
       return;
     }
-    setCart((prev) => setLinePrice(prev, priceEdit.skuId, Math.round(n * 100)));
+    applyCart((prev) => setLinePrice(prev, priceEdit.skuId, Math.round(n * 100)));
     setPriceEdit(null);
+  }
+
+  /** 改动购物车内容/单价后，自动清除整单优惠（避免金额错乱，需重新设置） */
+  function applyCart(next: (prev: CartLine[]) => CartLine[]) {
+    setCart(next);
+    if (discountKind !== "none") {
+      setDiscountKind("none");
+      setDiscountValue(0);
+    }
+  }
+
+  function clearDiscount() {
+    setDiscountKind("none");
+    setDiscountValue(0);
+  }
+
+  function openAdjust() {
+    if (cart.length === 0) return;
+    setAdjustTab(discountKind === "total" ? "total" : "zhe");
+    setAdjustInput(
+      discountKind === "zhe"
+        ? String(discountValue)
+        : discountKind === "total"
+          ? (discountValue / 100).toFixed(2)
+          : "",
+    );
+    sheetOpenRef.current = true; // 暂停扫码
+    setAdjustOpen(true);
+  }
+
+  function closeAdjust() {
+    setAdjustOpen(false);
+    setAdjustInput("");
+    sheetOpenRef.current = false;
+  }
+
+  function confirmAdjust() {
+    const orig = cartTotalCents(cart);
+    const n = Number(adjustInput);
+    if (adjustTab === "zhe") {
+      if (!Number.isFinite(n) || n <= 0 || n >= 10) {
+        Alert.alert("折扣有误", "请输入 0~10 之间的折扣，如 8.8（即 8.8 折）");
+        return;
+      }
+      setDiscountKind("zhe");
+      setDiscountValue(n);
+    } else {
+      const cents = Math.round(n * 100);
+      if (!Number.isFinite(n) || n < 0) {
+        Alert.alert("金额有误", "请输入有效的优惠后总价");
+        return;
+      }
+      if (cents >= orig) {
+        Alert.alert("无需改价", "优惠后总价需小于原价才会生效");
+        return;
+      }
+      setDiscountKind("total");
+      setDiscountValue(cents);
+    }
+    closeAdjust();
   }
 
   /** 当前购物车中该 SKU 已有数量 */
@@ -152,16 +289,25 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   function confirmAdd() {
     if (!pending) return;
     haptic("light");
-    setCart((prev) => addToCartQty(prev, toScannedSku(pending), pendingQty));
+    applyCart((prev) => addToCartQty(prev, toScannedSku(pending), pendingQty));
     setHint(`已加入：${pending.productName} ${pending.color}/${pending.size} ×${pendingQty}`);
     closeSheet();
   }
 
   function checkout() {
     if (cart.length === 0 || submitting) return;
+    const orig = cartTotalCents(cart);
+    const fin = computeFinalTotal(cart, discountKind, discountValue);
+    const cnt = cartItemCount(cart);
+    const priceLine =
+      fin < orig
+        ? `合计 ${yuan(fin)}（原价 ${yuan(orig)}${
+            discountKind === "zhe" ? ` · ${discountValue}折` : " · 已改价"
+          }）`
+        : `合计 ${yuan(orig)}`;
     Alert.alert(
       "确认结算",
-      `共 ${count} 件商品，合计 ${yuan(total)}\n确认收款并记录这笔销售？`,
+      `共 ${cnt} 件商品，${priceLine}\n确认收款并记录这笔销售？`,
       [
         { text: "再看看", style: "cancel" },
         { text: "确认结算", onPress: () => void doCheckout() },
@@ -173,12 +319,16 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
-      const input = cartToSaleInput(cart, genOpId());
+      const fin = computeFinalTotal(cart, discountKind, discountValue);
+      const lines =
+        fin < cartTotalCents(cart) ? distributeOrderTotal(cart, fin) : cart;
+      const input = cartToSaleInput(lines, genOpId());
       await enqueueSale(input);
       for (const line of cart) {
         await applyLocalStockDelta(line.skuId, -line.quantity);
       }
       setCart([]);
+      clearDiscount();
       await refreshPending();
       void syncNow();
       Alert.alert(
@@ -218,6 +368,14 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
 
   const total = cartTotalCents(cart);
   const count = cartItemCount(cart);
+  const finalTotal = computeFinalTotal(cart, discountKind, discountValue);
+  const discounted = finalTotal < total;
+  const discountTag =
+    discountKind === "zhe"
+      ? `${discountValue}折`
+      : discountKind === "total"
+        ? "已改价"
+        : "";
 
   return (
     <View style={styles.container}>
@@ -232,12 +390,20 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
         </Text>
       </View>
 
-      <View style={styles.cameraWrap}>
+      <View
+        style={styles.cameraWrap}
+        onLayout={(ev) =>
+          setCamSize({
+            w: ev.nativeEvent.layout.width,
+            h: ev.nativeEvent.layout.height,
+          })
+        }
+      >
         <CameraView
           style={StyleSheet.absoluteFill}
           enableTorch={torch}
           barcodeScannerSettings={{ barcodeTypes: ["qr", "ean13", "code128"] }}
-          onBarcodeScanned={(e) => void handleScanned(e.data)}
+          onBarcodeScanned={(e) => void handleScanned(e as ScanResult)}
         />
         <View style={styles.frame} pointerEvents="none" />
         <Pressable
@@ -272,7 +438,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
               <Pressable
                 style={styles.stepBtn}
                 onPress={() =>
-                  setCart((prev) =>
+                  applyCart((prev) =>
                     setQuantity(prev, item.skuId, item.quantity - 1),
                   )
                 }
@@ -283,7 +449,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
               <Pressable
                 style={styles.stepBtn}
                 onPress={() =>
-                  setCart((prev) =>
+                  applyCart((prev) =>
                     setQuantity(prev, item.skuId, item.quantity + 1),
                   )
                 }
@@ -292,7 +458,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
               </Pressable>
               <Pressable
                 style={styles.removeBtn}
-                onPress={() => setCart((prev) => removeFromCart(prev, item.skuId))}
+                onPress={() => applyCart((prev) => removeFromCart(prev, item.skuId))}
               >
                 <Text style={styles.removeText}>删</Text>
               </Pressable>
@@ -302,9 +468,29 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
       />
 
       <View style={styles.footer}>
-        <View>
-          <Text style={styles.totalLabel}>合计（{count} 件）</Text>
-          <Text style={styles.total}>{yuan(total)}</Text>
+        <View style={styles.footerLeft}>
+          <View style={styles.totalLabelRow}>
+            <Text style={styles.totalLabel}>合计（{count} 件）</Text>
+            <Pressable onPress={openAdjust} disabled={cart.length === 0} hitSlop={6}>
+              <Text
+                style={[
+                  styles.adjustLink,
+                  cart.length === 0 && styles.adjustLinkDisabled,
+                ]}
+              >
+                {discounted ? "修改优惠" : "优惠 / 改价"}
+              </Text>
+            </Pressable>
+          </View>
+          {discounted ? (
+            <View style={styles.totalDiscRow}>
+              <Text style={styles.total}>{yuan(finalTotal)}</Text>
+              <Text style={styles.totalOrig}>{yuan(total)}</Text>
+              <Text style={styles.discTag}>{discountTag}</Text>
+            </View>
+          ) : (
+            <Text style={styles.total}>{yuan(total)}</Text>
+          )}
         </View>
         <Pressable
           style={[styles.checkout, (cart.length === 0 || submitting) && styles.disabled]}
@@ -523,6 +709,92 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
         ) : null}
       </Modal>
 
+      {/* 整单优惠：打折 / 改价 */}
+      <Modal
+        visible={adjustOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAdjust}
+      >
+        <Pressable style={styles.backdrop} onPress={closeAdjust} />
+        <View style={styles.notFoundSheet}>
+          <Text style={styles.notFoundTitle}>整单优惠</Text>
+          <View style={styles.adjustTabs}>
+            <Pressable
+              style={[styles.adjustTab, adjustTab === "zhe" && styles.adjustTabActive]}
+              onPress={() => {
+                setAdjustTab("zhe");
+                setAdjustInput("");
+              }}
+            >
+              <Text
+                style={[
+                  styles.adjustTabText,
+                  adjustTab === "zhe" && styles.adjustTabTextActive,
+                ]}
+              >
+                打折
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.adjustTab, adjustTab === "total" && styles.adjustTabActive]}
+              onPress={() => {
+                setAdjustTab("total");
+                setAdjustInput("");
+              }}
+            >
+              <Text
+                style={[
+                  styles.adjustTabText,
+                  adjustTab === "total" && styles.adjustTabTextActive,
+                ]}
+              >
+                改价
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.priceInputRow}>
+            <TextInput
+              style={styles.priceInput}
+              placeholder={adjustTab === "zhe" ? "8.8" : "0.00"}
+              keyboardType="decimal-pad"
+              autoFocus
+              value={adjustInput}
+              onChangeText={setAdjustInput}
+              onSubmitEditing={confirmAdjust}
+            />
+            <Text style={styles.priceYuan}>{adjustTab === "zhe" ? "折" : "元"}</Text>
+          </View>
+          <Text style={styles.notFoundHint}>
+            {adjustTab === "zhe"
+              ? `输入几折，如 8.8 = 打 8.8 折（原价 ${yuan(total)}）`
+              : `输入优惠后的总价，需小于原价 ${yuan(total)}`}
+          </Text>
+
+          <View style={styles.sheetActions}>
+            {discounted ? (
+              <Pressable
+                style={styles.cancelBtn}
+                onPress={() => {
+                  clearDiscount();
+                  closeAdjust();
+                }}
+              >
+                <Text style={styles.cancelText}>清除优惠</Text>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.cancelBtn} onPress={closeAdjust}>
+                <Text style={styles.cancelText}>取消</Text>
+              </Pressable>
+            )}
+            <Pressable style={styles.addBtn} onPress={confirmAdjust}>
+              <Text style={styles.addText}>确定</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
@@ -559,8 +831,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   frame: {
-    width: 150,
-    height: 150,
+    width: FRAME_SIZE,
+    height: FRAME_SIZE,
     borderWidth: 3,
     borderColor: "#4ade80",
     borderRadius: 12,
@@ -654,7 +926,43 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#eee",
   },
+  footerLeft: { flex: 1 },
+  totalLabelRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   totalLabel: { fontSize: 13, color: "#6b7280" },
+  adjustLink: { fontSize: 13, fontWeight: "700", color: "#2563eb" },
+  adjustLinkDisabled: { color: "#cbd5e1" },
+  totalDiscRow: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  totalOrig: {
+    fontSize: 14,
+    color: "#9ca3af",
+    textDecorationLine: "line-through",
+  },
+  discTag: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#e11d48",
+    backgroundColor: "#fee2e2",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    overflow: "hidden",
+  },
+  adjustTabs: {
+    flexDirection: "row",
+    gap: 8,
+    alignSelf: "stretch",
+    marginTop: 4,
+  },
+  adjustTab: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: "#f1f5f9",
+    alignItems: "center",
+  },
+  adjustTabActive: { backgroundColor: "#2563eb" },
+  adjustTabText: { fontSize: 15, fontWeight: "700", color: "#475569" },
+  adjustTabTextActive: { color: "#fff" },
   total: { fontSize: 24, fontWeight: "800", color: "#e11d48" },
   checkout: {
     backgroundColor: "#2563eb",

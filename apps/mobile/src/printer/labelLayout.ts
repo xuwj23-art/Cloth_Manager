@@ -6,7 +6,7 @@ export interface LabelSizeMm {
   heightMm: number;
 }
 
-export const DEFAULT_LABEL_SIZE: LabelSizeMm = { widthMm: 60, heightMm: 40 };
+export const DEFAULT_LABEL_SIZE: LabelSizeMm = { widthMm: 40, heightMm: 60 };
 
 /** TSPL 价格用全角￥，多数热敏机的中文字库都含该字形，避免缺字 */
 function yuanLabel(cents: number): string {
@@ -38,15 +38,18 @@ function estimateQrModules(dataLen: number): number {
 /**
  * 把商品 + 各 SKU 打印份数，排版成一次蓝牙打印任务。
  *
- * 新版布局（横向 60×40 为基准，简洁美观）：
- *   ┌───────────────┐
- *   │   ███ 大二维码 ███   │  ← 居中，占主要视觉
- *   │     SKU 条码文本      │  ← 供人工输入兜底
- *   │      ￥价格           │  ← 加大字号
- *   └───────────────┘
+ * 新版布局（纵向 40×60 为基准，二维码为主、简洁美观）：
+ *   ┌─────────┐
+ *   │ ███ 大二维码 ███ │  ← 顶部居中，尽量大
+ *   │  SKU 条码文本   │  ← 供人工输入兜底（限定在宽度内不溢出）
+ *   │    ￥价格        │  ← 字号偏小
+ *   └─────────┘
  *
- * 注：二维码实际尺寸随条码长度变化，本函数按估算值居中；
- * 首次实物试打后如有偏移，可微调 qrCell / 各行 Y 坐标常量。
+ * 关键约束：
+ *  - 二维码宽度自动限制在标签宽度内（按条码长度估算模块数，必要时缩小 qrCell）。
+ *  - SKU 条码文本用 scale=1，估算宽度不超过标签宽度（吊牌条码约 17 字符 ≈ 25mm < 40mm）。
+ * 注：二维码实际尺寸随条码长度变化，本函数按估算值居中；首次实物试打后如有偏移，
+ * 可微调 qrCell / qrXAdjustMm / 各行 Y 坐标常量。
  */
 export function buildCtPrintJob(
   product: ProductWithSkus,
@@ -61,21 +64,29 @@ export function buildCtPrintJob(
   const size = opts?.size ?? DEFAULT_LABEL_SIZE;
   const dpi = opts?.dpi ?? 203;
   const dotsPerMm = dpi / 25.4;
-  const qrCell = opts?.qrCell ?? 6; // 单元格点数，越大二维码越大
   // 二维码水平微调（mm，正=右移）。估算的二维码尺寸会让其略偏左，默认右移一点居中
-  const qrXAdjustMm = opts?.qrXAdjustMm ?? 2.5;
+  const qrXAdjustMm = opts?.qrXAdjustMm ?? 1.5;
 
   // 用一个待打印的条码估算二维码尺寸（同款各 SKU 条码长度相近）
   const sample =
     product.skus.find((s) => (qtyBySku[s.id] ?? 0) > 0)?.barcode ??
     product.skus[0]?.barcode ??
     "";
-  const qrSizeMm = (estimateQrModules(sample.length) * qrCell) / dotsPerMm;
+  const modules = estimateQrModules(sample.length);
 
-  const qrYMm = 3;
+  // 期望更大的二维码（默认 cell=8），但必须保证整体宽度不超出标签（留 ~4mm 边距）
+  const wantCell = opts?.qrCell ?? 8;
+  const maxCell = Math.max(
+    3,
+    Math.floor(((size.widthMm - 4) * dotsPerMm) / modules),
+  );
+  const qrCell = Math.min(wantCell, maxCell);
+  const qrSizeMm = (modules * qrCell) / dotsPerMm;
+
+  const qrYMm = 4;
   const qrXMm = Math.max(1, (size.widthMm - qrSizeMm) / 2 + qrXAdjustMm);
-  const codeYMm = qrYMm + qrSizeMm + 1.5; // 二维码下方
-  const priceYMm = codeYMm + 4.5; // 最下方价格
+  const codeYMm = qrYMm + qrSizeMm + 2; // 二维码下方
+  const priceYMm = codeYMm + 4; // 价格行（字号偏小）
 
   const centerX = (w: number) => Math.max(1, (size.widthMm - w) / 2);
 
@@ -89,8 +100,10 @@ export function buildCtPrintJob(
       qr: sku.barcode,
       copies,
       texts: [
+        // SKU 条码：scale=1（最小可读字号），保证不超出标签宽度
         { xMm: centerX(textWidthMm(code, 1, dpi)), yMm: codeYMm, scale: 1, text: code },
-        { xMm: centerX(textWidthMm(price, 2, dpi)), yMm: priceYMm, scale: 2, text: price },
+        // 价格：字号调小（scale=1）
+        { xMm: centerX(textWidthMm(price, 1, dpi)), yMm: priceYMm, scale: 1, text: price },
       ],
     });
   }

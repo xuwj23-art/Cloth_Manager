@@ -6,7 +6,10 @@ import {
 import { randomUUID } from "node:crypto";
 import type {
   CreateSaleOrderInput,
+  DailySalesStat,
   EditSaleOrderInput,
+  MonthlySalesReport,
+  OperatorSalesStat,
   SaleOrderDetail,
   SalesBucket,
   SalesRange,
@@ -320,7 +323,7 @@ export class SalesService {
 
     const orders = await this.prisma.saleOrder.findMany({
       where: { shopId, status: "completed", createdAt: { gte: start } },
-      include: { items: true },
+      include: { items: true, operator: true },
       orderBy: { createdAt: "asc" },
     });
 
@@ -360,7 +363,106 @@ export class SalesService {
     total.profit = total.revenue - total.cost;
 
     const topSkus = await this.topSkus(shopId, start);
-    return { range, total, buckets, topSkus };
+    const byOperator = this.operatorStats(orders);
+    return { range, total, buckets, topSkus, byOperator };
+  }
+
+  /**
+   * 历史某月销售（按天）：当月合计 + 各店员销售额 + 每天明细（1 号→月末，由早到近）。
+   * year/month 为本地年月（month 1-12）。空数据的天也会列出（便于看趋势）。
+   */
+  async monthlyReport(
+    shopId: string,
+    year: number,
+    month: number,
+  ): Promise<MonthlySalesReport> {
+    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const end = new Date(year, month, 1, 0, 0, 0, 0);
+
+    const orders = await this.prisma.saleOrder.findMany({
+      where: {
+        shopId,
+        status: "completed",
+        createdAt: { gte: start, lt: end },
+      },
+      include: { items: true, operator: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const days: DailySalesStat[] = Array.from(
+      { length: daysInMonth },
+      (_, i) => ({
+        date: `${year}-${pad(month)}-${pad(i + 1)}`,
+        revenue: 0,
+        profit: 0,
+        orders: 0,
+        quantity: 0,
+      }),
+    );
+
+    const total: SalesStat = {
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+      orders: 0,
+      quantity: 0,
+    };
+
+    for (const o of orders) {
+      let qty = 0;
+      let cost = 0;
+      for (const it of o.items) {
+        qty += it.quantity;
+        cost += it.cost * it.quantity;
+      }
+      total.revenue += o.totalAmount;
+      total.cost += cost;
+      total.orders += 1;
+      total.quantity += qty;
+
+      const d = days[o.createdAt.getDate() - 1];
+      if (d) {
+        d.revenue += o.totalAmount;
+        d.profit += o.totalAmount - cost;
+        d.orders += 1;
+        d.quantity += qty;
+      }
+    }
+    total.profit = total.revenue - total.cost;
+
+    return { year, month, total, byOperator: this.operatorStats(orders), days };
+  }
+
+  /** 把订单列表汇总成各店员销售额（按营业额从高到低） */
+  private operatorStats(
+    orders: {
+      operatorId: string | null;
+      operator: { name: string } | null;
+      totalAmount: number;
+      items: { quantity: number }[];
+    }[],
+  ): OperatorSalesStat[] {
+    const map = new Map<string, OperatorSalesStat>();
+    for (const o of orders) {
+      const key = o.operatorId ?? "__none__";
+      let s = map.get(key);
+      if (!s) {
+        s = {
+          operatorId: o.operatorId,
+          operatorName: o.operator?.name ?? null,
+          revenue: 0,
+          orders: 0,
+          quantity: 0,
+        };
+        map.set(key, s);
+      }
+      s.revenue += o.totalAmount;
+      s.orders += 1;
+      s.quantity += o.items.reduce((q, it) => q + it.quantity, 0);
+    }
+    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
   }
 
   /** 生成空桶（含 label），顺序从早到近 */
