@@ -46,6 +46,9 @@ class CtPrinterModule : Module() {
 
     // 已配对(经典蓝牙)设备列表 —— 先在系统蓝牙里配对打印机，再在 App 里选择
     Function("getBondedDevices") {
+      // 打开设备列表时就提前初始化厂商 SDK，避免「首次 connect() 同帧 init+连接」竞态崩溃。
+      // ensureInit 幂等，初始化在这里完成后，后续 connect() 不再触发首次初始化。
+      try { ensureInit() } catch (_: Exception) {}
       val adapter = BluetoothAdapter.getDefaultAdapter()
         ?: return@Function emptyList<Map<String, String>>()
       try {

@@ -151,6 +151,9 @@ const PORTRAIT_TEXT_ROTATE = 90;
 /** portrait 二维码水平微调（mm，沿画布 Y/纵向标签左右方向；正=纵向标签里往右） */
 const PORTRAIT_QR_Y_ADJUST_MM = 3;
 
+/** portrait 整组（二维码+SKU+价格）竖直微调（mm，沿画布 X；正=纵向标签里整体上移） */
+const PORTRAIT_GROUP_X_ADJUST_MM = 4;
+
 /**
  * 纵向（旋转 90°）：在 60×40 横版画布上把内容旋转 90° 排版。
  *
@@ -175,7 +178,12 @@ function buildPortrait(
   const gapQrSku = 4; // 二维码 ↔ SKU 行间距（沿 X）
   const gapSkuPrice = 5; // SKU ↔ 价格行间距（沿 X）
   const groupLen = qrSizeMm + gapQrSku + gapSkuPrice;
-  const priceXMm = Math.max(2, (W - groupLen) / 2); // 最下（X 最小）
+  // 整体居中后按微调量上移；上移上限保证二维码顶部不超出画布
+  const maxPriceX = Math.max(2, W - 1 - gapSkuPrice - gapQrSku - qrSizeMm);
+  const priceXMm = Math.min(
+    maxPriceX,
+    Math.max(2, (W - groupLen) / 2 + PORTRAIT_GROUP_X_ADJUST_MM),
+  ); // 最下（X 最小）
   const skuXMm = priceXMm + gapSkuPrice;
   const qrXMm = skuXMm + gapQrSku; // 最上（X 最大），二维码左下角
   // 在 H 内居中，再按微调量整体右移；保证不超出 H
