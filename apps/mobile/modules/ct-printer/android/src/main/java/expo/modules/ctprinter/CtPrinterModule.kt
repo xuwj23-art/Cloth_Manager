@@ -31,6 +31,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
 class CtPrinterModule : Module() {
 
   private var initialized = false
+  private var initAtMs = 0L
   @Volatile private var pendingConnect: Promise? = null
   @Volatile private var connecting = false
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -109,38 +110,48 @@ class CtPrinterModule : Module() {
       }
       connecting = true
       pendingConnect = promise
-      try {
-        val d = Device()
-        if (port == "BLE") {
-          d.setPort(CTPL.Port.BLE)
-          // 驰腾 BLE 默认服务 UUID（取自官方 Demo）
-          d.setBleServiceUUID("49535343-fe7d-4ae5-8fa9-9fafd205e455")
-        } else {
-          d.setPort(CTPL.Port.SPP)
-        }
-        d.setBluetoothMacAddr(mac)
 
-        // 超时兜底：15s 无回调即判失败，避免界面卡死
-        connectTimeout?.let { mainHandler.removeCallbacks(it) }
-        val timeout = Runnable {
-          if (connecting) {
-            connecting = false
-            val p = pendingConnect
-            pendingConnect = null
-            try { CTPL.getInstance().disconnect() } catch (_: Exception) {}
-            p?.reject("E_TIMEOUT", "连接超时，请确认打印机已开机并在范围内", null)
-          }
-        }
-        connectTimeout = timeout
-        mainHandler.postDelayed(timeout, 15000)
-
-        CTPL.getInstance().connect(d)
-      } catch (e: Exception) {
-        connecting = false
-        connectTimeout?.let { mainHandler.removeCallbacks(it) }
-        pendingConnect = null
-        promise.reject("E_CONNECT", e.message ?: "连接异常", e)
+      val d = Device()
+      if (port == "BLE") {
+        d.setPort(CTPL.Port.BLE)
+        // 驰腾 BLE 默认服务 UUID（取自官方 Demo）
+        d.setBleServiceUUID("49535343-fe7d-4ae5-8fa9-9fafd205e455")
+      } else {
+        d.setPort(CTPL.Port.SPP)
       }
+      d.setBluetoothMacAddr(mac)
+
+      // 超时兜底：15s 无回调即判失败，避免界面卡死
+      connectTimeout?.let { mainHandler.removeCallbacks(it) }
+      val timeout = Runnable {
+        if (connecting) {
+          connecting = false
+          val p = pendingConnect
+          pendingConnect = null
+          try { CTPL.getInstance().disconnect() } catch (_: Exception) {}
+          p?.reject("E_TIMEOUT", "连接超时，请确认打印机已开机并在范围内", null)
+        }
+      }
+      connectTimeout = timeout
+      mainHandler.postDelayed(timeout, 15000)
+
+      // 关键修复（首次连接闪退）：
+      // 1) 厂商 SDK 的 connect 内部会创建 Handler / 弹 Toast / 触发配对，
+      //    这些只能在「主线程」执行；AsyncFunction 默认跑在后台队列，
+      //    首次调用会在 SDK 工作线程上崩溃（try/catch 也拦不住）。→ 强制 post 到主线程。
+      // 2) init 刚完成时 SDK 内部线程尚未就绪，预留 ~400ms 稳定窗口再连。
+      val settle = (400L - (System.currentTimeMillis() - initAtMs)).coerceIn(0L, 400L)
+      mainHandler.postDelayed({
+        if (!connecting) return@postDelayed
+        try {
+          CTPL.getInstance().connect(d)
+        } catch (e: Exception) {
+          connecting = false
+          connectTimeout?.let { mainHandler.removeCallbacks(it) }
+          pendingConnect = null
+          promise.reject("E_CONNECT", e.message ?: "连接异常", e)
+        }
+      }, settle)
     }
 
     // 查询打印机状态/配置（DPI、纸张、碳带、间隙等），结果走 "onData" 事件
@@ -269,5 +280,6 @@ class CtPrinterModule : Module() {
       override fun autoSPPBond(): Boolean = true
     })
     initialized = true
+    initAtMs = System.currentTimeMillis()
   }
 }

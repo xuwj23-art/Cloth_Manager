@@ -149,7 +149,10 @@ function buildLandscape(
 const PORTRAIT_TEXT_ROTATE = 90;
 
 /** portrait 二维码水平微调（mm，沿画布 Y/纵向标签左右方向；正=纵向标签里往右） */
-const PORTRAIT_QR_Y_ADJUST_MM = 3;
+const PORTRAIT_QR_Y_ADJUST_MM = 1;
+
+/** portrait SKU 行水平微调（mm，沿画布 Y；正=纵向标签里往右） */
+const PORTRAIT_SKU_Y_ADJUST_MM = 2;
 
 /** portrait 整组（二维码+SKU+价格）竖直微调（mm，沿画布 X；正=纵向标签里整体上移） */
 const PORTRAIT_GROUP_X_ADJUST_MM = 4;
@@ -206,7 +209,7 @@ function buildPortrait(
       texts: [
         {
           xMm: skuXMm,
-          yMm: centerY(textWidthMm(code, 1, dpi)),
+          yMm: centerY(textWidthMm(code, 1, dpi)) + PORTRAIT_SKU_Y_ADJUST_MM,
           scale: 1,
           rotate: PORTRAIT_TEXT_ROTATE,
           text: code,
