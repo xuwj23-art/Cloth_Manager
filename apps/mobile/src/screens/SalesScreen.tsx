@@ -60,8 +60,10 @@ function lastMonths(n: number): { year: number; month: number }[] {
   });
 }
 
-type SelMonth = { year: number; month: number };
-type TabKey = SalesRange | "history";
+export type SalesMonth = { year: number; month: number };
+export type SalesTab = SalesRange | "history";
+type SelMonth = SalesMonth;
+type TabKey = SalesTab;
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "today", label: "今日" },
@@ -161,13 +163,24 @@ function BucketChart({ report }: { report: SalesReport }) {
 }
 
 export function SalesScreen({
+  tab,
+  onTab,
+  month: sel,
+  onMonth,
+  day,
+  onDay,
   onBack,
   onOpenOrder,
 }: {
+  tab: SalesTab;
+  onTab: (t: SalesTab) => void;
+  month: SalesMonth;
+  onMonth: (m: SalesMonth) => void;
+  day: string | null;
+  onDay: (d: string | null) => void;
   onBack: () => void;
   onOpenOrder: (id: string) => void;
 }) {
-  const [tab, setTab] = useState<TabKey>("today");
   const [orders, setOrders] = useState<SaleOrderDetail[]>([]);
   const [report, setReport] = useState<SalesReport | null>(null);
   const [monthly, setMonthly] = useState<MonthlySalesReport | null>(null);
@@ -175,11 +188,9 @@ export function SalesScreen({
   const [error, setError] = useState<string | null>(null);
 
   const months = useMemo(() => lastMonths(12), []);
-  const [sel, setSel] = useState<SelMonth>(months[0]!);
   const [monthOpen, setMonthOpen] = useState(false);
 
   // 历史 → 点某天查看当日流水
-  const [day, setDay] = useState<string | null>(null);
   const [dayOrders, setDayOrders] = useState<SaleOrderDetail[]>([]);
   const [dayLoading, setDayLoading] = useState(false);
 
@@ -211,21 +222,26 @@ export function SalesScreen({
     void load(tab, sel);
   }, [load, tab, sel]);
 
-  const openDay = useCallback(async (date: string) => {
-    setDay(date);
-    setDayLoading(true);
-    try {
-      setDayOrders(await getSalesByDay(date));
-    } catch {
+  // 当日流水：day 变化（含返回后重建）时按需加载
+  useEffect(() => {
+    if (tab !== "history" || day === null) {
       setDayOrders([]);
-    } finally {
-      setDayLoading(false);
+      return;
     }
-  }, []);
+    let alive = true;
+    setDayLoading(true);
+    getSalesByDay(day)
+      .then((d) => alive && setDayOrders(d))
+      .catch(() => alive && setDayOrders([]))
+      .finally(() => alive && setDayLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [tab, day]);
 
   function switchTab(next: TabKey) {
-    setDay(null);
-    setTab(next);
+    onDay(null);
+    onTab(next);
   }
 
   const soldDays = (monthly?.days ?? []).filter((d) => d.orders > 0);
@@ -271,7 +287,7 @@ export function SalesScreen({
           contentContainerStyle={styles.list}
           ListHeaderComponent={
             <View>
-              <Pressable style={styles.dayBack} onPress={() => setDay(null)}>
+              <Pressable style={styles.dayBack} onPress={() => onDay(null)}>
                 <Text style={styles.dayBackText}>‹ {sel.month}月明细</Text>
               </Pressable>
               <Text style={styles.dayTitle}>{formatDay(day)}</Text>
@@ -327,7 +343,7 @@ export function SalesScreen({
             <Text style={styles.empty}>该月暂无销售记录</Text>
           }
           renderItem={({ item }) => (
-            <Pressable style={styles.dayRow} onPress={() => openDay(item.date)}>
+            <Pressable style={styles.dayRow} onPress={() => onDay(item.date)}>
               <View>
                 <Text style={styles.dayDate}>{formatDay(item.date)}</Text>
                 <Text style={styles.dayMeta}>
@@ -410,8 +426,8 @@ export function SalesScreen({
                 <Pressable
                   style={[styles.monthItem, active && styles.monthItemActive]}
                   onPress={() => {
-                    setSel(item);
-                    setDay(null);
+                    onMonth(item);
+                    onDay(null);
                     setMonthOpen(false);
                   }}
                 >

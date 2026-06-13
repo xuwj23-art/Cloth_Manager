@@ -83,7 +83,7 @@ export function buildCtPrintJob(
       dpi,
       dotsPerMm,
       modules,
-      wantCell: opts?.qrCell ?? 8,
+      wantCell: opts?.qrCell ?? 10,
     });
   }
   return buildLandscape(product, qtyBySku, {
@@ -149,8 +149,14 @@ function buildLandscape(
 const PORTRAIT_TEXT_ROTATE = 90;
 
 /**
- * 纵向（旋转 90°）：在 60×40 横版画布上，二维码靠左占满高度，SKU、价格旋转 90° 排右侧。
- * 打印后把标签转 90°，即为「二维码在上 / SKU / 价格在下」的纵向标签。
+ * 纵向（旋转 90°）：在 60×40 横版画布上把内容旋转 90° 排版。
+ *
+ * 坐标说明（已据实物照片校准）：
+ *  - 画布 X 轴(0..W) 对应「拿在手里的纵向标签」的上下方向：X 越大越靠上。
+ *    所以「二维码在上 / SKU / 价格在下」⇒ 画布 X：price < sku < 二维码。
+ *  - 画布 Y 轴(0..H) 对应纵向标签的左右方向；旋转文本沿 Y 方向延伸，
+ *    用 (H - 文本长度)/2 在 H 内居中（之前误用 (H+L)/2 导致贴边/被切）。
+ *  - 整组（二维码 + 两行文本）在 X 方向整体居中。
  */
 function buildPortrait(
   product: ProductWithSkus,
@@ -158,21 +164,20 @@ function buildPortrait(
   ctx: BuildCtx,
 ): CtPrintJob {
   const { W, H, dpi, dotsPerMm, modules, wantCell } = ctx;
-  // 二维码尽量大：受限于画布高度（H），并保证右侧能放下两列旋转文本（约 14mm）
-  const maxCell = Math.max(
-    3,
-    Math.floor((Math.min(H - 3, W - 14) * dotsPerMm) / modules),
-  );
+  // 二维码尽量大：受限于画布高度 H（纵向标签的宽度），留约 4mm 边距
+  const maxCell = Math.max(3, Math.floor(((H - 4) * dotsPerMm) / modules));
   const qrCell = Math.min(wantCell, maxCell);
   const qrSizeMm = (modules * qrCell) / dotsPerMm;
 
-  const qrXMm = 2;
-  const qrYMm = Math.max(1, (H - qrSizeMm) / 2);
+  const gapQrSku = 4; // 二维码 ↔ SKU 行间距（沿 X）
+  const gapSkuPrice = 5; // SKU ↔ 价格行间距（沿 X）
+  const groupLen = qrSizeMm + gapQrSku + gapSkuPrice;
+  const priceXMm = Math.max(2, (W - groupLen) / 2); // 最下（X 最小）
+  const skuXMm = priceXMm + gapSkuPrice;
+  const qrXMm = skuXMm + gapQrSku; // 最上（X 最大），二维码左下角
+  const qrYMm = Math.max(1, (H - qrSizeMm) / 2); // 在 H 内居中
 
-  // 旋转文本沿画布纵向（H 方向）阅读，长度需 ≤ H；按长度在 H 内居中
-  const codeXMm = qrXMm + qrSizeMm + 3;
-  const priceXMm = codeXMm + 5;
-  const centerY = (lenMm: number) => Math.max(1, (H + lenMm) / 2);
+  const centerY = (lenMm: number) => Math.max(1, (H - lenMm) / 2);
 
   const labels: CtLabel[] = [];
   for (const sku of product.skus) {
@@ -185,7 +190,7 @@ function buildPortrait(
       copies,
       texts: [
         {
-          xMm: codeXMm,
+          xMm: skuXMm,
           yMm: centerY(textWidthMm(code, 1, dpi)),
           scale: 1,
           rotate: PORTRAIT_TEXT_ROTATE,

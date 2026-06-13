@@ -39,37 +39,11 @@ import { useSync } from "../sync/sync-context";
 /** 绿色扫描框边长（dp），与样式 frame 保持一致 */
 const FRAME_SIZE = 150;
 
-/** 扫码事件中可用于定位的字段（结构化，避免依赖具体版本的类型导出） */
-type ScanResult = {
-  data: string;
-  bounds?: {
-    origin: { x: number; y: number };
-    size: { width: number; height: number };
-  };
-  cornerPoints?: { x: number; y: number }[];
-};
+/** 扫码事件中需要用到的字段（只用 data；绿框仅作视觉提示，不做范围限制） */
+type ScanResult = { data: string };
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
-}
-
-/**
- * 取条码在预览「视图坐标系」中的中心点；拿不到坐标返回 null。
- * expo-camera v17 已把 cornerPoints/bounds 映射到视图坐标（含缩放/裁剪补偿），
- * 优先用更可靠的 cornerPoints。
- */
-function scanCenter(e: ScanResult): { x: number; y: number } | null {
-  const pts = e.cornerPoints;
-  if (Array.isArray(pts) && pts.length > 0) {
-    const sx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-    const sy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-    return { x: sx, y: sy };
-  }
-  const b = e.bounds;
-  if (b && b.size && (b.size.width > 0 || b.size.height > 0)) {
-    return { x: b.origin.x + b.size.width / 2, y: b.origin.y + b.size.height / 2 };
-  }
-  return null;
 }
 
 /** 生成客户端幂等 opId（设备本地唯一即可） */
@@ -114,8 +88,6 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   const [hint, setHint] = useState<string>("对准吊牌二维码扫描");
   const [submitting, setSubmitting] = useState(false);
   const [torch, setTorch] = useState(false);
-  // 相机预览实际尺寸，用于把绿框换算成坐标范围，过滤框外的扫码
-  const [camSize, setCamSize] = useState({ w: 0, h: 0 });
 
   // 扫码确认卡：扫中后暂停继续识别，由用户确认数量后再加入
   const [pending, setPending] = useState<CachedSku | null>(null);
@@ -139,9 +111,6 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   // 任一弹卡打开时暂停扫码（onBarcodeScanned 会高频触发）
   const sheetOpenRef = useRef(false);
-  // 扫码框限制：连续多次被框过滤（疑似本机型坐标不可用）则自动放开，避免完全扫不出
-  const regionLimitRef = useRef(true);
-  const rejectStreakRef = useRef(0);
 
   // 扫码成功提示音
   const beep = useAudioPlayer(require("../../assets/beep.wav"));
@@ -174,33 +143,8 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
     setPending(cached);
   }
 
-  /** 条码中心是否落在绿色扫描框内（布局未知时放行） */
-  function insideFrame(c: { x: number; y: number }): boolean {
-    const { w, h } = camSize;
-    if (w <= 0 || h <= 0) return true;
-    const half = FRAME_SIZE / 2;
-    const cx = w / 2;
-    const cy = h / 2;
-    return (
-      c.x >= cx - half &&
-      c.x <= cx + half &&
-      c.y >= cy - half &&
-      c.y <= cy + half
-    );
-  }
-
   async function handleScanned(e: ScanResult) {
     if (sheetOpenRef.current) return; // 已有弹卡，暂停识别
-    if (regionLimitRef.current) {
-      const c = scanCenter(e);
-      // 拿到坐标且不在绿框内 → 忽略；连续被过滤太多次则判定本机型坐标不可用，自动放开
-      if (c && !insideFrame(c)) {
-        rejectStreakRef.current += 1;
-        if (rejectStreakRef.current >= 25) regionLimitRef.current = false;
-        return;
-      }
-    }
-    rejectStreakRef.current = 0;
     sheetOpenRef.current = true; // 立即上锁，避免同一画面重复触发
     await lookupAndPrompt(e.data);
   }
@@ -399,15 +343,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
         </Text>
       </View>
 
-      <View
-        style={styles.cameraWrap}
-        onLayout={(ev) =>
-          setCamSize({
-            w: ev.nativeEvent.layout.width,
-            h: ev.nativeEvent.layout.height,
-          })
-        }
-      >
+      <View style={styles.cameraWrap}>
         <CameraView
           style={StyleSheet.absoluteFill}
           enableTorch={torch}
