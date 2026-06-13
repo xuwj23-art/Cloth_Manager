@@ -587,9 +587,9 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
           <Text style={styles.notFoundTitle}>手动输入条码</Text>
           <TextInput
             style={styles.manualInput}
-            placeholder="输入吊牌上的条码/编号"
+            placeholder="输入吊牌下方的数字编号"
             autoFocus
-            autoCapitalize="characters"
+            keyboardType="number-pad"
             value={manualCode}
             onChangeText={setManualCode}
             onSubmitEditing={submitManual}

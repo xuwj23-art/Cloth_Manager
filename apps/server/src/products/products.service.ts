@@ -48,15 +48,47 @@ const DEMO_PRODUCTS = [
 export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** 为 SKU 生成全局唯一编号（QR 内容）。门店前缀 + 短随机串。 */
-  private generateBarcode(shopId: string): string {
-    const prefix = shopId.replace(/-/g, "").slice(0, 4).toUpperCase();
-    const rand = randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase();
-    return `${prefix}-${rand}`;
+  /** 生成 10 位纯数字条码（首位非 0），便于手动输入（数字键盘，无字母/横杠） */
+  private genNumericBarcode(): string {
+    let s = String(1 + Math.floor(Math.random() * 9));
+    for (let i = 0; i < 9; i++) s += Math.floor(Math.random() * 10);
+    return s;
+  }
+
+  /** 生成 count 个全局唯一的纯数字条码（查库去重 + 批内去重，冲突自动重试） */
+  private async generateUniqueBarcodes(count: number): Promise<string[]> {
+    if (count <= 0) return [];
+    const result: string[] = [];
+    const used = new Set<string>();
+    while (result.length < count) {
+      const batch: string[] = [];
+      while (batch.length < count - result.length) {
+        const c = this.genNumericBarcode();
+        if (!used.has(c)) {
+          used.add(c);
+          batch.push(c);
+        }
+      }
+      const existing = await this.prisma.sku.findMany({
+        where: { barcode: { in: batch } },
+        select: { barcode: true },
+      });
+      const taken = new Set(existing.map((e) => e.barcode));
+      for (const c of batch) {
+        if (!taken.has(c)) result.push(c);
+      }
+    }
+    return result;
   }
 
   /** 新建商品款（含批量 SKU），杂款建档核心入口 */
   async createProduct(shopId: string, input: CreateProductInput) {
+    // 仅为未显式带条码的 SKU 预生成唯一纯数字条码
+    const generated = await this.generateUniqueBarcodes(
+      input.skus.filter((s) => !s.barcode).length,
+    );
+    let gi = 0;
+
     return this.prisma.product.create({
       data: {
         shopId,
@@ -68,7 +100,7 @@ export class ProductsService {
           create: input.skus.map((s) => ({
             color: s.color,
             size: s.size,
-            barcode: s.barcode ?? this.generateBarcode(shopId),
+            barcode: s.barcode ?? generated[gi++]!,
             costPrice: s.costPrice,
             salePrice: s.salePrice,
             stock: s.initialStock ?? 0,
