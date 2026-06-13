@@ -53,17 +53,21 @@ function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
 }
 
-/** 取条码在预览坐标系中的中心点；拿不到坐标返回 null */
+/**
+ * 取条码在预览「视图坐标系」中的中心点；拿不到坐标返回 null。
+ * expo-camera v17 已把 cornerPoints/bounds 映射到视图坐标（含缩放/裁剪补偿），
+ * 优先用更可靠的 cornerPoints。
+ */
 function scanCenter(e: ScanResult): { x: number; y: number } | null {
-  const b = e.bounds;
-  if (b && b.size && b.size.width > 0 && b.size.height > 0) {
-    return { x: b.origin.x + b.size.width / 2, y: b.origin.y + b.size.height / 2 };
-  }
   const pts = e.cornerPoints;
   if (Array.isArray(pts) && pts.length > 0) {
     const sx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
     const sy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
     return { x: sx, y: sy };
+  }
+  const b = e.bounds;
+  if (b && b.size && (b.size.width > 0 || b.size.height > 0)) {
+    return { x: b.origin.x + b.size.width / 2, y: b.origin.y + b.size.height / 2 };
   }
   return null;
 }
@@ -135,6 +139,9 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   // 任一弹卡打开时暂停扫码（onBarcodeScanned 会高频触发）
   const sheetOpenRef = useRef(false);
+  // 扫码框限制：连续多次被框过滤（疑似本机型坐标不可用）则自动放开，避免完全扫不出
+  const regionLimitRef = useRef(true);
+  const rejectStreakRef = useRef(0);
 
   // 扫码成功提示音
   const beep = useAudioPlayer(require("../../assets/beep.wav"));
@@ -167,17 +174,10 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
     setPending(cached);
   }
 
-  /**
-   * 条码中心是否落在绿色扫描框内。
-   * 安全降级：拿不到坐标、布局未知、或坐标明显超出预览视图范围（部分 Android 返回
-   * 图像像素坐标而非视图坐标）时一律放行，确保任何情况下都不会因过滤而扫不出码。
-   */
-  function insideFrame(c: { x: number; y: number } | null): boolean {
-    if (!c) return true;
+  /** 条码中心是否落在绿色扫描框内（布局未知时放行） */
+  function insideFrame(c: { x: number; y: number }): boolean {
     const { w, h } = camSize;
     if (w <= 0 || h <= 0) return true;
-    // 坐标不在预览视图范围内 → 不是视图坐标系，放行
-    if (c.x < 0 || c.y < 0 || c.x > w || c.y > h) return true;
     const half = FRAME_SIZE / 2;
     const cx = w / 2;
     const cy = h / 2;
@@ -191,7 +191,16 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
 
   async function handleScanned(e: ScanResult) {
     if (sheetOpenRef.current) return; // 已有弹卡，暂停识别
-    if (!insideFrame(scanCenter(e))) return; // 不在绿框内，忽略
+    if (regionLimitRef.current) {
+      const c = scanCenter(e);
+      // 拿到坐标且不在绿框内 → 忽略；连续被过滤太多次则判定本机型坐标不可用，自动放开
+      if (c && !insideFrame(c)) {
+        rejectStreakRef.current += 1;
+        if (rejectStreakRef.current >= 25) regionLimitRef.current = false;
+        return;
+      }
+    }
+    rejectStreakRef.current = 0;
     sheetOpenRef.current = true; // 立即上锁，避免同一画面重复触发
     await lookupAndPrompt(e.data);
   }

@@ -279,6 +279,23 @@ export class SalesService {
     return this.getOrder(shopId, id);
   }
 
+  /** 某一天（本地日期 YYYY-MM-DD）的销售流水，按时间倒序 */
+  async listByDay(shopId: string, date: string): Promise<SaleOrderDetail[]> {
+    const [y, m, d] = date.split("-").map(Number);
+    if (!y || !m || !d) return [];
+    const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+    const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+    const orders = await this.prisma.saleOrder.findMany({
+      where: { shopId, createdAt: { gte: start, lt: end } },
+      include: {
+        operator: true,
+        items: { include: { sku: { include: { product: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return orders.map((o) => this.toDetail(o));
+  }
+
   /** 单据详情 */
   async getOrder(shopId: string, id: string): Promise<SaleOrderDetail> {
     const order = await this.prisma.saleOrder.findUnique({

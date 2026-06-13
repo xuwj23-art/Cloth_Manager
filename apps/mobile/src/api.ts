@@ -234,6 +234,11 @@ export function getMonthlySales(
   return request(`/sales/monthly?year=${year}&month=${month}`);
 }
 
+/** 某天销售流水（按时间倒序）：date=YYYY-MM-DD */
+export function getSalesByDay(date: string): Promise<SaleOrderDetail[]> {
+  return request(`/sales/by-day?date=${encodeURIComponent(date)}`);
+}
+
 /** 上传图片，返回相对路径（如 /uploads/xxx.jpg） */
 export async function uploadImage(localUri: string): Promise<string> {
   const form = new FormData();

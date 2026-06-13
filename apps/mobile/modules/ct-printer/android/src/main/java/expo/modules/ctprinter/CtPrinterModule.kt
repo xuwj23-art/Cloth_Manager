@@ -204,9 +204,15 @@ class CtPrinterModule : Module() {
               val scale = (t["scale"] as? Number)?.toInt() ?: 1
               val text = t["text"] as? String ?: ""
               if (text.isEmpty()) continue
+              val rotate = when ((t["rotate"] as? Number)?.toInt() ?: 0) {
+                90 -> Rotate.Degree90
+                180 -> Rotate.Degree180
+                270 -> Rotate.Degree270
+                else -> Rotate.Degree0
+              }
               ctpl.drawText(
                 Point((xMm * dotsPerMm).toInt(), (yMm * dotsPerMm).toInt()),
-                Rotate.Degree0,
+                rotate,
                 scale,
                 scale,
                 text,

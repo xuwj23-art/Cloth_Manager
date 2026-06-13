@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -17,7 +17,12 @@ import type {
   SalesReport,
   SalesStat,
 } from "@cloth-scan/shared";
-import { getMonthlySales, getSalesReport, listSales } from "../api";
+import {
+  getMonthlySales,
+  getSalesByDay,
+  getSalesReport,
+  listSales,
+} from "../api";
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
@@ -29,6 +34,12 @@ function formatTime(iso: string): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(
     d.getMinutes(),
   )}`;
+}
+
+function formatClock(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /** YYYY-MM-DD → 「M月D日 周X」 */
@@ -49,6 +60,7 @@ function lastMonths(n: number): { year: number; month: number }[] {
   });
 }
 
+type SelMonth = { year: number; month: number };
 type TabKey = SalesRange | "history";
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -163,10 +175,16 @@ export function SalesScreen({
   const [error, setError] = useState<string | null>(null);
 
   const months = useMemo(() => lastMonths(12), []);
-  const [sel, setSel] = useState(months[0]!);
+  const [sel, setSel] = useState<SelMonth>(months[0]!);
+  const [monthOpen, setMonthOpen] = useState(false);
+
+  // 历史 → 点某天查看当日流水
+  const [day, setDay] = useState<string | null>(null);
+  const [dayOrders, setDayOrders] = useState<SaleOrderDetail[]>([]);
+  const [dayLoading, setDayLoading] = useState(false);
 
   const load = useCallback(
-    async (t: TabKey, m: { year: number; month: number }) => {
+    async (t: TabKey, m: SelMonth) => {
       setLoading(true);
       setError(null);
       try {
@@ -193,6 +211,25 @@ export function SalesScreen({
     void load(tab, sel);
   }, [load, tab, sel]);
 
+  const openDay = useCallback(async (date: string) => {
+    setDay(date);
+    setDayLoading(true);
+    try {
+      setDayOrders(await getSalesByDay(date));
+    } catch {
+      setDayOrders([]);
+    } finally {
+      setDayLoading(false);
+    }
+  }, []);
+
+  function switchTab(next: TabKey) {
+    setDay(null);
+    setTab(next);
+  }
+
+  const soldDays = (monthly?.days ?? []).filter((d) => d.orders > 0);
+
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
@@ -208,7 +245,7 @@ export function SalesScreen({
           <Pressable
             key={t.key}
             style={[styles.tab, tab === t.key && styles.tabActive]}
-            onPress={() => setTab(t.key)}
+            onPress={() => switchTab(t.key)}
           >
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>
               {t.label}
@@ -217,36 +254,49 @@ export function SalesScreen({
         ))}
       </View>
 
-      {tab === "history" ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.monthScroll}
-          contentContainerStyle={styles.monthRow}
-        >
-          {months.map((m) => {
-            const active = m.year === sel.year && m.month === sel.month;
-            return (
-              <Pressable
-                key={`${m.year}-${m.month}`}
-                style={[styles.monthChip, active && styles.monthChipActive]}
-                onPress={() => setSel(m)}
-              >
-                <Text
-                  style={[
-                    styles.monthChipText,
-                    active && styles.monthChipTextActive,
-                  ]}
-                >
-                  {m.year}年{m.month}月
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+      {tab === "history" && day === null ? (
+        <Pressable style={styles.monthSelect} onPress={() => setMonthOpen(true)}>
+          <Text style={styles.monthSelectText}>
+            {sel.year}年{sel.month}月
+          </Text>
+          <Text style={styles.monthSelectCaret}>▾</Text>
+        </Pressable>
       ) : null}
 
-      {loading ? (
+      {/* 历史 → 当日流水明细 */}
+      {tab === "history" && day !== null ? (
+        <FlatList
+          data={dayOrders}
+          keyExtractor={(o) => o.id}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            <View>
+              <Pressable style={styles.dayBack} onPress={() => setDay(null)}>
+                <Text style={styles.dayBackText}>‹ {sel.month}月明细</Text>
+              </Pressable>
+              <Text style={styles.dayTitle}>{formatDay(day)}</Text>
+              {dayLoading ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
+            </View>
+          }
+          ListEmptyComponent={
+            dayLoading ? null : (
+              <Text style={styles.empty}>当日暂无流水</Text>
+            )
+          }
+          renderItem={({ item }) => (
+            <Pressable style={styles.orderCard} onPress={() => onOpenOrder(item.id)}>
+              <View style={styles.orderLeft}>
+                <Text style={styles.orderTime}>{formatClock(item.createdAt)}</Text>
+                <Text style={styles.orderMeta}>
+                  {item.itemCount} 件
+                  {item.operatorName ? ` · ${item.operatorName}` : ""}
+                </Text>
+              </View>
+              <Text style={styles.orderAmount}>{yuan(item.totalAmount)}</Text>
+            </Pressable>
+          )}
+        />
+      ) : loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" />
         </View>
@@ -259,7 +309,7 @@ export function SalesScreen({
         </View>
       ) : tab === "history" ? (
         <FlatList<DailySalesStat>
-          data={monthly?.days ?? []}
+          data={soldDays}
           keyExtractor={(d) => d.date}
           onRefresh={() => load(tab, sel)}
           refreshing={loading}
@@ -269,7 +319,7 @@ export function SalesScreen({
               <View>
                 <TotalCard total={monthly.total} />
                 <OperatorCard ops={monthly.byOperator} />
-                <Text style={styles.sectionTitle}>每日明细（1 号 → 月末）</Text>
+                <Text style={styles.sectionTitle}>每日明细</Text>
               </View>
             ) : null
           }
@@ -277,27 +327,28 @@ export function SalesScreen({
             <Text style={styles.empty}>该月暂无销售记录</Text>
           }
           renderItem={({ item }) => (
-            <View
-              style={[styles.dayRow, item.orders === 0 && styles.dayRowEmpty]}
-            >
+            <Pressable style={styles.dayRow} onPress={() => openDay(item.date)}>
               <View>
                 <Text style={styles.dayDate}>{formatDay(item.date)}</Text>
                 <Text style={styles.dayMeta}>
                   {item.orders} 单 · {item.quantity} 件
                 </Text>
               </View>
-              <View style={{ alignItems: "flex-end" }}>
-                <Text style={styles.dayRevenue}>{yuan(item.revenue)}</Text>
-                <Text
-                  style={[
-                    styles.dayProfit,
-                    { color: item.profit >= 0 ? "#16a34a" : "#dc2626" },
-                  ]}
-                >
-                  利 {yuan(item.profit)}
-                </Text>
+              <View style={styles.dayRight}>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={styles.dayRevenue}>{yuan(item.revenue)}</Text>
+                  <Text
+                    style={[
+                      styles.dayProfit,
+                      { color: item.profit >= 0 ? "#16a34a" : "#dc2626" },
+                    ]}
+                  >
+                    利 {yuan(item.profit)}
+                  </Text>
+                </View>
+                <Text style={styles.dayCaret}>›</Text>
               </View>
-            </View>
+            </Pressable>
           )}
         />
       ) : (
@@ -336,6 +387,49 @@ export function SalesScreen({
           )}
         />
       )}
+
+      {/* 月份选择 */}
+      <Modal
+        visible={monthOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMonthOpen(false)}
+      >
+        <Pressable
+          style={styles.monthBackdrop}
+          onPress={() => setMonthOpen(false)}
+        />
+        <View style={styles.monthSheet}>
+          <Text style={styles.monthSheetTitle}>选择月份</Text>
+          <FlatList
+            data={months}
+            keyExtractor={(m) => `${m.year}-${m.month}`}
+            renderItem={({ item }) => {
+              const active = item.year === sel.year && item.month === sel.month;
+              return (
+                <Pressable
+                  style={[styles.monthItem, active && styles.monthItemActive]}
+                  onPress={() => {
+                    setSel(item);
+                    setDay(null);
+                    setMonthOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.monthItemText,
+                      active && styles.monthItemTextActive,
+                    ]}
+                  >
+                    {item.year}年{item.month}月
+                  </Text>
+                  {active ? <Text style={styles.monthCheck}>✓</Text> : null}
+                </Pressable>
+              );
+            }}
+          />
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -370,17 +464,21 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: "#2563eb" },
   tabText: { fontSize: 15, fontWeight: "700", color: "#475569" },
   tabTextActive: { color: "#fff" },
-  monthScroll: { maxHeight: 50, flexGrow: 0 },
-  monthRow: { paddingHorizontal: 12, paddingBottom: 8, gap: 8 },
-  monthChip: {
+  monthSelect: {
+    marginHorizontal: 12,
+    marginBottom: 6,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: "#f1f5f9",
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#dbe2ea",
+    backgroundColor: "#f8fafc",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-  monthChipActive: { backgroundColor: "#1d4ed8" },
-  monthChipText: { fontSize: 14, fontWeight: "700", color: "#475569" },
-  monthChipTextActive: { color: "#fff" },
+  monthSelectText: { fontSize: 16, fontWeight: "700", color: "#1f2937" },
+  monthSelectCaret: { fontSize: 14, color: "#6b7280" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   list: { padding: 12, gap: 10 },
   totalCard: {
@@ -466,11 +564,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#eee",
   },
-  dayRowEmpty: { opacity: 0.45 },
   dayDate: { fontSize: 15, fontWeight: "700", color: "#111" },
   dayMeta: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  dayRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayRevenue: { fontSize: 16, fontWeight: "800", color: "#e11d48" },
   dayProfit: { fontSize: 12, marginTop: 2 },
+  dayCaret: { fontSize: 20, color: "#cbd5e1", fontWeight: "700" },
+  dayBack: { paddingVertical: 4, marginBottom: 4 },
+  dayBackText: { fontSize: 15, color: "#2563eb", fontWeight: "700" },
+  dayTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111",
+    marginBottom: 8,
+  },
   orderCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -493,4 +600,36 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   retryText: { color: "#2563eb" },
+  monthBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  monthSheet: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    top: "18%",
+    maxHeight: "64%",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+  },
+  monthSheetTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111",
+    marginBottom: 8,
+  },
+  monthItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 13,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  monthItemActive: { backgroundColor: "#eff6ff" },
+  monthItemText: { fontSize: 16, color: "#1f2937", fontWeight: "600" },
+  monthItemTextActive: { color: "#2563eb", fontWeight: "800" },
+  monthCheck: { fontSize: 16, color: "#2563eb", fontWeight: "800" },
 });

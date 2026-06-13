@@ -6,7 +6,11 @@ export interface LabelSizeMm {
   heightMm: number;
 }
 
-export const DEFAULT_LABEL_SIZE: LabelSizeMm = { widthMm: 40, heightMm: 60 };
+/** 物理标签尺寸基准：60×40（60mm 那条边为进纸/打印头方向） */
+export const DEFAULT_LABEL_SIZE: LabelSizeMm = { widthMm: 60, heightMm: 40 };
+
+/** 打印方向：landscape=内容正排；portrait=内容旋转 90°（横版纸印出纵向阅读的标签） */
+export type LabelOrientation = "landscape" | "portrait";
 
 /** TSPL 价格用全角￥，多数热敏机的中文字库都含该字形，避免缺字 */
 function yuanLabel(cents: number): string {
@@ -14,8 +18,8 @@ function yuanLabel(cents: number): string {
 }
 
 /**
- * 估算 drawText 文本宽度（mm）。CTPL 默认点阵字体：ASCII≈12 点/字、中文≈24 点/字（scale=1），
- * scale 为整数放大倍数。用于把文本水平居中。
+ * 估算 drawText 文本长度（mm，沿文字阅读方向）。CTPL 默认点阵字体：
+ * ASCII≈12 点/字、中文/全角≈24 点/字（scale=1），scale 为整数放大倍数。
  */
 function textWidthMm(text: string, scale: number, dpi: number): number {
   const dotsPerMm = dpi / 25.4;
@@ -38,18 +42,14 @@ function estimateQrModules(dataLen: number): number {
 /**
  * 把商品 + 各 SKU 打印份数，排版成一次蓝牙打印任务。
  *
- * 新版布局（纵向 40×60 为基准，二维码为主、简洁美观）：
- *   ┌─────────┐
- *   │ ███ 大二维码 ███ │  ← 顶部居中，尽量大
- *   │  SKU 条码文本   │  ← 供人工输入兜底（限定在宽度内不溢出）
- *   │    ￥价格        │  ← 字号偏小
- *   └─────────┘
+ * 物理标签固定为 60×40（60mm 进纸方向）。orientation 决定内容朝向：
+ *  - landscape（正排）：二维码居中靠上，SKU、价格在下方居中。
+ *  - portrait（纵向）：把内容旋转 90° 印在 60×40 横版纸上——二维码在打印画布左侧
+ *    （占满 40mm 高、尽量大），SKU/价格文本旋转 90° 排在右侧。打印出来后把标签
+ *    转 90° 拿在手里，即是「二维码在上、SKU、价格在下」的纵向标签（40 宽 × 60 高）。
  *
- * 关键约束：
- *  - 二维码宽度自动限制在标签宽度内（按条码长度估算模块数，必要时缩小 qrCell）。
- *  - SKU 条码文本用 scale=1，估算宽度不超过标签宽度（吊牌条码约 17 字符 ≈ 25mm < 40mm）。
- * 注：二维码实际尺寸随条码长度变化，本函数按估算值居中；首次实物试打后如有偏移，
- * 可微调 qrCell / qrXAdjustMm / 各行 Y 坐标常量。
+ * 注：二维码尺寸随条码长度变化，按估算值居中；首次实物试打如有偏移，可微调
+ * 下方常量（portrait 文本若上下颠倒/错位，把 PORTRAIT_TEXT_ROTATE 在 90/270 之间切换）。
  */
 export function buildCtPrintJob(
   product: ProductWithSkus,
@@ -59,13 +59,15 @@ export function buildCtPrintJob(
     dpi?: number;
     qrCell?: number;
     qrXAdjustMm?: number;
+    orientation?: LabelOrientation;
   },
 ): CtPrintJob {
   const size = opts?.size ?? DEFAULT_LABEL_SIZE;
   const dpi = opts?.dpi ?? 203;
   const dotsPerMm = dpi / 25.4;
-  // 二维码水平微调（mm，正=右移）。估算的二维码尺寸会让其略偏左，默认右移一点居中
-  const qrXAdjustMm = opts?.qrXAdjustMm ?? 1.5;
+  const orientation = opts?.orientation ?? "landscape";
+  const W = size.widthMm;
+  const H = size.heightMm;
 
   // 用一个待打印的条码估算二维码尺寸（同款各 SKU 条码长度相近）
   const sample =
@@ -74,21 +76,56 @@ export function buildCtPrintJob(
     "";
   const modules = estimateQrModules(sample.length);
 
-  // 期望更大的二维码（默认 cell=8），但必须保证整体宽度不超出标签（留 ~4mm 边距）
-  const wantCell = opts?.qrCell ?? 8;
+  if (orientation === "portrait") {
+    return buildPortrait(product, qtyBySku, {
+      W,
+      H,
+      dpi,
+      dotsPerMm,
+      modules,
+      wantCell: opts?.qrCell ?? 8,
+    });
+  }
+  return buildLandscape(product, qtyBySku, {
+    W,
+    H,
+    dpi,
+    dotsPerMm,
+    modules,
+    wantCell: opts?.qrCell ?? 6,
+    qrXAdjustMm: opts?.qrXAdjustMm ?? 2.5,
+  });
+}
+
+interface BuildCtx {
+  W: number;
+  H: number;
+  dpi: number;
+  dotsPerMm: number;
+  modules: number;
+  wantCell: number;
+}
+
+/** 正排（横版）：二维码居中靠上，SKU、价格在下方居中 */
+function buildLandscape(
+  product: ProductWithSkus,
+  qtyBySku: Record<string, number>,
+  ctx: BuildCtx & { qrXAdjustMm: number },
+): CtPrintJob {
+  const { W, H, dpi, dotsPerMm, modules, wantCell, qrXAdjustMm } = ctx;
+  // 二维码尺寸：宽度不超出标签，且给下方两行文本留约 11mm
   const maxCell = Math.max(
     3,
-    Math.floor(((size.widthMm - 4) * dotsPerMm) / modules),
+    Math.floor((Math.min(W - 4, H - 11) * dotsPerMm) / modules),
   );
   const qrCell = Math.min(wantCell, maxCell);
   const qrSizeMm = (modules * qrCell) / dotsPerMm;
 
-  const qrYMm = 4;
-  const qrXMm = Math.max(1, (size.widthMm - qrSizeMm) / 2 + qrXAdjustMm);
-  const codeYMm = qrYMm + qrSizeMm + 2; // 二维码下方
-  const priceYMm = codeYMm + 4; // 价格行（字号偏小）
-
-  const centerX = (w: number) => Math.max(1, (size.widthMm - w) / 2);
+  const qrYMm = 2;
+  const qrXMm = Math.max(1, (W - qrSizeMm) / 2 + qrXAdjustMm);
+  const codeYMm = qrYMm + qrSizeMm + 1.5;
+  const priceYMm = codeYMm + 4.5;
+  const centerX = (w: number) => Math.max(1, (W - w) / 2);
 
   const labels: CtLabel[] = [];
   for (const sku of product.skus) {
@@ -100,23 +137,71 @@ export function buildCtPrintJob(
       qr: sku.barcode,
       copies,
       texts: [
-        // SKU 条码：scale=1（最小可读字号），保证不超出标签宽度
         { xMm: centerX(textWidthMm(code, 1, dpi)), yMm: codeYMm, scale: 1, text: code },
-        // 价格：字号调小（scale=1）
-        { xMm: centerX(textWidthMm(price, 1, dpi)), yMm: priceYMm, scale: 1, text: price },
+        { xMm: centerX(textWidthMm(price, 2, dpi)), yMm: priceYMm, scale: 2, text: price },
       ],
     });
   }
+  return { widthMm: W, heightMm: H, dpi, qrXMm, qrYMm, qrCell, labels };
+}
 
-  return {
-    widthMm: size.widthMm,
-    heightMm: size.heightMm,
-    dpi,
-    qrXMm,
-    qrYMm,
-    qrCell,
-    labels,
-  };
+/** portrait 文本旋转角度；若实物上下颠倒/错位，在 90 / 270 间切换 */
+const PORTRAIT_TEXT_ROTATE = 90;
+
+/**
+ * 纵向（旋转 90°）：在 60×40 横版画布上，二维码靠左占满高度，SKU、价格旋转 90° 排右侧。
+ * 打印后把标签转 90°，即为「二维码在上 / SKU / 价格在下」的纵向标签。
+ */
+function buildPortrait(
+  product: ProductWithSkus,
+  qtyBySku: Record<string, number>,
+  ctx: BuildCtx,
+): CtPrintJob {
+  const { W, H, dpi, dotsPerMm, modules, wantCell } = ctx;
+  // 二维码尽量大：受限于画布高度（H），并保证右侧能放下两列旋转文本（约 14mm）
+  const maxCell = Math.max(
+    3,
+    Math.floor((Math.min(H - 3, W - 14) * dotsPerMm) / modules),
+  );
+  const qrCell = Math.min(wantCell, maxCell);
+  const qrSizeMm = (modules * qrCell) / dotsPerMm;
+
+  const qrXMm = 2;
+  const qrYMm = Math.max(1, (H - qrSizeMm) / 2);
+
+  // 旋转文本沿画布纵向（H 方向）阅读，长度需 ≤ H；按长度在 H 内居中
+  const codeXMm = qrXMm + qrSizeMm + 3;
+  const priceXMm = codeXMm + 5;
+  const centerY = (lenMm: number) => Math.max(1, (H + lenMm) / 2);
+
+  const labels: CtLabel[] = [];
+  for (const sku of product.skus) {
+    const copies = qtyBySku[sku.id] ?? 0;
+    if (copies <= 0) continue;
+    const code = sku.barcode;
+    const price = yuanLabel(sku.salePrice);
+    labels.push({
+      qr: sku.barcode,
+      copies,
+      texts: [
+        {
+          xMm: codeXMm,
+          yMm: centerY(textWidthMm(code, 1, dpi)),
+          scale: 1,
+          rotate: PORTRAIT_TEXT_ROTATE,
+          text: code,
+        },
+        {
+          xMm: priceXMm,
+          yMm: centerY(textWidthMm(price, 1, dpi)),
+          scale: 1,
+          rotate: PORTRAIT_TEXT_ROTATE,
+          text: price,
+        },
+      ],
+    });
+  }
+  return { widthMm: W, heightMm: H, dpi, qrXMm, qrYMm, qrCell, labels };
 }
 
 /** 该任务总标签张数 */

@@ -74,6 +74,13 @@ export class SalesController {
     return this.sales.monthlyReport(user.shopId, safeYear, safeMonth);
   }
 
+  /** 某天销售流水：店主专属。date=YYYY-MM-DD */
+  @Get("by-day")
+  @Roles("owner")
+  byDay(@CurrentUser() user: RequestUser, @Query("date") date?: string) {
+    return this.sales.listByDay(user.shopId, date ?? "");
+  }
+
   /** 单据详情：店主专属 */
   @Get(":id")
   @Roles("owner")

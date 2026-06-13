@@ -27,11 +27,18 @@ import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.type
 
 /** 常见服装吊牌/不干胶尺寸（mm） */
 const LABEL_SIZES = [
-  { id: "40x60", label: "40×60", w: 40, h: 60 },
   { id: "60x40", label: "60×40", w: 60, h: 40 },
   { id: "40x30", label: "40×30", w: 40, h: 30 },
   { id: "50x30", label: "50×30", w: 50, h: 30 },
+  { id: "40x60", label: "40×60", w: 40, h: 60 },
 ] as const;
+
+const ORIENTATIONS = [
+  { id: "portrait", label: "纵向" },
+  { id: "landscape", label: "横向" },
+] as const;
+
+type Orientation = (typeof ORIENTATIONS)[number]["id"];
 
 type LabelSize = (typeof LABEL_SIZES)[number];
 
@@ -63,14 +70,26 @@ interface LabelItem {
   price: string;
 }
 
-function buildLabelsHtml(labels: LabelItem[], size: LabelSize): string {
+function buildLabelsHtml(
+  labels: LabelItem[],
+  size: LabelSize,
+  orientation: Orientation,
+): string {
+  const portrait = orientation === "portrait";
+  // 纵向：物理标签仍是 size.w×size.h，但内容按 (h×w) 排版后旋转 90° 填入
+  const innerW = portrait ? size.h : size.w;
+  const innerH = portrait ? size.w : size.h;
   const cells = labels
     .map(
       (l) => `
     <div class="label" style="width:${size.w}mm;height:${size.h}mm;">
-      <img class="qr" src="data:image/png;base64,${l.qr}"/>
-      <div class="code">${escapeHtml(l.code)}</div>
-      <div class="price">${escapeHtml(l.price)}</div>
+      <div class="inner" style="width:${innerW}mm;height:${innerH}mm;${
+        portrait ? "transform:rotate(90deg);" : ""
+      }">
+        <img class="qr" src="data:image/png;base64,${l.qr}"/>
+        <div class="code">${escapeHtml(l.code)}</div>
+        <div class="price">${escapeHtml(l.price)}</div>
+      </div>
     </div>`,
     )
     .join("");
@@ -79,8 +98,10 @@ function buildLabelsHtml(labels: LabelItem[], size: LabelSize): string {
   <style>
     *{box-sizing:border-box;}
     body{margin:0;padding:4mm;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;}
-    .label{display:flex;flex-direction:column;align-items:center;justify-content:center;
-      border:1px dashed #bbb;padding:1.5mm;margin:1mm;float:left;overflow:hidden;}
+    .label{border:1px dashed #bbb;margin:1mm;float:left;overflow:hidden;
+      display:flex;align-items:center;justify-content:center;}
+    .inner{display:flex;flex-direction:column;align-items:center;justify-content:center;
+      padding:1.5mm;overflow:hidden;}
     .qr{height:64%;width:auto;aspect-ratio:1;}
     .code{font-size:7pt;letter-spacing:0.3px;color:#222;margin-top:1mm;
       max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -96,6 +117,7 @@ export function LabelPrintScreen({
   onBack: () => void;
 }) {
   const [size, setSize] = useState<LabelSize>(LABEL_SIZES[0]);
+  const [orientation, setOrientation] = useState<Orientation>("portrait");
   const [qty, setQty] = useState<Record<string, number>>(() =>
     Object.fromEntries(product.skus.map((s) => [s.id, 1])),
   );
@@ -141,7 +163,7 @@ export function LabelPrintScreen({
         Alert.alert("请至少选择 1 个规格的份数");
         return;
       }
-      await Print.printAsync({ html: buildLabelsHtml(labels, size) });
+      await Print.printAsync({ html: buildLabelsHtml(labels, size, orientation) });
     } catch (e) {
       Alert.alert("打印失败", (e as Error).message);
     } finally {
@@ -158,7 +180,7 @@ export function LabelPrintScreen({
         return;
       }
       const { uri } = await Print.printToFileAsync({
-        html: buildLabelsHtml(labels, size),
+        html: buildLabelsHtml(labels, size, orientation),
       });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: "application/pdf" });
@@ -216,6 +238,7 @@ export function LabelPrintScreen({
     }
     const job = buildCtPrintJob(product, qty, {
       size: { widthMm: size.w, heightMm: size.h },
+      orientation,
     });
     if (job.labels.length === 0) {
       Alert.alert("请至少选择 1 个规格的份数");
@@ -258,6 +281,26 @@ export function LabelPrintScreen({
               style={[styles.sizeChipText, size.id === s.id && styles.sizeChipTextOn]}
             >
               {s.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={styles.sizeRow}>
+        <Text style={styles.sizeLabel}>打印方向</Text>
+        {ORIENTATIONS.map((o) => (
+          <Pressable
+            key={o.id}
+            style={[styles.sizeChip, orientation === o.id && styles.sizeChipOn]}
+            onPress={() => setOrientation(o.id)}
+          >
+            <Text
+              style={[
+                styles.sizeChipText,
+                orientation === o.id && styles.sizeChipTextOn,
+              ]}
+            >
+              {o.label}
             </Text>
           </Pressable>
         ))}
