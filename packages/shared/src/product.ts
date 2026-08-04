@@ -30,6 +30,8 @@ export const ProductSchema = z.object({
   images: z.array(z.string().max(512)).default([]),
   /** 软下架/归档时间（null = 在售） */
   archivedAt: z.string().datetime().nullable().optional(),
+  /** 软删除时间（null = 未删除）。已删除的商品永不复活（PRD §7 规则 5） */
+  deletedAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -107,4 +109,24 @@ export function expandSkuMatrix(params: {
     }
   }
   return result;
+}
+
+/**
+ * 判断商品当前是否应处于「已归档/售罄」状态（PRD §7 规则 7）。
+ * - 已删除（deletedAt 非空）→ 不复活，返回当前 archivedAt 状态
+ * - 总库存 <= 0 且未归档 → 应归档（返回当前时间戳 ISO）
+ * - 总库存 > 0 且已归档 → 应恢复（返回 null）
+ * - 否则保持现状（返回当前 archivedAt）
+ *
+ * 前后端共用，确保归档语义一致（PRD §7 规则 5：软删除不复活）。
+ */
+export function shouldArchive(opts: {
+  totalStock: number;
+  archivedAt: string | null;
+  deletedAt: string | null;
+}): string | null {
+  if (opts.deletedAt) return opts.archivedAt; // 已删不复活
+  if (opts.totalStock <= 0 && !opts.archivedAt) return new Date().toISOString(); // 售罄归档
+  if (opts.totalStock > 0 && opts.archivedAt) return null; // 补货恢复
+  return opts.archivedAt; // 保持
 }

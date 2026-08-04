@@ -9,7 +9,7 @@ import type {
   ProductScope,
   UpdateProductInput,
 } from "@cloth-scan/shared";
-import { expandSkuMatrix } from "@cloth-scan/shared";
+import { expandSkuMatrix, shouldArchive } from "@cloth-scan/shared";
 import { PrismaService } from "../prisma/prisma.service";
 
 /** Prisma 事务客户端（$transaction 回调参数）。用宽松类型避免引入庞大的生成类型。 */
@@ -257,28 +257,31 @@ export class ProductsService {
   /**
    * 根据当前总库存刷新归档状态：总库存为 0 自动下架（售罄归档），
    * 重新有货则自动恢复在售。可在事务内调用（销售扣减后、盘点改库存后）。
+   *
+   * 归档判定逻辑抽到 shared 的 {@link shouldArchive}，前端可复用同一语义。
    */
   async recomputeArchive(tx: TxClient, productId: string): Promise<void> {
     const agg = await tx.sku.aggregate({
       where: { productId },
       _sum: { stock: true },
     });
-    const total = agg._sum.stock ?? 0;
+    const totalStock = agg._sum.stock ?? 0;
     const p = await tx.product.findUnique({
       where: { id: productId },
       select: { archivedAt: true, deletedAt: true },
     });
-    // 已删除商品保持删除态：回滚库存到它身上时不要把它「复活」成在售
-    if (p?.deletedAt) return;
-    if (total <= 0 && !p?.archivedAt) {
+    // 当前归档态归一化为 ISO 字符串（Prisma 返回 Date | null）
+    const archivedAt = p?.archivedAt instanceof Date ? p.archivedAt.toISOString() : (p?.archivedAt ?? null);
+    const deletedAt =
+      p?.deletedAt instanceof Date ? p.deletedAt.toISOString() : (p?.deletedAt ?? null);
+
+    const newArchivedAt = shouldArchive({ totalStock, archivedAt, deletedAt });
+    if (newArchivedAt !== archivedAt) {
       await tx.product.update({
         where: { id: productId },
-        data: { archivedAt: new Date() },
-      });
-    } else if (total > 0 && p?.archivedAt) {
-      await tx.product.update({
-        where: { id: productId },
-        data: { archivedAt: null },
+        data: {
+          archivedAt: newArchivedAt === null ? null : new Date(newArchivedAt),
+        },
       });
     }
   }
