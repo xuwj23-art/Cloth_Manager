@@ -51,3 +51,24 @@ export async function countPendingOps(): Promise<number> {
   );
   return row?.n ?? 0;
 }
+
+/**
+ * 返回当前 pending（未同步）的 outbox 里所有涉及的 skuId（从 payload 解析）。
+ * 用于 pull 时跳过这些 SKU 的 stock 覆盖，避免乐观扣被服务端旧值冲掉（D1）。
+ */
+export async function listPendingSkuIds(): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ payload: string }>(
+    `SELECT payload FROM outbox WHERE status = 'pending'`,
+  );
+  const ids = new Set<string>();
+  for (const r of rows) {
+    try {
+      const payload = JSON.parse(r.payload) as { items?: { skuId: string }[] };
+      for (const it of payload.items ?? []) ids.add(it.skuId);
+    } catch {
+      /* 忽略损坏 payload */
+    }
+  }
+  return ids;
+}

@@ -3,6 +3,7 @@ import { ApiError, createSale, getHealth, listProducts } from "../api";
 import { upsertCatalog } from "../db/catalog";
 import {
   listPendingOps,
+  listPendingSkuIds,
   markOpFailed,
   markOpSynced,
 } from "../db/outbox";
@@ -21,10 +22,18 @@ export async function isOnline(timeoutMs = 3000): Promise<boolean> {
   }
 }
 
-/** 拉取：用服务端目录刷新本地缓存（供离线扫码） */
-export async function pullCatalog(): Promise<number> {
+/**
+ * 拉取：用服务端目录刷新本地缓存（供离线扫码）。
+ *
+ * @param pendingSkuIds 仍 pending 的 outbox 涉及的 skuId；对这些 SKU 保留本地乐观
+ *   stock，避免 pull 早于 push 到达时把扣减值冲掉（D1）。未传则内部自行读取。
+ */
+export async function pullCatalog(
+  pendingSkuIds?: Set<string>,
+): Promise<number> {
   const products = await listProducts();
-  return upsertCatalog(products);
+  const pending = pendingSkuIds ?? (await listPendingSkuIds());
+  return upsertCatalog(products, pending);
 }
 
 export interface PushResult {
@@ -69,6 +78,9 @@ export async function syncAll(): Promise<{
   pulled: number;
 }> {
   const push = await pushOutbox();
-  const pulled = await pullCatalog();
+  // pull 前抓一次 pending 涉及的 skuId，确保即便 push 后仍有残留 pending
+  // （网络/5xx），pull 也不会覆盖这些 SKU 的本地乐观 stock（D1）。
+  const pendingSkuIds = await listPendingSkuIds();
+  const pulled = await pullCatalog(pendingSkuIds);
   return { push, pulled };
 }
