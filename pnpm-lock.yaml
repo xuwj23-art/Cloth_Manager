@@ -12,7 +12,7 @@ importers:
         specifier: ^2.3.3
         version: 2.9.16
       typescript:
-        specifier: ^5.7.2
+        specifier: ~5.9.3
         version: 5.9.3
 
   apps/mobile:
@@ -158,7 +158,7 @@ importers:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@22.19.20)(typescript@5.9.3)
       typescript:
-        specifier: ^5.7.2
+        specifier: ~5.9.3
         version: 5.9.3
       vitest:
         specifier: ^2.1.8
@@ -171,7 +171,7 @@ importers:
         version: 3.25.76
     devDependencies:
       typescript:
-        specifier: ^5.7.2
+        specifier: ~5.9.3
         version: 5.9.3
       vitest:
         specifier: ^2.1.8
