@@ -121,16 +121,19 @@ export class SalesCommandService {
             include: { items: true },
           });
 
-          for (const item of itemsData) {
-            await tx.stockMovement.create({
-              data: {
+          // E7：库存流水批量化——原逐条 tx.stockMovement.create 循环 N 次往返，
+          // 改为一次 createMany 批量插入。仍在同一 Serializable 事务内，幂等/防超卖/原子性不变。
+          // opId 每条独立 randomUUID（流水 opId 仅用于本条去重日志，与订单级 opId 不同语义）。
+          if (itemsData.length > 0) {
+            await tx.stockMovement.createMany({
+              data: itemsData.map((item) => ({
                 skuId: item.skuId,
-                type: "out",
+                type: "out" as const,
                 quantity: -item.quantity,
                 refOrderId: order.id,
                 operatorId,
                 opId: randomUUID(),
-              },
+              })),
             });
           }
 
@@ -241,6 +244,14 @@ export class SalesCommandService {
     await this.prisma.$transaction(
       async (tx) => {
         const affected = new Set<string>();
+        // E7：库存流水先收集，循环结束后一次 createMany 批量插入
+        const movementData: {
+          skuId: string;
+          type: "adjust";
+          quantity: number;
+          refOrderId: string;
+          opId: string;
+        }[] = [];
         for (const r of input.items) {
           const existing = byId.get(r.id)!;
           affected.add(existing.sku.productId);
@@ -288,14 +299,12 @@ export class SalesCommandService {
                 throw new NotFoundException(`SKU 不存在：${existing.skuId}`);
               }
             }
-            await tx.stockMovement.create({
-              data: {
-                skuId: existing.skuId,
-                type: "adjust",
-                quantity: -delta,
-                refOrderId: id,
-                opId: randomUUID(),
-              },
+            movementData.push({
+              skuId: existing.skuId,
+              type: "adjust",
+              quantity: -delta,
+              refOrderId: id,
+              opId: randomUUID(),
             });
           }
           if (r.quantity === 0) {
@@ -306,6 +315,11 @@ export class SalesCommandService {
               data: { quantity: r.quantity, price: r.price, subtotal: r.price * r.quantity },
             });
           }
+        }
+
+        // 库存流水批量写入（仍在 Serializable 事务内）
+        if (movementData.length > 0) {
+          await tx.stockMovement.createMany({ data: movementData });
         }
 
         // 重算实收：各行 subtotal 之和 - 该单已记录的 orderDiscountCents（≥0）

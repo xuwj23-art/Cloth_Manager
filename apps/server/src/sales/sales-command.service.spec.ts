@@ -38,7 +38,10 @@ function makePrisma(opts: {
             items: data.items?.create ?? [],
           })),
     },
-    stockMovement: { create: vi.fn().mockResolvedValue({}) },
+    stockMovement: {
+      create: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
   };
   const prisma = {
     saleOrder: {
@@ -81,7 +84,19 @@ describe("SalesCommandService.createSale", () => {
         }),
       }),
     );
-    expect(prisma.__tx.stockMovement.create).toHaveBeenCalledTimes(1);
+    // E7：库存流水批量化，1 件商品 → 1 次 createMany（数组长度 1）
+    expect(prisma.__tx.stockMovement.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.__tx.stockMovement.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          skuId: "sku-1",
+          type: "out",
+          quantity: -2,
+          refOrderId: "order-1",
+          operatorId: "user-1",
+        }),
+      ],
+    });
   });
 
   it("重复 opId：事务内 create 撞 P2002，回查返回已存在单（幂等）", async () => {
@@ -262,7 +277,10 @@ describe("SalesCommandService.editOrder", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         update: vi.fn().mockResolvedValue({}),
       },
-      stockMovement: { create: vi.fn().mockResolvedValue({}) },
+      stockMovement: {
+        create: vi.fn().mockResolvedValue({}),
+        createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       saleItem: {
         delete: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
@@ -305,6 +323,18 @@ describe("SalesCommandService.editOrder", () => {
     expect(tx.saleOrder.update).toHaveBeenCalledWith({
       where: { id: "o1" },
       data: { totalAmount: 5000 },
+    });
+    // E7：库存调整流水批量化，delta=-1 → 1 条 adjust 流水
+    expect(tx.stockMovement.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.stockMovement.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          skuId: "s1",
+          type: "adjust",
+          quantity: 1, // -delta = -(-1) = 1（加库存）
+          refOrderId: "o1",
+        }),
+      ],
     });
     expect(result.totalAmount).toBe(5000);
   });
