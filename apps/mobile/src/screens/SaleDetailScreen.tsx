@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -14,9 +15,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { SaleOrderDetail } from "@cloth-scan/shared";
 import { deleteSaleOrder, editSaleOrder, getSale, imageUrl, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
-import { StateView } from "../components/StateView";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { colors, font, radius, space, touch } from "../theme/tokens";
 import { formatTime, yuan } from "../utils/format";
 
 type SaleDetailNav = NativeStackNavigationProp<RootStackParamList, "SaleDetail">;
@@ -145,13 +144,12 @@ export function SaleDetailScreen() {
         <Pressable
           onPress={editing ? () => setEditing(false) : () => navigation.goBack()}
           hitSlop={8}
-          style={styles.topbarBtn}
         >
           <Text style={styles.back}>{editing ? "取消" : "返回"}</Text>
         </Pressable>
         <Text style={styles.title}>{editing ? "编辑账单" : "单据详情"}</Text>
         {order && !editing ? (
-          <Pressable onPress={startEdit} hitSlop={8} style={styles.topbarBtn}>
+          <Pressable onPress={startEdit} hitSlop={8}>
             <Text style={styles.editLink}>编辑</Text>
           </Pressable>
         ) : (
@@ -159,144 +157,141 @@ export function SaleDetailScreen() {
         )}
       </View>
 
-      <StateView loading={loading} error={error} onRetry={load}>
-        {order ? (
-          <>
-            <ScrollView contentContainerStyle={styles.body}>
-              <View style={styles.summaryBox}>
-                <Text style={styles.amount}>{yuan(editing ? draftTotal : order.totalAmount)}</Text>
-                <Text style={styles.metaLine}>{formatTime(order.createdAt)}</Text>
-                <Text style={styles.metaLine}>
-                  收银员：{order.operatorName ?? "—"} ·{" "}
-                  {editing ? `保留 ${keptCount} 项` : `共 ${order.itemCount} 件`}
-                </Text>
-              </View>
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" />
+        </View>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.error}>{error}</Text>
+          <Pressable style={styles.retry} onPress={load}>
+            <Text style={styles.retryText}>重试</Text>
+          </Pressable>
+        </View>
+      ) : order ? (
+        <>
+          <ScrollView contentContainerStyle={styles.body}>
+            <View style={styles.summaryBox}>
+              <Text style={styles.amount}>{yuan(editing ? draftTotal : order.totalAmount)}</Text>
+              <Text style={styles.metaLine}>{formatTime(order.createdAt)}</Text>
+              <Text style={styles.metaLine}>
+                收银员：{order.operatorName ?? "—"} ·{" "}
+                {editing ? `保留 ${keptCount} 项` : `共 ${order.itemCount} 件`}
+              </Text>
+            </View>
 
-              <Text style={styles.sectionTitle}>商品明细</Text>
+            <Text style={styles.sectionTitle}>商品明细</Text>
 
-              {!editing
-                ? order.items.map((it) => (
-                    <View key={it.id} style={styles.itemRow}>
-                      <Pressable
-                        style={styles.cover}
-                        onPress={() => {
-                          const u = imageUrl(it.coverImage);
-                          if (u) setViewerUri(u);
-                        }}
-                      >
-                        {it.coverImage ? (
-                          <Image
-                            source={{ uri: thumbUrl(it.coverImage) }}
-                            style={styles.coverImg}
-                          />
-                        ) : (
-                          <Text style={styles.coverPlaceholder}>👗</Text>
-                        )}
-                      </Pressable>
-                      <View style={styles.itemInfo}>
-                        <Text style={styles.itemName} numberOfLines={1}>
-                          {it.productName}
+            {!editing
+              ? order.items.map((it) => (
+                  <View key={it.id} style={styles.itemRow}>
+                    <Pressable
+                      style={styles.cover}
+                      onPress={() => {
+                        const u = imageUrl(it.coverImage);
+                        if (u) setViewerUri(u);
+                      }}
+                    >
+                      {it.coverImage ? (
+                        <Image source={{ uri: thumbUrl(it.coverImage) }} style={styles.coverImg} />
+                      ) : (
+                        <Text style={styles.coverPlaceholder}>无图</Text>
+                      )}
+                    </Pressable>
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemName} numberOfLines={1}>
+                        {it.productName}
+                      </Text>
+                      <Text style={styles.itemSpec}>
+                        {it.color}/{it.size} · {it.barcode}
+                      </Text>
+                      <Text style={styles.itemCalc}>
+                        {yuan(it.price)} × {it.quantity}
+                      </Text>
+                    </View>
+                    <Text style={styles.itemSubtotal}>{yuan(it.subtotal)}</Text>
+                  </View>
+                ))
+              : draft.map((l) => {
+                  const removed = l.quantity === 0;
+                  return (
+                    <View key={l.id} style={[styles.itemRow, removed && styles.itemRemoved]}>
+                      <View style={styles.editInfo}>
+                        <Text style={[styles.itemName, removed && styles.struck]} numberOfLines={1}>
+                          {l.productName}
                         </Text>
                         <Text style={styles.itemSpec}>
-                          {it.color}/{it.size} · {it.barcode}
+                          {l.color}/{l.size}
                         </Text>
-                        <Text style={styles.itemCalc}>
-                          {yuan(it.price)} × {it.quantity}
-                        </Text>
+                        {removed ? (
+                          <Pressable onPress={() => setQty(l.id, 1)}>
+                            <Text style={styles.restoreText}>已删除 · 点此撤销</Text>
+                          </Pressable>
+                        ) : (
+                          <View style={styles.priceRow}>
+                            <Text style={styles.priceYuan}>¥</Text>
+                            <TextInput
+                              style={styles.priceInput}
+                              keyboardType="decimal-pad"
+                              value={l.priceStr}
+                              onChangeText={(v) => setPrice(l.id, v)}
+                            />
+                          </View>
+                        )}
                       </View>
-                      <Text style={styles.itemSubtotal}>{yuan(it.subtotal)}</Text>
-                    </View>
-                  ))
-                : draft.map((l) => {
-                    const removed = l.quantity === 0;
-                    return (
-                      <View key={l.id} style={[styles.itemRow, removed && styles.itemRemoved]}>
-                        <View style={styles.editInfo}>
-                          <Text
-                            style={[styles.itemName, removed && styles.struck]}
-                            numberOfLines={1}
-                          >
-                            {l.productName}
-                          </Text>
-                          <Text style={styles.itemSpec}>
-                            {l.color}/{l.size}
-                          </Text>
-                          {removed ? (
-                            <Pressable onPress={() => setQty(l.id, 1)} hitSlop={8}>
-                              <Text style={styles.restoreText}>已删除 · 点此撤销</Text>
+                      {!removed ? (
+                        <View style={styles.editControls}>
+                          <View style={styles.stepper}>
+                            <Pressable
+                              style={styles.stepBtn}
+                              onPress={() => setQty(l.id, l.quantity - 1)}
+                            >
+                              <Text style={styles.stepText}>−</Text>
                             </Pressable>
-                          ) : (
-                            <View style={styles.priceRow}>
-                              <Text style={styles.priceYuan}>¥</Text>
-                              <TextInput
-                                style={styles.priceInput}
-                                keyboardType="decimal-pad"
-                                value={l.priceStr}
-                                onChangeText={(v) => setPrice(l.id, v)}
-                              />
-                            </View>
-                          )}
-                        </View>
-                        {!removed ? (
-                          <View style={styles.editControls}>
-                            <View style={styles.stepper}>
-                              <Pressable
-                                style={styles.stepBtn}
-                                onPress={() => setQty(l.id, l.quantity - 1)}
-                              >
-                                <Text style={styles.stepText}>−</Text>
-                              </Pressable>
-                              <Text style={styles.qty}>{l.quantity}</Text>
-                              <Pressable
-                                style={styles.stepBtn}
-                                onPress={() => setQty(l.id, l.quantity + 1)}
-                              >
-                                <Text style={styles.stepText}>＋</Text>
-                              </Pressable>
-                            </View>
-                            <Pressable style={styles.lineDelete} onPress={() => setQty(l.id, 0)}>
-                              <Text style={styles.lineDeleteText}>删除</Text>
+                            <Text style={styles.qty}>{l.quantity}</Text>
+                            <Pressable
+                              style={styles.stepBtn}
+                              onPress={() => setQty(l.id, l.quantity + 1)}
+                            >
+                              <Text style={styles.stepText}>＋</Text>
                             </Pressable>
                           </View>
-                        ) : null}
-                      </View>
-                    );
-                  })}
+                          <Pressable style={styles.lineDelete} onPress={() => setQty(l.id, 0)}>
+                            <Text style={styles.lineDeleteText}>删除</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
 
-              {!editing ? (
-                <Pressable
-                  style={({ pressed }) => [styles.deleteOrderBtn, pressed && styles.deletePressed]}
-                  onPress={confirmDeleteOrder}
-                >
-                  <Text style={styles.deleteOrderText}>删除整单</Text>
-                </Pressable>
-              ) : null}
-            </ScrollView>
-
-            {editing ? (
-              <View style={styles.editFooter}>
-                <Pressable
-                  style={({ pressed }) => [styles.cancelBtn, pressed && styles.cancelPressed]}
-                  onPress={() => setEditing(false)}
-                >
-                  <Text style={styles.cancelText}>取消</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.saveBtn,
-                    (saving || keptCount === 0) && styles.disabled,
-                    pressed && !saving && keptCount > 0 && styles.savePressed,
-                  ]}
-                  disabled={saving || keptCount === 0}
-                  onPress={save}
-                >
-                  <Text style={styles.saveText}>保存（{yuan(draftTotal)}）</Text>
-                </Pressable>
-              </View>
+            {!editing ? (
+              <Pressable style={styles.deleteOrderBtn} onPress={confirmDeleteOrder}>
+                <Text style={styles.deleteOrderText}>删除整单</Text>
+              </Pressable>
             ) : null}
-          </>
-        ) : null}
-      </StateView>
+          </ScrollView>
+
+          {editing ? (
+            <View style={styles.editFooter}>
+              <Pressable style={styles.cancelBtn} onPress={() => setEditing(false)}>
+                <Text style={styles.cancelText}>取消</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.saveBtn, saving && styles.disabled]}
+                disabled={saving}
+                onPress={save}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveText}>保存（{yuan(draftTotal)}）</Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
+        </>
+      ) : null}
 
       <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
@@ -304,140 +299,133 @@ export function SaleDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: "#fff" },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    backgroundColor: colors.card,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: "#f0f0f0",
   },
-  topbarBtn: { minHeight: touch.minSize, justifyContent: "center" },
-  back: { color: colors.primary, fontSize: font.body },
-  editLink: { color: colors.primary, fontSize: font.body, fontWeight: "700" },
-  title: { fontSize: font.title, fontWeight: "800", color: colors.text },
+  back: { color: "#2563eb", fontSize: 16 },
+  editLink: { color: "#2563eb", fontSize: 16, fontWeight: "700" },
+  title: { fontSize: 18, fontWeight: "800", color: "#111" },
   placeholder: { width: 32 },
-  body: { padding: space.lg, gap: space.md },
-  // 总金额大数字卡（Monzo §2.2）
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  body: { padding: 16, gap: 10 },
   summaryBox: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: space.lg,
+    backgroundColor: "#f8fafc",
+    borderRadius: 12,
+    padding: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#eef2f7",
   },
-  amount: { fontSize: font.display, fontWeight: "800", color: colors.primary },
-  metaLine: { fontSize: font.caption, color: colors.textMuted, marginTop: space.xs },
+  amount: { fontSize: 30, fontWeight: "800", color: "#e11d48" },
+  metaLine: { fontSize: 14, color: "#6b7280", marginTop: 4 },
   sectionTitle: {
-    fontSize: font.body,
+    fontSize: 14,
     fontWeight: "700",
-    color: colors.text,
-    marginTop: space.sm,
+    color: "#374151",
+    marginTop: 8,
   },
   itemRow: {
     flexDirection: "row",
-    gap: space.md,
+    gap: 12,
     alignItems: "center",
-    padding: space.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
+    padding: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#eee",
   },
-  itemRemoved: { backgroundColor: colors.bg, borderColor: colors.border, opacity: 0.7 },
+  itemRemoved: { backgroundColor: "#fafafa", borderColor: "#f0f0f0" },
   cover: {
-    width: 56,
-    height: 56,
-    borderRadius: radius.md,
-    backgroundColor: colors.bg,
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   coverImg: { width: "100%", height: "100%" },
-  coverPlaceholder: { fontSize: 22 },
+  coverPlaceholder: { color: "#9ca3af", fontSize: 11 },
   itemInfo: { flex: 1, gap: 2 },
-  itemName: { fontSize: font.body, fontWeight: "700", color: colors.text },
-  itemSpec: { fontSize: font.caption, color: colors.textMuted },
-  itemCalc: { fontSize: font.caption, color: colors.textMuted },
-  itemSubtotal: { fontSize: font.body, fontWeight: "800", color: colors.text },
-  editInfo: { flex: 1, gap: space.xs },
-  struck: { textDecorationLine: "line-through", color: colors.textMuted },
-  restoreText: { color: colors.primary, fontSize: font.caption, fontWeight: "700" },
-  priceRow: { flexDirection: "row", alignItems: "center", gap: space.xs },
-  priceYuan: { fontSize: font.body, fontWeight: "700", color: colors.text },
+  itemName: { fontSize: 15, fontWeight: "700", color: "#111" },
+  itemSpec: { fontSize: 12, color: "#9ca3af" },
+  itemCalc: { fontSize: 13, color: "#6b7280" },
+  itemSubtotal: { fontSize: 16, fontWeight: "700", color: "#111" },
+  editInfo: { flex: 1, gap: 4 },
+  struck: { textDecorationLine: "line-through", color: "#9ca3af" },
+  restoreText: { color: "#2563eb", fontSize: 13, fontWeight: "600" },
+  priceRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  priceYuan: { fontSize: 15, fontWeight: "700", color: "#111" },
   priceInput: {
-    minWidth: 80,
+    minWidth: 78,
     borderBottomWidth: 1.5,
-    borderBottomColor: colors.primary,
-    fontSize: font.body,
+    borderBottomColor: "#2563eb",
+    fontSize: 16,
     fontWeight: "700",
-    color: colors.text,
+    color: "#111",
     paddingVertical: 2,
   },
-  editControls: { alignItems: "flex-end", gap: space.xs },
-  stepper: { flexDirection: "row", alignItems: "center", gap: space.xs },
+  editControls: { alignItems: "flex-end", gap: 6 },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 6 },
   stepBtn: {
-    width: touch.minSize,
-    height: touch.minSize,
-    borderRadius: radius.md,
-    backgroundColor: colors.primarySoft,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: "#eef2ff",
     alignItems: "center",
     justifyContent: "center",
   },
-  stepText: { fontSize: font.title, color: colors.primary, fontWeight: "800" },
-  qty: { minWidth: 28, textAlign: "center", fontSize: font.body, fontWeight: "700" },
-  lineDelete: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 2,
-    minHeight: touch.minSize,
-    justifyContent: "center",
-  },
-  lineDeleteText: { color: colors.danger, fontSize: font.caption, fontWeight: "700" },
+  stepText: { fontSize: 18, color: "#2563eb", fontWeight: "700" },
+  qty: { minWidth: 26, textAlign: "center", fontSize: 16, fontWeight: "700" },
+  lineDelete: { paddingHorizontal: 8, paddingVertical: 2 },
+  lineDeleteText: { color: "#dc2626", fontSize: 12, fontWeight: "700" },
   deleteOrderBtn: {
-    marginTop: space.lg,
+    marginTop: 16,
     borderWidth: 1.5,
-    borderColor: "#FECACA",
-    backgroundColor: colors.dangerSoft,
-    borderRadius: radius.md,
-    paddingVertical: space.md,
-    minHeight: touch.minSize,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: "center",
-    justifyContent: "center",
   },
-  deletePressed: { opacity: 0.7 },
-  deleteOrderText: { color: colors.danger, fontSize: font.body, fontWeight: "800" },
+  deleteOrderText: { color: "#dc2626", fontSize: 16, fontWeight: "800" },
   editFooter: {
     flexDirection: "row",
-    gap: space.md,
-    padding: space.lg,
-    backgroundColor: colors.card,
+    gap: 12,
+    padding: 16,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: "#eee",
   },
   cancelBtn: {
     flex: 1,
-    minHeight: touch.buttonHeight,
-    borderRadius: radius.md,
+    paddingVertical: 16,
+    borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: colors.border,
+    borderColor: "#d1d5db",
     alignItems: "center",
-    justifyContent: "center",
   },
-  cancelPressed: { opacity: 0.7 },
-  cancelText: { fontSize: font.body, fontWeight: "700", color: colors.textMuted },
+  cancelText: { fontSize: 16, fontWeight: "700", color: "#6b7280" },
   saveBtn: {
     flex: 2,
-    backgroundColor: colors.primary,
-    minHeight: touch.buttonHeight,
-    borderRadius: radius.md,
+    backgroundColor: "#2563eb",
+    paddingVertical: 16,
+    borderRadius: 12,
     alignItems: "center",
-    justifyContent: "center",
   },
-  savePressed: { backgroundColor: colors.primaryPressed },
   disabled: { opacity: 0.5 },
-  saveText: { color: "#fff", fontSize: font.body, fontWeight: "800" },
+  saveText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  error: { color: "#dc2626" },
+  retry: {
+    borderWidth: 1,
+    borderColor: "#2563eb",
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  retryText: { color: "#2563eb" },
 });

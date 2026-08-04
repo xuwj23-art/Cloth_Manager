@@ -46,7 +46,7 @@ export function PriceEditSheet() {
     <Modal visible={open} transparent animationType="none" onRequestClose={close}>
       <Pressable style={cashierStyles.backdrop} onPress={close} />
       {open && line ? (
-        <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.bottomSheet}>
+        <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.centerSheet}>
           <Text style={cashierStyles.titleText}>修改成交价</Text>
           <Text style={styles.meta}>
             {line.productName} {line.color}/{line.size}

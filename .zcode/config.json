@@ -1,4 +1,0 @@
-{
-  "$schema": "https://json.schemastore.org/zcode-config.json",
-  "$comment": "项目级 ZCode 配置（仅对本仓库生效）。本项目为全栈重构（后端 NestJS + 移动端 RN + shared + 前端 UI），所有全局已启用的 MCP/skill 均需保留：serena（语义分析）、context7（文档）、android-emulator（实测）、playwright（浏览器/后端 API 测试）、mobbin（移动端 UI 参考）。故此处不关闭任何 server，沿用全局默认。仅作为占位与说明文件，便于团队/未来回溯本项目工具策略。"
-}

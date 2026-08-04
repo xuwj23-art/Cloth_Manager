@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
@@ -12,9 +20,7 @@ import type {
   SalesStat,
 } from "@cloth-scan/shared";
 import { getMonthlySales, getSalesByDay, getSalesReport, listSales } from "../api";
-import { StateView } from "../components/StateView";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { colors, font, radius, space, touch } from "../theme/tokens";
 import { yuan } from "../utils/format";
 
 type SalesNav = NativeStackNavigationProp<RootStackParamList, "Sales">;
@@ -61,24 +67,19 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "history", label: "历史" },
 ];
 
-/** 合计卡（Monzo §2.2）：营业额大数字 + 毛利（含毛利率）+ 单数/件数 */
+/** 合计卡：营业额 + 毛利（含毛利率）+ 单数/件数 */
 function TotalCard({ total }: { total: SalesStat }) {
   const margin = total.revenue > 0 ? Math.round((total.profit / total.revenue) * 100) : 0;
   return (
     <View style={styles.totalCard}>
       <View style={styles.totalTop}>
-        <View style={styles.totalCol}>
+        <View>
           <Text style={styles.totalLabel}>营业额</Text>
           <Text style={styles.totalRevenue}>{yuan(total.revenue)}</Text>
         </View>
-        <View style={[styles.totalCol, { alignItems: "flex-end" }]}>
+        <View style={{ alignItems: "flex-end" }}>
           <Text style={styles.totalLabel}>毛利</Text>
-          <Text
-            style={[
-              styles.totalProfit,
-              { color: total.profit >= 0 ? colors.online : colors.danger },
-            ]}
-          >
+          <Text style={[styles.totalProfit, { color: total.profit >= 0 ? "#16a34a" : "#dc2626" }]}>
             {yuan(total.profit)}
           </Text>
           <Text style={styles.totalMargin}>毛利率 {margin}%</Text>
@@ -114,7 +115,7 @@ function OperatorCard({ ops }: { ops: OperatorSalesStat[] }) {
   );
 }
 
-/** 下钻迷你条形图：本周按天、本月按周；空数据也展示（§3.6 粗柱 + 数值标签） */
+/** 下钻迷你条形图：本周按天、本月按周；空数据也展示 */
 function BucketChart({ report }: { report: SalesReport }) {
   if (report.buckets.length === 0) return null;
   const max = Math.max(1, ...report.buckets.map((b) => b.revenue));
@@ -130,9 +131,7 @@ function BucketChart({ report }: { report: SalesReport }) {
           </View>
           <View style={styles.barValues}>
             <Text style={styles.barRevenue}>{yuan(b.revenue)}</Text>
-            <Text
-              style={[styles.barProfit, { color: b.profit >= 0 ? colors.online : colors.danger }]}
-            >
+            <Text style={[styles.barProfit, { color: b.profit >= 0 ? "#16a34a" : "#dc2626" }]}>
               利 {yuan(b.profit)}
             </Text>
           </View>
@@ -222,7 +221,7 @@ export function SalesScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.topbarBtn}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>销售记录</Text>
@@ -233,11 +232,7 @@ export function SalesScreen() {
         {TABS.map((t) => (
           <Pressable
             key={t.key}
-            style={({ pressed }) => [
-              styles.tab,
-              tab === t.key && styles.tabActive,
-              pressed && tab === t.key && styles.tabActivePressed,
-            ]}
+            style={[styles.tab, tab === t.key && styles.tabActive]}
             onPress={() => switchTab(t.key)}
           >
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
@@ -246,10 +241,7 @@ export function SalesScreen() {
       </View>
 
       {tab === "history" && day === null ? (
-        <Pressable
-          style={({ pressed }) => [styles.monthSelect, pressed && styles.monthSelectPressed]}
-          onPress={() => setMonthOpen(true)}
-        >
+        <Pressable style={styles.monthSelect} onPress={() => setMonthOpen(true)}>
           <Text style={styles.monthSelectText}>
             {sel.year}年{sel.month}月
           </Text>
@@ -257,7 +249,7 @@ export function SalesScreen() {
         </Pressable>
       ) : null}
 
-      {/* 历史 → 当日流水明细（带返回上一级的导航） */}
+      {/* 历史 → 当日流水明细 */}
       {tab === "history" && day !== null ? (
         <FlatList
           data={dayOrders}
@@ -265,16 +257,17 @@ export function SalesScreen() {
           contentContainerStyle={styles.list}
           ListHeaderComponent={
             <View>
-              <Pressable style={styles.dayBack} onPress={() => setDay(null)} hitSlop={8}>
+              <Pressable style={styles.dayBack} onPress={() => setDay(null)}>
                 <Text style={styles.dayBackText}>‹ {sel.month}月明细</Text>
               </Pressable>
               <Text style={styles.dayTitle}>{formatDay(day)}</Text>
+              {dayLoading ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
             </View>
           }
           ListEmptyComponent={dayLoading ? null : <Text style={styles.empty}>当日暂无流水</Text>}
           renderItem={({ item }) => (
             <Pressable
-              style={({ pressed }) => [styles.orderCard, pressed && styles.cardPressed]}
+              style={styles.orderCard}
               onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
             >
               <View style={styles.orderLeft}>
@@ -287,95 +280,96 @@ export function SalesScreen() {
             </Pressable>
           )}
         />
-      ) : (
-        <StateView loading={loading} error={error} onRetry={() => load(tab, sel)}>
-          {tab === "history" ? (
-            <FlatList<DailySalesStat>
-              data={soldDays}
-              keyExtractor={(d) => d.date}
-              onRefresh={() => load(tab, sel)}
-              refreshing={loading}
-              contentContainerStyle={styles.list}
-              ListHeaderComponent={
-                monthly ? (
-                  <View>
-                    <TotalCard total={monthly.total} />
-                    <OperatorCard ops={monthly.byOperator} />
-                    <Text style={styles.sectionTitle}>每日明细</Text>
-                  </View>
-                ) : null
-              }
-              ListEmptyComponent={<Text style={styles.empty}>该月暂无销售记录</Text>}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={({ pressed }) => [styles.dayRow, pressed && styles.cardPressed]}
-                  onPress={() => setDay(item.date)}
-                >
-                  <View>
-                    <Text style={styles.dayDate}>{formatDay(item.date)}</Text>
-                    <Text style={styles.dayMeta}>
-                      {item.orders} 单 · {item.quantity} 件
-                    </Text>
-                  </View>
-                  <View style={styles.dayRight}>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={styles.dayRevenue}>{yuan(item.revenue)}</Text>
-                      <Text
-                        style={[
-                          styles.dayProfit,
-                          { color: item.profit >= 0 ? colors.online : colors.danger },
-                        ]}
-                      >
-                        利 {yuan(item.profit)}
-                      </Text>
-                    </View>
-                    <Text style={styles.dayCaret}>›</Text>
-                  </View>
-                </Pressable>
-              )}
-            />
-          ) : (
-            <FlatList
-              data={orders}
-              keyExtractor={(o) => o.id}
-              onRefresh={() => load(tab, sel)}
-              refreshing={loading}
-              contentContainerStyle={styles.list}
-              ListHeaderComponent={
-                <View>
-                  {report ? (
-                    <>
-                      <TotalCard total={report.total} />
-                      <OperatorCard ops={report.byOperator} />
-                      <BucketChart report={report} />
-                    </>
-                  ) : null}
-                  <Text style={styles.sectionTitle}>流水（最近 500 笔）</Text>
+      ) : loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" />
+        </View>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.error}>{error}</Text>
+          <Pressable style={styles.retry} onPress={() => load(tab, sel)}>
+            <Text style={styles.retryText}>重试</Text>
+          </Pressable>
+        </View>
+      ) : tab === "history" ? (
+        <FlatList<DailySalesStat>
+          data={soldDays}
+          keyExtractor={(d) => d.date}
+          onRefresh={() => load(tab, sel)}
+          refreshing={loading}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            monthly ? (
+              <View>
+                <TotalCard total={monthly.total} />
+                <OperatorCard ops={monthly.byOperator} />
+                <Text style={styles.sectionTitle}>每日明细</Text>
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={<Text style={styles.empty}>该月暂无销售记录</Text>}
+          renderItem={({ item }) => (
+            <Pressable style={styles.dayRow} onPress={() => setDay(item.date)}>
+              <View>
+                <Text style={styles.dayDate}>{formatDay(item.date)}</Text>
+                <Text style={styles.dayMeta}>
+                  {item.orders} 单 · {item.quantity} 件
+                </Text>
+              </View>
+              <View style={styles.dayRight}>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={styles.dayRevenue}>{yuan(item.revenue)}</Text>
+                  <Text
+                    style={[styles.dayProfit, { color: item.profit >= 0 ? "#16a34a" : "#dc2626" }]}
+                  >
+                    利 {yuan(item.profit)}
+                  </Text>
                 </View>
-              }
-              ListEmptyComponent={
-                <Text style={styles.empty}>还没有销售记录，去「扫码收银」开张吧</Text>
-              }
-              renderItem={({ item }) => (
-                <Pressable
-                  style={({ pressed }) => [styles.orderCard, pressed && styles.cardPressed]}
-                  onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
-                >
-                  <View style={styles.orderLeft}>
-                    <Text style={styles.orderTime}>{formatTimeNoYear(item.createdAt)}</Text>
-                    <Text style={styles.orderMeta}>
-                      {item.itemCount} 件{item.operatorName ? ` · ${item.operatorName}` : ""}
-                    </Text>
-                  </View>
-                  <Text style={styles.orderAmount}>{yuan(item.totalAmount)}</Text>
-                </Pressable>
-              )}
-            />
+                <Text style={styles.dayCaret}>›</Text>
+              </View>
+            </Pressable>
           )}
-        </StateView>
+        />
+      ) : (
+        <FlatList
+          data={orders}
+          keyExtractor={(o) => o.id}
+          onRefresh={() => load(tab, sel)}
+          refreshing={loading}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            <View>
+              {report ? (
+                <>
+                  <TotalCard total={report.total} />
+                  <OperatorCard ops={report.byOperator} />
+                  <BucketChart report={report} />
+                </>
+              ) : null}
+              <Text style={styles.sectionTitle}>流水（最近 500 笔）</Text>
+            </View>
+          }
+          ListEmptyComponent={
+            <Text style={styles.empty}>还没有销售记录，去「扫码收银」开张吧</Text>
+          }
+          renderItem={({ item }) => (
+            <Pressable
+              style={styles.orderCard}
+              onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
+            >
+              <View style={styles.orderLeft}>
+                <Text style={styles.orderTime}>{formatTimeNoYear(item.createdAt)}</Text>
+                <Text style={styles.orderMeta}>
+                  {item.itemCount} 件{item.operatorName ? ` · ${item.operatorName}` : ""}
+                </Text>
+              </View>
+              <Text style={styles.orderAmount}>{yuan(item.totalAmount)}</Text>
+            </Pressable>
+          )}
+        />
       )}
 
-      {/* 月份选择（Modal） */}
+      {/* 月份选择 */}
       <Modal
         visible={monthOpen}
         transparent
@@ -414,209 +408,201 @@ export function SalesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: "#fff" },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    backgroundColor: colors.card,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: "#f0f0f0",
   },
-  topbarBtn: { minHeight: touch.minSize, justifyContent: "center" },
-  back: { color: colors.primary, fontSize: font.body },
-  title: { fontSize: font.title, fontWeight: "800", color: colors.text },
+  back: { color: "#2563eb", fontSize: 16 },
+  title: { fontSize: 18, fontWeight: "800", color: "#111" },
   placeholder: { width: 32 },
   tabs: {
     flexDirection: "row",
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.md,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   tab: {
     flex: 1,
-    paddingVertical: space.md - 2,
-    borderRadius: radius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "#f1f5f9",
     alignItems: "center",
-    minHeight: touch.minSize,
-    justifyContent: "center",
   },
-  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabActivePressed: { backgroundColor: colors.primaryPressed },
-  tabText: { fontSize: font.body, fontWeight: "700", color: colors.textMuted },
+  tabActive: { backgroundColor: "#2563eb" },
+  tabText: { fontSize: 15, fontWeight: "700", color: "#475569" },
   tabTextActive: { color: "#fff" },
   monthSelect: {
-    marginHorizontal: space.md,
-    marginBottom: space.xs,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    borderRadius: radius.md,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
+    borderColor: "#dbe2ea",
+    backgroundColor: "#f8fafc",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    minHeight: touch.minSize,
   },
-  monthSelectPressed: { opacity: 0.85 },
-  monthSelectText: { fontSize: font.body, fontWeight: "700", color: colors.text },
-  monthSelectCaret: { fontSize: font.caption, color: colors.textMuted },
-  list: { padding: space.md, gap: space.md },
-  // 大数字卡（Monzo §2.2）：营业额 display 字号 + 墨绿品牌色
+  monthSelectText: { fontSize: 16, fontWeight: "700", color: "#1f2937" },
+  monthSelectCaret: { fontSize: 14, color: "#6b7280" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
+  list: { padding: 12, gap: 10 },
   totalCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: space.lg,
+    backgroundColor: "#f8fafc",
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: space.md,
+    borderColor: "#eef2f7",
+    marginBottom: 10,
   },
   totalTop: { flexDirection: "row", justifyContent: "space-between" },
-  totalCol: { gap: 2 },
-  totalLabel: { fontSize: font.caption, color: colors.textMuted, fontWeight: "600" },
+  totalLabel: { fontSize: 12, color: "#6b7280" },
   totalRevenue: {
-    fontSize: font.display,
+    fontSize: 26,
     fontWeight: "800",
-    color: colors.primary,
-    marginTop: space.xs,
+    color: "#2563eb",
+    marginTop: 2,
   },
-  totalProfit: { fontSize: font.title + 2, fontWeight: "800", marginTop: space.xs },
-  totalMargin: { fontSize: font.caption - 2, color: colors.textMuted, marginTop: 2 },
-  totalMeta: { fontSize: font.caption, color: colors.textMuted, marginTop: space.sm },
+  totalProfit: { fontSize: 20, fontWeight: "800", marginTop: 2 },
+  totalMargin: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
+  totalMeta: { fontSize: 13, color: "#6b7280", marginTop: 8 },
   opBox: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    backgroundColor: "#fff",
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: space.md,
-    marginBottom: space.md,
-    gap: space.sm,
+    borderColor: "#eee",
+    padding: 12,
+    marginBottom: 10,
+    gap: 6,
   },
   opRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: space.md,
+    gap: 12,
   },
-  opName: { flex: 1, fontSize: font.body, fontWeight: "600", color: colors.text },
+  opName: { flex: 1, fontSize: 14, fontWeight: "600", color: "#111" },
   opRight: { alignItems: "flex-end" },
-  opRevenue: { fontSize: font.body, fontWeight: "800", color: colors.primary },
-  opMeta: { fontSize: font.caption - 2, color: colors.textMuted },
+  opRevenue: { fontSize: 15, fontWeight: "800", color: "#e11d48" },
+  opMeta: { fontSize: 11, color: "#9ca3af" },
   chartBox: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    backgroundColor: "#fff",
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: space.md,
-    marginBottom: space.md,
-    gap: space.sm,
+    borderColor: "#eee",
+    padding: 12,
+    marginBottom: 10,
+    gap: 8,
   },
-  chartTitle: { fontSize: font.body, fontWeight: "700", color: colors.text, marginBottom: 2 },
-  barRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
-  barLabel: { width: 44, fontSize: font.caption, color: colors.text },
+  chartTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111",
+    marginBottom: 2,
+  },
+  barRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  barLabel: { width: 44, fontSize: 13, color: "#374151" },
   barTrack: {
     flex: 1,
-    height: 16,
-    backgroundColor: colors.bg,
-    borderRadius: radius.sm,
+    height: 14,
+    backgroundColor: "#eef2f7",
+    borderRadius: 7,
     overflow: "hidden",
   },
-  barFill: { height: 16, backgroundColor: colors.primary, borderRadius: radius.sm },
-  barValues: { width: 100, alignItems: "flex-end" },
-  barRevenue: { fontSize: font.caption - 2, fontWeight: "700", color: colors.text },
-  barProfit: { fontSize: font.caption - 3 },
+  barFill: { height: 14, backgroundColor: "#60a5fa", borderRadius: 7 },
+  barValues: { width: 96, alignItems: "flex-end" },
+  barRevenue: { fontSize: 12, fontWeight: "700", color: "#111" },
+  barProfit: { fontSize: 11 },
   sectionTitle: {
-    fontSize: font.body,
+    fontSize: 14,
     fontWeight: "700",
-    color: colors.text,
-    marginTop: space.xs,
-    marginBottom: space.xs,
+    color: "#374151",
+    marginTop: 4,
+    marginBottom: 6,
   },
-  empty: {
-    textAlign: "center",
-    color: colors.textMuted,
-    marginTop: space.xxl * 2,
-    fontSize: font.body,
-  },
+  empty: { textAlign: "center", color: "#9ca3af", marginTop: 48 },
   dayRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: space.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
+    padding: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#eee",
   },
-  dayDate: { fontSize: font.body, fontWeight: "700", color: colors.text },
-  dayMeta: { fontSize: font.caption, color: colors.textMuted, marginTop: 2 },
-  dayRight: { flexDirection: "row", alignItems: "center", gap: space.sm },
-  dayRevenue: { fontSize: font.body, fontWeight: "800", color: colors.primary },
-  dayProfit: { fontSize: font.caption, marginTop: 2 },
-  dayCaret: { fontSize: font.title + 2, color: colors.border, fontWeight: "700" },
-  dayBack: {
-    paddingVertical: space.xs,
-    marginBottom: space.xs,
-    minHeight: touch.minSize,
-    justifyContent: "center",
-  },
-  dayBackText: { fontSize: font.body, color: colors.primary, fontWeight: "700" },
+  dayDate: { fontSize: 15, fontWeight: "700", color: "#111" },
+  dayMeta: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  dayRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dayRevenue: { fontSize: 16, fontWeight: "800", color: "#e11d48" },
+  dayProfit: { fontSize: 12, marginTop: 2 },
+  dayCaret: { fontSize: 20, color: "#cbd5e1", fontWeight: "700" },
+  dayBack: { paddingVertical: 4, marginBottom: 4 },
+  dayBackText: { fontSize: 15, color: "#2563eb", fontWeight: "700" },
   dayTitle: {
-    fontSize: font.title,
+    fontSize: 18,
     fontWeight: "800",
-    color: colors.text,
-    marginBottom: space.sm,
+    color: "#111",
+    marginBottom: 8,
   },
   orderCard: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: space.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
+    padding: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#eee",
   },
-  cardPressed: { opacity: 0.85 },
-  orderLeft: { gap: 2, flex: 1 },
-  orderTime: { fontSize: font.body, fontWeight: "600", color: colors.text },
-  orderMeta: { fontSize: font.caption, color: colors.textMuted },
-  orderAmount: { fontSize: font.title, fontWeight: "800", color: colors.primary },
-  // 月份选择 Modal
-  monthBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.backdrop },
+  orderLeft: { gap: 2 },
+  orderTime: { fontSize: 15, fontWeight: "600", color: "#111" },
+  orderMeta: { fontSize: 13, color: "#6b7280" },
+  orderAmount: { fontSize: 18, fontWeight: "800", color: "#e11d48" },
+  error: { color: "#dc2626" },
+  retry: {
+    borderWidth: 1,
+    borderColor: "#2563eb",
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  retryText: { color: "#2563eb" },
+  monthBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
   monthSheet: {
     position: "absolute",
-    left: space.xl,
-    right: space.xl,
+    left: 24,
+    right: 24,
     top: "18%",
     maxHeight: "64%",
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: space.lg,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
   },
   monthSheetTitle: {
-    fontSize: font.body,
+    fontSize: 16,
     fontWeight: "800",
-    color: colors.text,
-    marginBottom: space.sm,
+    color: "#111",
+    marginBottom: 8,
   },
   monthItem: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: space.md + 1,
-    paddingHorizontal: space.md,
-    borderRadius: radius.md,
-    minHeight: touch.minSize,
+    paddingVertical: 13,
+    paddingHorizontal: 10,
+    borderRadius: 10,
   },
-  monthItemActive: { backgroundColor: colors.primarySoft },
-  monthItemText: { fontSize: font.body, color: colors.text, fontWeight: "600" },
-  monthItemTextActive: { color: colors.primary, fontWeight: "800" },
-  monthCheck: { fontSize: font.body, color: colors.primary, fontWeight: "800" },
+  monthItemActive: { backgroundColor: "#eff6ff" },
+  monthItemText: { fontSize: 16, color: "#1f2937", fontWeight: "600" },
+  monthItemTextActive: { color: "#2563eb", fontWeight: "800" },
+  monthCheck: { fontSize: 16, color: "#2563eb", fontWeight: "800" },
 });

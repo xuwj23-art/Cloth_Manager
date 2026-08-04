@@ -37,7 +37,7 @@ export function ManualInputSheet({
     <Modal visible={open} transparent animationType="none" onRequestClose={() => setSheet("none")}>
       <Pressable style={cashierStyles.backdrop} onPress={() => setSheet("none")} />
       {open ? (
-        <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.bottomSheet}>
+        <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.centerSheet}>
           <Text style={cashierStyles.titleText}>手动输入条码</Text>
           <Text style={cashierStyles.captionText}>输入吊牌下方的数字编号</Text>
 

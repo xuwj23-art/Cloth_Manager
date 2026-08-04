@@ -1,8 +1,8 @@
 /**
  * UI 设计语言 token（见 docs/design/UI-REFERENCES.md §3）。
  *
- * 第 4 波 Task 2 落地 CashierScreen 时建立，供后续屏幕统一引用。
- * 设计意图：中老年友好——字号≥16sp、点击区≥48dp、单一沉稳品牌色、动画 150-250ms。
+ * 第 4 波 Task 2 落地 CashierScreen 时建立，供 CashierScreen 子组件统一引用。
+ * 品牌色沿用重构前蓝色 #2563eb（用户偏好），其余 token 不变。
  */
 
 /** 配色（§3.1：浅灰底 + 卡片纯白 + 单一品牌色） */
@@ -11,12 +11,12 @@ export const colors = {
   bg: "#F5F5F7",
   /** 卡片底色 */
   card: "#FFFFFF",
-  /** 品牌主色：墨绿（沉稳高级，金额/结算按钮强调） */
-  primary: "#1A5638",
+  /** 品牌主色：蓝（沿用重构前风格，金额/结算按钮强调） */
+  primary: "#2563eb",
   /** 品牌主色按下态（轻微压暗） */
-  primaryPressed: "#144730",
+  primaryPressed: "#1d4ed8",
   /** 品牌主色浅底（步进器底色、选中态衬底） */
-  primarySoft: "#E6EFE9",
+  primarySoft: "#eef2ff",
   /** 主文字 */
   text: "#1A1A1A",
   /** 辅助文字 */

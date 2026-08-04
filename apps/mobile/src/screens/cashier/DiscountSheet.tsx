@@ -86,7 +86,7 @@ export function DiscountSheet() {
     <Modal visible={open} transparent animationType="none" onRequestClose={close}>
       <Pressable style={cashierStyles.backdrop} onPress={close} />
       {open ? (
-        <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.bottomSheet}>
+        <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.centerSheet}>
           <Text style={cashierStyles.titleText}>整单优惠</Text>
 
           {/* tab 段控件（大段，§2.5） */}

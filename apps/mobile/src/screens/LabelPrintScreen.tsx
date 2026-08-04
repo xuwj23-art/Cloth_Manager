@@ -26,7 +26,6 @@ import {
 import { buildCtPrintJob, totalLabelCount } from "../printer/labelLayout";
 import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.types";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { colors, font, radius, space, touch } from "../theme/tokens";
 import { yuan } from "../utils/format";
 
 type LabelPrintNav = NativeStackNavigationProp<RootStackParamList, "LabelPrint">;
@@ -253,11 +252,11 @@ export function LabelPrintScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.topbarBtn}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>打印吊牌</Text>
-        <Pressable onPress={fillByStock} hitSlop={8} style={styles.topbarBtn}>
+        <Pressable onPress={fillByStock} hitSlop={8}>
           <Text style={styles.fillLink}>按库存</Text>
         </Pressable>
       </View>
@@ -267,11 +266,7 @@ export function LabelPrintScreen() {
         {LABEL_SIZES.map((s) => (
           <Pressable
             key={s.id}
-            style={({ pressed }) => [
-              styles.sizeChip,
-              size.id === s.id && styles.sizeChipOn,
-              pressed && size.id !== s.id && styles.chipPressed,
-            ]}
+            style={[styles.sizeChip, size.id === s.id && styles.sizeChipOn]}
             onPress={() => setSize(s)}
           >
             <Text style={[styles.sizeChipText, size.id === s.id && styles.sizeChipTextOn]}>
@@ -286,11 +281,7 @@ export function LabelPrintScreen() {
         {ORIENTATIONS.map((o) => (
           <Pressable
             key={o.id}
-            style={({ pressed }) => [
-              styles.sizeChip,
-              orientation === o.id && styles.sizeChipOn,
-              pressed && orientation !== o.id && styles.chipPressed,
-            ]}
+            style={[styles.sizeChip, orientation === o.id && styles.sizeChipOn]}
             onPress={() => setOrientation(o.id)}
           >
             <Text style={[styles.sizeChipText, orientation === o.id && styles.sizeChipTextOn]}>
@@ -356,12 +347,11 @@ export function LabelPrintScreen() {
                 setConnected(false);
               }}
               hitSlop={8}
-              style={styles.topbarBtn}
             >
               <Text style={styles.btLink}>断开</Text>
             </Pressable>
           ) : (
-            <Pressable onPress={openBluetooth} hitSlop={8} style={styles.topbarBtn}>
+            <Pressable onPress={openBluetooth} hitSlop={8}>
               <Text style={styles.btLink}>选择设备</Text>
             </Pressable>
           )}
@@ -370,11 +360,7 @@ export function LabelPrintScreen() {
 
       <View style={styles.footer}>
         <Pressable
-          style={({ pressed }) => [
-            styles.secondaryBtn,
-            busy && styles.dim,
-            pressed && !busy && styles.secondaryPressed,
-          ]}
+          style={[styles.secondaryBtn, busy && styles.dim]}
           disabled={busy}
           onPress={handleSharePdf}
         >
@@ -382,11 +368,7 @@ export function LabelPrintScreen() {
         </Pressable>
         {isPrinterAvailable ? (
           <Pressable
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              (busy || totalLabels === 0) && styles.dim,
-              pressed && !(busy || totalLabels === 0) && styles.primaryPressed,
-            ]}
+            style={[styles.primaryBtn, (busy || totalLabels === 0) && styles.dim]}
             disabled={busy || totalLabels === 0}
             onPress={handleBtPrint}
           >
@@ -396,11 +378,7 @@ export function LabelPrintScreen() {
           </Pressable>
         ) : (
           <Pressable
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              (busy || totalLabels === 0) && styles.dim,
-              pressed && !(busy || totalLabels === 0) && styles.primaryPressed,
-            ]}
+            style={[styles.primaryBtn, (busy || totalLabels === 0) && styles.dim]}
             disabled={busy || totalLabels === 0}
             onPress={handlePrint}
           >
@@ -419,12 +397,7 @@ export function LabelPrintScreen() {
           <View style={styles.modalCard}>
             <View style={styles.modalHead}>
               <Text style={styles.modalTitle}>选择蓝牙打印机</Text>
-              <Pressable
-                onPress={openBluetooth}
-                hitSlop={8}
-                disabled={scanning}
-                style={styles.topbarBtn}
-              >
+              <Pressable onPress={openBluetooth} hitSlop={8} disabled={scanning}>
                 <Text style={styles.btLink}>{scanning ? "刷新中…" : "刷新"}</Text>
               </Pressable>
             </View>
@@ -432,7 +405,7 @@ export function LabelPrintScreen() {
               请先在手机「系统设置 → 蓝牙」里配对打印机，再回到这里选择。
             </Text>
             {scanning ? (
-              <ActivityIndicator style={{ marginVertical: space.xl }} color={colors.primary} />
+              <ActivityIndicator style={{ marginVertical: 20 }} />
             ) : devices.length === 0 ? (
               <Text style={styles.modalEmpty}>未找到已配对设备</Text>
             ) : (
@@ -440,7 +413,7 @@ export function LabelPrintScreen() {
                 {devices.map((d) => (
                   <Pressable
                     key={d.mac}
-                    style={({ pressed }) => [styles.devRow, pressed && styles.cardPressed]}
+                    style={styles.devRow}
                     disabled={busy}
                     onPress={() => doConnect(d)}
                   >
@@ -450,10 +423,7 @@ export function LabelPrintScreen() {
                 ))}
               </ScrollView>
             )}
-            <Pressable
-              style={({ pressed }) => [styles.modalClose, pressed && styles.cardPressed]}
-              onPress={() => setBtOpen(false)}
-            >
+            <Pressable style={styles.modalClose} onPress={() => setBtOpen(false)}>
               <Text style={styles.modalCloseText}>关闭</Text>
             </Pressable>
           </View>
@@ -464,167 +434,138 @@ export function LabelPrintScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: "#fff" },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    backgroundColor: colors.card,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: "#f0f0f0",
   },
-  topbarBtn: { minHeight: touch.minSize, justifyContent: "center" },
-  back: { color: colors.primary, fontSize: font.body },
-  title: { fontSize: font.title, fontWeight: "800", color: colors.text },
-  fillLink: { color: colors.primary, fontSize: font.body, fontWeight: "700" },
+  back: { color: "#2563eb", fontSize: 16 },
+  title: { fontSize: 18, fontWeight: "800", color: "#111" },
+  fillLink: { color: "#2563eb", fontSize: 14, fontWeight: "700" },
   sizeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: space.sm,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md - 2,
-    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
-  sizeLabel: { fontSize: font.caption, color: colors.textMuted, marginRight: space.xs },
+  sizeLabel: { fontSize: 13, color: "#6b7280", marginRight: 4 },
   sizeChip: {
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.card,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    minHeight: touch.minSize,
-    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#f3f4f6",
   },
-  sizeChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  sizeChipText: { fontSize: font.caption, color: colors.textMuted, fontWeight: "700" },
+  sizeChipOn: { backgroundColor: "#2563eb" },
+  sizeChipText: { fontSize: 13, color: "#6b7280", fontWeight: "600" },
   sizeChipTextOn: { color: "#fff" },
-  chipPressed: { opacity: 0.7 },
-  body: { padding: space.lg, gap: space.md },
+  body: { padding: 16, gap: 10 },
   card: {
     flexDirection: "row",
     alignItems: "center",
-    gap: space.md,
-    padding: space.md,
+    gap: 12,
+    padding: 10,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
+    borderColor: "#eee",
+    borderRadius: 12,
   },
   qrBox: {
     width: 84,
     height: 84,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.card,
+    backgroundColor: "#fff",
   },
   cardInfo: { flex: 1, gap: 2 },
-  name: { fontSize: font.body, fontWeight: "700", color: colors.text },
-  spec: { fontSize: font.caption, color: colors.textMuted },
-  price: { fontSize: font.body, fontWeight: "800", color: colors.primary },
-  stepper: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  name: { fontSize: 15, fontWeight: "700", color: "#111" },
+  spec: { fontSize: 13, color: "#6b7280" },
+  price: { fontSize: 15, fontWeight: "800", color: "#111" },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 8 },
   stepBtn: {
-    width: touch.minSize,
-    height: touch.minSize,
-    borderRadius: radius.md,
-    backgroundColor: colors.primarySoft,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
   },
-  stepText: { fontSize: font.title, fontWeight: "800", color: colors.primary },
-  qtyText: { minWidth: 28, textAlign: "center", fontSize: font.body, fontWeight: "700" },
-  hint: { fontSize: font.caption, color: colors.textMuted, lineHeight: 20, marginTop: space.xs },
+  stepText: { fontSize: 18, fontWeight: "700", color: "#111" },
+  qtyText: { minWidth: 24, textAlign: "center", fontSize: 16, fontWeight: "700" },
+  hint: { fontSize: 12, color: "#9ca3af", lineHeight: 18, marginTop: 4 },
   footer: {
     flexDirection: "row",
-    gap: space.md,
-    padding: space.lg,
-    backgroundColor: colors.card,
+    gap: 12,
+    padding: 16,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: "#f0f0f0",
   },
   secondaryBtn: {
     flex: 1,
-    borderRadius: radius.md,
-    minHeight: touch.buttonHeight,
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: "center",
-    justifyContent: "center",
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: "#2563eb",
   },
-  secondaryPressed: { opacity: 0.7 },
-  secondaryText: { color: colors.primary, fontSize: font.body, fontWeight: "700" },
+  secondaryText: { color: "#2563eb", fontSize: 15, fontWeight: "700" },
   primaryBtn: {
     flex: 1.4,
-    borderRadius: radius.md,
-    minHeight: touch.buttonHeight,
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
+    backgroundColor: "#2563eb",
   },
-  primaryPressed: { backgroundColor: colors.primaryPressed },
-  primaryText: { color: "#fff", fontSize: font.body, fontWeight: "800" },
+  primaryText: { color: "#fff", fontSize: 15, fontWeight: "800" },
   dim: { opacity: 0.5 },
   btBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.card,
+    borderTopColor: "#f0f0f0",
   },
-  btStatus: { fontSize: font.caption, color: colors.text, fontWeight: "600" },
-  btLink: { color: colors.primary, fontSize: font.body, fontWeight: "700" },
+  btStatus: { fontSize: 13, color: "#374151", fontWeight: "600" },
+  btLink: { color: "#2563eb", fontSize: 14, fontWeight: "700" },
   modalMask: {
     flex: 1,
-    backgroundColor: colors.backdrop,
+    backgroundColor: "rgba(0,0,0,0.4)",
     justifyContent: "flex-end",
   },
   modalCard: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: space.xl,
-    paddingBottom: space.xxl + space.md,
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    padding: 18,
+    paddingBottom: 28,
   },
   modalHead: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  modalTitle: { fontSize: font.body + 1, fontWeight: "800", color: colors.text },
-  modalHint: {
-    fontSize: font.caption,
-    color: colors.textMuted,
-    marginTop: space.xs,
-    lineHeight: 20,
-  },
-  modalEmpty: {
-    fontSize: font.body,
-    color: colors.textMuted,
-    textAlign: "center",
-    marginVertical: space.xl,
-  },
+  modalTitle: { fontSize: 17, fontWeight: "800", color: "#111" },
+  modalHint: { fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 18 },
+  modalEmpty: { fontSize: 14, color: "#9ca3af", textAlign: "center", marginVertical: 24 },
   devRow: {
-    paddingVertical: space.md,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    minHeight: touch.minSize,
-    justifyContent: "center",
+    borderBottomColor: "#f3f4f6",
   },
-  cardPressed: { opacity: 0.7 },
-  devName: { fontSize: font.body, fontWeight: "700", color: colors.text },
-  devMac: { fontSize: font.caption, color: colors.textMuted, marginTop: 2 },
+  devName: { fontSize: 15, fontWeight: "700", color: "#111" },
+  devMac: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
   modalClose: {
-    marginTop: space.lg,
-    minHeight: touch.buttonHeight,
-    borderRadius: radius.md,
+    marginTop: 16,
+    paddingVertical: 13,
+    borderRadius: 12,
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.bg,
+    backgroundColor: "#f3f4f6",
   },
-  modalCloseText: { fontSize: font.body, fontWeight: "700", color: colors.text },
+  modalCloseText: { fontSize: 15, fontWeight: "700", color: "#374151" },
 });
