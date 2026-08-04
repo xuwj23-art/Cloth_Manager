@@ -7,7 +7,7 @@
     "dev": "nest start --watch",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" --config ../../eslint.config.js",
     "test": "vitest run",
     "test:integration": "prisma generate && vitest run --config vitest.integration.config.ts",
     "prisma:generate": "prisma generate",

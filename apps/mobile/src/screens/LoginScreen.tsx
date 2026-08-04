@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
 } from "react-native";
 import { useAuth } from "../auth-context";
 
@@ -92,9 +91,7 @@ export function LoginScreen() {
             value={inviteCode}
             onChangeText={setInviteCode}
           />
-          <Text style={styles.inviteHint}>
-            注册需邀请码，请向管理员获取。
-          </Text>
+          <Text style={styles.inviteHint}>注册需邀请码，请向管理员获取。</Text>
         </>
       )}
 
@@ -108,9 +105,7 @@ export function LoginScreen() {
         {submitting ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.btnText}>
-            {mode === "login" ? "登录" : "注册"}
-          </Text>
+          <Text style={styles.btnText}>{mode === "login" ? "登录" : "注册"}</Text>
         )}
       </Pressable>
 

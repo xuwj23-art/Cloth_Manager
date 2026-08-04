@@ -12,7 +12,7 @@
     "build:android": "cd android && gradlew.bat assembleRelease",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "echo \"(mobile) no lint configured yet\""
+    "lint": "eslint \"src/**/*.{ts,tsx}\" --config ../../eslint.config.js"
   },
   "dependencies": {
     "@cloth-scan/shared": "workspace:*",

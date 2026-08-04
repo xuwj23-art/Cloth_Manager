@@ -4,6 +4,7 @@
   "private": true,
   "description": "服装进销存 App（QR 吊牌 / 离线优先）—— 全栈 TypeScript Monorepo",
   "packageManager": "pnpm@10.34.1",
+  "type": "module",
   "engines": {
     "node": ">=20"
   },
@@ -11,14 +12,36 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "lint:all": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "server": "pnpm --filter @cloth-scan/server",
     "mobile": "pnpm --filter @cloth-scan/mobile",
-    "shared": "pnpm --filter @cloth-scan/shared"
+    "shared": "pnpm --filter @cloth-scan/shared",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "prettier": "^3.9.6",
     "turbo": "^2.3.3",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.66.0"
   }
 }
