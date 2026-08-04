@@ -11,6 +11,7 @@
     "web": "expo start --web",
     "build:android": "cd android && gradlew.bat assembleRelease",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "echo \"(mobile) no lint configured yet\""
   },
   "dependencies": {
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.17",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^2.1.9"
   }
 }
