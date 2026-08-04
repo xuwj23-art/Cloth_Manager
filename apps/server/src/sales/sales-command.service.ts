@@ -1,52 +1,28 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import type {
-  CreateSaleOrderInput,
-  DailySalesStat,
-  EditSaleOrderInput,
-  MonthlySalesReport,
-  OperatorSalesStat,
-  SaleOrderDetail,
-  SalesBucket,
-  SalesRange,
-  SalesReport,
-  SalesStat,
-  SalesSummary,
-  SalesWindowStats,
-  TopSkuStat,
-} from "@cloth-scan/shared";
+import type { CreateSaleOrderInput, EditSaleOrderInput, SaleOrderDetail } from "@cloth-scan/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 
-/** 本地时区下的「今日 0 点」 */
-function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-/** 本地时区下「本周一 0 点」（周一为一周起点） */
-function startOfWeek(): Date {
-  const d = startOfToday();
-  const day = d.getDay(); // 0=周日,1=周一...
-  const diff = (day + 6) % 7; // 距上一个周一的天数
-  d.setDate(d.getDate() - diff);
-  return d;
-}
-
-/** 本地时区下「本月 1 号 0 点」 */
-function startOfMonth(): Date {
-  const d = startOfToday();
-  d.setDate(1);
-  return d;
-}
-
+/**
+ * 销售写操作（命令侧）：createSale / editOrder / deleteOrder。
+ *
+ * 这一层承载 Wave 2 的全部并发/一致性保证（PRD §7 不变式），拆分时仅做代码移动，
+ * 不改动任何写行为：
+ *  - 金额用分（Int）
+ *  - 库存走流水（stockMovement）
+ *  - opId 幂等（P2002 / P2034 catch 保留）
+ *  - 防超卖（updateMany + stock>=qty 原子条件更新 + Serializable 隔离保留）
+ *  - 软删除（voided + deletedAt 保留）
+ *  - 门店隔离（product.shopId 关系过滤保留）
+ *  - 进价快照（saleItem.cost 保留）
+ *  - 售罄归档（products.recomputeArchive 调用保留）
+ *  - 整单优惠（orderDiscountCents：各行按原价入库，实收 = Σsubtotal - discount ≥ 0 保留）
+ *
+ * 只读查询见 SalesReportService。
+ */
 @Injectable()
-export class SalesService {
+export class SalesCommandService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly products: ProductsService,
@@ -63,11 +39,7 @@ export class SalesService {
    *  3) 防超卖 —— 用 updateMany 带 stock>=qty 条件做原子条件更新，count!==1 即库存不足，
    *     读写不再分离，无超卖窗口。
    */
-  async createSale(
-    shopId: string,
-    operatorId: string | null,
-    input: CreateSaleOrderInput,
-  ) {
+  async createSale(shopId: string, operatorId: string | null, input: CreateSaleOrderInput) {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
@@ -181,9 +153,7 @@ export class SalesService {
       //   注意：只有当 DB 里确有同 opId 单时才视为幂等命中，否则 P2034 是真并发冲突，
       //   应向上抛（调用方决定重试）。不减弱 Serializable 隔离级别。
       const code = (e as { code?: unknown } | null)?.code;
-      const isIdempotencyRace =
-        code === "P2002" ||
-        code === "P2034";
+      const isIdempotencyRace = code === "P2002" || code === "P2034";
       if (isIdempotencyRace) {
         // P2002 还要确认是 opId 字段冲突（SaleOrder 唯一约束目前只有 opId，防御性判断）
         if (code === "P2002") {
@@ -201,20 +171,6 @@ export class SalesService {
       }
       throw e;
     }
-  }
-
-  /** 销售流水（最近 500 笔），含明细名称与操作人。过滤软删单（voided + deletedAt 非空） */
-  async listOrders(shopId: string): Promise<SaleOrderDetail[]> {
-    const orders = await this.prisma.saleOrder.findMany({
-      where: { shopId, status: "completed", deletedAt: null },
-      include: {
-        operator: true,
-        items: { include: { sku: { include: { product: true } } } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 500,
-    });
-    return orders.map((o) => this.toDetail(o));
   }
 
   /**
@@ -263,12 +219,11 @@ export class SalesService {
    * 编辑账单：改价 / 改数量 / 删某件（quantity=0）。不支持加商品。
    * 库存按新旧数量差额回滚或扣减（扣减时校验库存）；总价与售罄状态同步刷新。
    * 若改后全单为空，则整单删除。
+   *
+   * 注意：编辑完成后回读详情走 SalesReportService.getOrder（只读路径）。
+   * 此处保留对 PrismaService 的直接回查以避免命令/报表服务双向依赖。
    */
-  async editOrder(
-    shopId: string,
-    id: string,
-    input: EditSaleOrderInput,
-  ): Promise<SaleOrderDetail> {
+  async editOrder(shopId: string, id: string, input: EditSaleOrderInput): Promise<SaleOrderDetail> {
     const order = await this.prisma.saleOrder.findUnique({
       where: { id },
       include: { items: { include: { sku: true } } },
@@ -356,9 +311,7 @@ export class SalesService {
         // 重算实收：各行 subtotal 之和 - 该单已记录的 orderDiscountCents（≥0）
         const remaining = await tx.saleItem.findMany({ where: { orderId: id } });
         if (remaining.length === 0) {
-          throw new BadRequestException(
-            "账单不能为空，请保留至少一件商品，或使用「删除整单」",
-          );
+          throw new BadRequestException("账单不能为空，请保留至少一件商品，或使用「删除整单」");
         }
         const subtotalSum = remaining.reduce((s, it) => s + it.subtotal, 0);
         // 编辑不改优惠金额；若改后 subtotal 之和小于已记优惠，夹到 0（不允许实收为负）
@@ -376,33 +329,14 @@ export class SalesService {
       { isolationLevel: "Serializable" },
     );
 
-    return this.getOrder(shopId, id);
+    return this.refetchDetail(shopId, id);
   }
 
-  /** 某一天（本地日期 YYYY-MM-DD）的销售流水，按时间倒序。过滤软删单 */
-  async listByDay(shopId: string, date: string): Promise<SaleOrderDetail[]> {
-    const [y, m, d] = date.split("-").map(Number);
-    if (!y || !m || !d) return [];
-    const start = new Date(y, m - 1, d, 0, 0, 0, 0);
-    const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
-    const orders = await this.prisma.saleOrder.findMany({
-      where: {
-        shopId,
-        status: "completed",
-        deletedAt: null,
-        createdAt: { gte: start, lt: end },
-      },
-      include: {
-        operator: true,
-        items: { include: { sku: { include: { product: true } } } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-    return orders.map((o) => this.toDetail(o));
-  }
-
-  /** 单据详情。软删单（voided + deletedAt 非空）视为不存在 */
-  async getOrder(shopId: string, id: string): Promise<SaleOrderDetail> {
+  /**
+   * 编辑后回读详情（软删单视为不存在）。内联实现以避免 Command→Report 循环依赖；
+   * 行为与 SalesReportService.getOrder 完全一致。
+   */
+  private async refetchDetail(shopId: string, id: string): Promise<SaleOrderDetail> {
     const order = await this.prisma.saleOrder.findUnique({
       where: { id },
       include: {
@@ -418,316 +352,17 @@ export class SalesService {
     ) {
       throw new NotFoundException("单据不存在");
     }
-    return this.toDetail(order);
-  }
-
-  /** 报表汇总：今日/本周/本月营业额、单数、销量 + 近 7 天热销榜 */
-  async getSummary(shopId: string): Promise<SalesSummary> {
-    const [today, week, month, topSkus] = await Promise.all([
-      this.windowStats(shopId, startOfToday()),
-      this.windowStats(shopId, startOfWeek()),
-      this.windowStats(shopId, startOfMonth()),
-      this.topSkus(shopId, startOfWeek()),
-    ]);
-    return { today, week, month, topSkus };
-  }
-
-  /**
-   * 报表（含利润 + 日期下钻）：
-   *  - today：仅合计，无下钻桶
-   *  - week ：本周一起，按「天」下钻（周一…今天）
-   *  - month：本月 1 号起，按「周」下钻（第1周=1~7号…第5周=29~月末）
-   * 桶顺序从早到近。利润 = 成交价合计 − 进价快照×数量。
-   */
-  async report(shopId: string, range: SalesRange): Promise<SalesReport> {
-    const now = new Date();
-    const start =
-      range === "today"
-        ? startOfToday()
-        : range === "week"
-          ? startOfWeek()
-          : startOfMonth();
-
-    const orders = await this.prisma.saleOrder.findMany({
-      where: {
-        shopId,
-        status: "completed",
-        deletedAt: null,
-        createdAt: { gte: start },
-      },
-      include: { items: true, operator: true },
-      orderBy: { createdAt: "asc" },
-    });
-
-    // 预建桶（空桶也展示，便于看趋势）
-    const buckets = this.buildBuckets(range, now);
-    const byKey = new Map(buckets.map((b) => [b.key, b]));
-
-    const total: SalesStat = {
-      revenue: 0,
-      cost: 0,
-      profit: 0,
-      orders: 0,
-      quantity: 0,
-    };
-
-    for (const o of orders) {
-      let orderQty = 0;
-      let orderCost = 0;
-      for (const it of o.items) {
-        orderQty += it.quantity;
-        orderCost += it.cost * it.quantity;
-      }
-      total.revenue += o.totalAmount;
-      total.cost += orderCost;
-      total.orders += 1;
-      total.quantity += orderQty;
-
-      const key = this.bucketKey(range, o.createdAt);
-      const b = key ? byKey.get(key) : undefined;
-      if (b) {
-        b.revenue += o.totalAmount;
-        b.profit += o.totalAmount - orderCost;
-        b.orders += 1;
-        b.quantity += orderQty;
-      }
-    }
-    total.profit = total.revenue - total.cost;
-
-    const topSkus = await this.topSkus(shopId, start);
-    const byOperator = this.operatorStats(orders);
-    return { range, total, buckets, topSkus, byOperator };
-  }
-
-  /**
-   * 历史某月销售（按天）：当月合计 + 各店员销售额 + 每天明细（1 号→月末，由早到近）。
-   * year/month 为本地年月（month 1-12）。空数据的天也会列出（便于看趋势）。
-   */
-  async monthlyReport(
-    shopId: string,
-    year: number,
-    month: number,
-  ): Promise<MonthlySalesReport> {
-    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
-    const end = new Date(year, month, 1, 0, 0, 0, 0);
-
-    const orders = await this.prisma.saleOrder.findMany({
-      where: {
-        shopId,
-        status: "completed",
-        deletedAt: null,
-        createdAt: { gte: start, lt: end },
-      },
-      include: { items: true, operator: true },
-      orderBy: { createdAt: "asc" },
-    });
-
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const days: DailySalesStat[] = Array.from(
-      { length: daysInMonth },
-      (_, i) => ({
-        date: `${year}-${pad(month)}-${pad(i + 1)}`,
-        revenue: 0,
-        profit: 0,
-        orders: 0,
-        quantity: 0,
-      }),
-    );
-
-    const total: SalesStat = {
-      revenue: 0,
-      cost: 0,
-      profit: 0,
-      orders: 0,
-      quantity: 0,
-    };
-
-    for (const o of orders) {
-      let qty = 0;
-      let cost = 0;
-      for (const it of o.items) {
-        qty += it.quantity;
-        cost += it.cost * it.quantity;
-      }
-      total.revenue += o.totalAmount;
-      total.cost += cost;
-      total.orders += 1;
-      total.quantity += qty;
-
-      const d = days[o.createdAt.getDate() - 1];
-      if (d) {
-        d.revenue += o.totalAmount;
-        d.profit += o.totalAmount - cost;
-        d.orders += 1;
-        d.quantity += qty;
-      }
-    }
-    total.profit = total.revenue - total.cost;
-
-    return { year, month, total, byOperator: this.operatorStats(orders), days };
-  }
-
-  /** 把订单列表汇总成各店员销售额（按营业额从高到低） */
-  private operatorStats(
-    orders: {
-      operatorId: string | null;
-      operator: { name: string } | null;
-      totalAmount: number;
-      items: { quantity: number }[];
-    }[],
-  ): OperatorSalesStat[] {
-    const map = new Map<string, OperatorSalesStat>();
-    for (const o of orders) {
-      const key = o.operatorId ?? "__none__";
-      let s = map.get(key);
-      if (!s) {
-        s = {
-          operatorId: o.operatorId,
-          operatorName: o.operator?.name ?? null,
-          revenue: 0,
-          orders: 0,
-          quantity: 0,
-        };
-        map.set(key, s);
-      }
-      s.revenue += o.totalAmount;
-      s.orders += 1;
-      s.quantity += o.items.reduce((q, it) => q + it.quantity, 0);
-    }
-    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
-  }
-
-  /** 生成空桶（含 label），顺序从早到近 */
-  private buildBuckets(range: SalesRange, now: Date): SalesBucket[] {
-    const empty = (key: string, label: string): SalesBucket => ({
-      key,
-      label,
-      revenue: 0,
-      profit: 0,
-      orders: 0,
-      quantity: 0,
-    });
-    if (range === "today") return [];
-    if (range === "week") {
-      const names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-      const todayIdx = (now.getDay() + 6) % 7; // 周一=0
-      return names.slice(0, todayIdx + 1).map((n, i) => empty(`d${i}`, n));
-    }
-    // month：按日期段分周，最多 5 周（第5周=29~月末）
-    const maxIdx = Math.min(Math.floor((now.getDate() - 1) / 7), 4);
-    return Array.from({ length: maxIdx + 1 }, (_, i) =>
-      empty(`w${i}`, `第${i + 1}周`),
-    );
-  }
-
-  /** 某订单时间落在哪个桶 */
-  private bucketKey(range: SalesRange, date: Date): string | null {
-    if (range === "today") return null;
-    if (range === "week") return `d${(date.getDay() + 6) % 7}`;
-    return `w${Math.min(Math.floor((date.getDate() - 1) / 7), 4)}`;
-  }
-
-  private async windowStats(
-    shopId: string,
-    since: Date,
-  ): Promise<SalesWindowStats> {
-    const where = {
-      shopId,
-      status: "completed" as const,
-      deletedAt: null,
-      createdAt: { gte: since },
-    };
-    const [orderAgg, itemAgg] = await Promise.all([
-      this.prisma.saleOrder.aggregate({
-        where,
-        _sum: { totalAmount: true },
-        _count: true,
-      }),
-      this.prisma.saleItem.aggregate({
-        where: { order: where },
-        _sum: { quantity: true },
-      }),
-    ]);
     return {
-      revenue: orderAgg._sum.totalAmount ?? 0,
-      orders: orderAgg._count,
-      quantity: itemAgg._sum.quantity ?? 0,
-    };
-  }
-
-  private async topSkus(shopId: string, since: Date): Promise<TopSkuStat[]> {
-    const grouped = await this.prisma.saleItem.groupBy({
-      by: ["skuId"],
-      where: {
-        order: {
-          shopId,
-          status: "completed",
-          deletedAt: null,
-          createdAt: { gte: since },
-        },
-      },
-      _sum: { quantity: true, subtotal: true },
-      orderBy: { _sum: { quantity: "desc" } },
-      take: 5,
-    });
-    if (grouped.length === 0) return [];
-
-    const skus = await this.prisma.sku.findMany({
-      where: { id: { in: grouped.map((g) => g.skuId) } },
-      include: { product: true },
-    });
-    const byId = new Map(skus.map((s) => [s.id, s]));
-
-    return grouped.map((g) => {
-      const sku = byId.get(g.skuId);
-      return {
-        skuId: g.skuId,
-        productName: sku?.product.name ?? "(已删除)",
-        color: sku?.color ?? "",
-        size: sku?.size ?? "",
-        barcode: sku?.barcode ?? "",
-        quantity: g._sum.quantity ?? 0,
-        revenue: g._sum.subtotal ?? 0,
-      };
-    });
-  }
-
-  private toDetail(o: {
-    id: string;
-    shopId: string;
-    operatorId: string | null;
-    operator: { name: string } | null;
-    status: string;
-    totalAmount: number;
-    orderDiscountCents: number;
-    createdAt: Date;
-    items: {
-      id: string;
-      skuId: string;
-      quantity: number;
-      price: number;
-      cost: number;
-      subtotal: number;
-      sku: {
-        color: string;
-        size: string;
-        barcode: string;
-        product: { name: string; coverImage: string | null };
-      };
-    }[];
-  }): SaleOrderDetail {
-    return {
-      id: o.id,
-      shopId: o.shopId,
-      operatorId: o.operatorId,
-      operatorName: o.operator?.name ?? null,
-      status: o.status as SaleOrderDetail["status"],
-      totalAmount: o.totalAmount,
-      orderDiscountCents: o.orderDiscountCents,
-      itemCount: o.items.reduce((s, it) => s + it.quantity, 0),
-      createdAt: o.createdAt.toISOString(),
-      items: o.items.map((it) => ({
+      id: order.id,
+      shopId: order.shopId,
+      operatorId: order.operatorId,
+      operatorName: order.operator?.name ?? null,
+      status: order.status as SaleOrderDetail["status"],
+      totalAmount: order.totalAmount,
+      orderDiscountCents: order.orderDiscountCents,
+      itemCount: order.items.reduce((s, it) => s + it.quantity, 0),
+      createdAt: order.createdAt.toISOString(),
+      items: order.items.map((it) => ({
         id: it.id,
         skuId: it.skuId,
         quantity: it.quantity,

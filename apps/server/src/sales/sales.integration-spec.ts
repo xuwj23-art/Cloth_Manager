@@ -1,14 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { startPg, stopPg, resetDb } from "../../test/pg-container";
-import { SalesService } from "./sales.service";
+import { SalesCommandService } from "./sales-command.service";
+import { SalesReportService } from "./sales-report.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 
 describe("PG 容器集成测试基础设施", () => {
   let prisma: PrismaClient;
-  beforeAll(async () => { prisma = await startPg(); });
-  afterAll(async () => { await stopPg(); });
+  beforeAll(async () => {
+    prisma = await startPg();
+  });
+  afterAll(async () => {
+    await stopPg();
+  });
 
   it("容器已启动且能建表（SELECT 1 成功）", async () => {
     const r = await prisma.$queryRaw`SELECT 1 AS ok`;
@@ -29,6 +34,8 @@ describe("PG 容器集成测试基础设施", () => {
  * 并发安全测试（Task 2: A1 幂等 + A2 防超卖）。
  * 用独立 describe 块 + 自己的 beforeAll/afterAll，避免与上面的基础设施冒烟测试
  * 共享同一 prisma 单例导致 resetDb 互相干扰。
+ *
+ * 拆分后写操作走 SalesCommandService，读操作走 SalesReportService。
  */
 async function seedFixture(p: PrismaClient) {
   await resetDb(p);
@@ -66,15 +73,17 @@ async function seedFixture(p: PrismaClient) {
 
 describe("createSale 并发安全（A1 幂等 + A2 防超卖）", () => {
   let prisma: PrismaClient;
-  let sales: SalesService;
+  let command: SalesCommandService;
   beforeAll(async () => {
     prisma = await startPg();
-    sales = new SalesService(
+    command = new SalesCommandService(
       prisma as unknown as PrismaService,
       new ProductsService(prisma as unknown as PrismaService),
     );
   });
-  afterAll(async () => { await stopPg(); });
+  afterAll(async () => {
+    await stopPg();
+  });
 
   it("A1: 同一 opId 并发提交两次，只扣一次库存且都返回同一单", async () => {
     const { shopId, userId, skuId } = await seedFixture(prisma);
@@ -83,8 +92,8 @@ describe("createSale 并发安全（A1 幂等 + A2 防超卖）", () => {
       items: [{ skuId, quantity: 3, price: 9900 }],
     };
     const [r1, r2] = await Promise.all([
-      sales.createSale(shopId, userId, input),
-      sales.createSale(shopId, userId, input),
+      command.createSale(shopId, userId, input),
+      command.createSale(shopId, userId, input),
     ]);
     expect(r1.id).toBe(r2.id); // 同一单
     const sku = await prisma.sku.findUnique({ where: { id: skuId } });
@@ -95,11 +104,11 @@ describe("createSale 并发安全（A1 幂等 + A2 防超卖）", () => {
     const { shopId, userId, skuId } = await seedFixture(prisma);
     // 库存 10，两个请求各买 8（合计 16 > 10），应一个成功一个失败
     const results = await Promise.allSettled([
-      sales.createSale(shopId, userId, {
+      command.createSale(shopId, userId, {
         opId: "op-race-a",
         items: [{ skuId, quantity: 8, price: 9900 }],
       }),
-      sales.createSale(shopId, userId, {
+      command.createSale(shopId, userId, {
         opId: "op-race-b",
         items: [{ skuId, quantity: 8, price: 9900 }],
       }),
@@ -117,23 +126,29 @@ describe("createSale 并发安全（A1 幂等 + A2 防超卖）", () => {
 /**
  * Task 3: 订单软删除（A4）。删单 = voided + deletedAt，库存回滚，
  * SaleItem 行保留作审计痕迹，前台查询过滤掉软删单。
+ *
+ * 删单是写（SalesCommandService），流水查询是读（SalesReportService）。
  */
 describe("deleteOrder 软删除（A4）", () => {
   let prisma: PrismaClient;
-  let sales: SalesService;
+  let command: SalesCommandService;
+  let reports: SalesReportService;
   beforeAll(async () => {
     prisma = await startPg();
-    sales = new SalesService(
+    command = new SalesCommandService(
       prisma as unknown as PrismaService,
       new ProductsService(prisma as unknown as PrismaService),
     );
+    reports = new SalesReportService(prisma as unknown as PrismaService);
   });
-  afterAll(async () => { await stopPg(); });
+  afterAll(async () => {
+    await stopPg();
+  });
 
   it("删单后：status=voided、deletedAt 非空、库存回滚、SaleItem 保留", async () => {
     const { shopId, userId, skuId } = await seedFixture(prisma);
     // 开一笔单卖 4 件（库存 10 → 6）
-    const order = await sales.createSale(shopId, userId, {
+    const order = await command.createSale(shopId, userId, {
       opId: "op-softdel-1",
       items: [{ skuId, quantity: 4, price: 9900 }],
     });
@@ -145,7 +160,7 @@ describe("deleteOrder 软删除（A4）", () => {
     expect(itemIds.length).toBe(1);
 
     // 软删除
-    await sales.deleteOrder(shopId, order.id);
+    await command.deleteOrder(shopId, order.id);
 
     // 单据仍在 DB，但 status=voided + deletedAt 非空
     const after = await prisma.saleOrder.findUnique({ where: { id: order.id } });
@@ -168,17 +183,17 @@ describe("deleteOrder 软删除（A4）", () => {
 
   it("listOrders 不含软删单", async () => {
     const { shopId, userId, skuId } = await seedFixture(prisma);
-    const live = await sales.createSale(shopId, userId, {
+    const live = await command.createSale(shopId, userId, {
       opId: "op-softdel-live",
       items: [{ skuId, quantity: 1, price: 9900 }],
     });
-    const toDelete = await sales.createSale(shopId, userId, {
+    const toDelete = await command.createSale(shopId, userId, {
       opId: "op-softdel-del",
       items: [{ skuId, quantity: 1, price: 9900 }],
     });
-    await sales.deleteOrder(shopId, toDelete.id);
+    await command.deleteOrder(shopId, toDelete.id);
 
-    const list = await sales.listOrders(shopId);
+    const list = await reports.listOrders(shopId);
     const ids = list.map((o) => o.id);
     expect(ids).toContain(live.id);
     expect(ids).not.toContain(toDelete.id); // 软删单对流水不可见
@@ -189,23 +204,29 @@ describe("deleteOrder 软删除（A4）", () => {
  * Task 4: 订单级优惠字段 orderDiscountCents（A3）。
  * 解决多件行整数分摊无精确解的数学死角：各行按原价入库，优惠单独记。
  * 实收 = Σ各行subtotal - orderDiscountCents；totalAmount 即实收，不可为负。
+ *
+ * 开单/详情/报表分属命令/报表两侧，分别注入 SalesCommandService / SalesReportService。
  */
 describe("createSale 订单级优惠 orderDiscountCents（A3）", () => {
   let prisma: PrismaClient;
-  let sales: SalesService;
+  let command: SalesCommandService;
+  let reports: SalesReportService;
   beforeAll(async () => {
     prisma = await startPg();
-    sales = new SalesService(
+    command = new SalesCommandService(
       prisma as unknown as PrismaService,
       new ProductsService(prisma as unknown as PrismaService),
     );
+    reports = new SalesReportService(prisma as unknown as PrismaService);
   });
-  afterAll(async () => { await stopPg(); });
+  afterAll(async () => {
+    await stopPg();
+  });
 
   it("带 orderDiscountCents 开单：totalAmount=Σsubtotal-discount，字段已存储", async () => {
     const { shopId, userId, skuId } = await seedFixture(prisma);
     // 卖 3 件 @9900 = 29700；整单优惠 4700；实收应为 25000
-    const order = await sales.createSale(shopId, userId, {
+    const order = await command.createSale(shopId, userId, {
       opId: "op-disc-1",
       items: [{ skuId, quantity: 3, price: 9900 }],
       orderDiscountCents: 4700,
@@ -217,7 +238,7 @@ describe("createSale 订单级优惠 orderDiscountCents（A3）", () => {
     expect(order.items[0]!.subtotal).toBe(29700);
 
     // 详情接口返回 orderDiscountCents
-    const detail = await sales.getOrder(shopId, order.id);
+    const detail = await reports.getOrder(shopId, order.id);
     expect(detail.orderDiscountCents).toBe(4700);
     expect(detail.totalAmount).toBe(25000);
   });
@@ -225,7 +246,7 @@ describe("createSale 订单级优惠 orderDiscountCents（A3）", () => {
   it("优惠超过原价合计应 BadRequest（不允许实收为负）", async () => {
     const { shopId, userId, skuId } = await seedFixture(prisma);
     await expect(
-      sales.createSale(shopId, userId, {
+      command.createSale(shopId, userId, {
         opId: "op-disc-over",
         items: [{ skuId, quantity: 1, price: 9900 }],
         orderDiscountCents: 10000, // > 9900
@@ -236,12 +257,12 @@ describe("createSale 订单级优惠 orderDiscountCents（A3）", () => {
   it("报表 revenue 基于实收 totalAmount（含优惠扣减），profit = revenue - cost", async () => {
     const { shopId, userId, skuId } = await seedFixture(prisma);
     // 卖 2 件 @9900 = 19800；优惠 1800；实收 18000；进价 5000*2 = 10000；毛利 8000
-    await sales.createSale(shopId, userId, {
+    await command.createSale(shopId, userId, {
       opId: "op-disc-report",
       items: [{ skuId, quantity: 2, price: 9900 }],
       orderDiscountCents: 1800,
     });
-    const rep = await sales.report(shopId, "today");
+    const rep = await reports.report(shopId, "today");
     expect(rep.total.revenue).toBe(18000); // 实收，不是原价 19800
     expect(rep.total.cost).toBe(10000);
     expect(rep.total.profit).toBe(8000); // 18000 - 10000

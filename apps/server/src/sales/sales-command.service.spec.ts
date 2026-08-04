@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
-import { SalesService } from "./sales.service";
+import { SalesCommandService } from "./sales-command.service";
 import type { PrismaService } from "../prisma/prisma.service";
 
 const SHOP = "shop-1";
 
-/** products.recomputeArchive 是 SalesService 的依赖，此处 stub 掉避免拉起真实 Prisma */
+/** products.recomputeArchive 是 SalesCommandService 的依赖，此处 stub 掉避免拉起真实 Prisma */
 const productsStub = { recomputeArchive: vi.fn() } as any;
 
 /**
@@ -25,9 +25,7 @@ function makePrisma(opts: {
   const tx = {
     sku: {
       findUnique: vi.fn().mockResolvedValue(skuRow),
-      updateMany: vi
-        .fn()
-        .mockResolvedValue({ count: opts.updateManyCount ?? 1 }),
+      updateMany: vi.fn().mockResolvedValue({ count: opts.updateManyCount ?? 1 }),
     },
     saleOrder: {
       create: opts.saleOrderCreateThrows
@@ -62,10 +60,10 @@ const okSku = {
   product: { shopId: SHOP },
 };
 
-describe("SalesService.createSale", () => {
+describe("SalesCommandService.createSale", () => {
   it("正常开单：原子扣减库存并写一条出库流水", async () => {
     const prisma = makePrisma({ sku: { ...okSku } }) as any;
-    const service = new SalesService(prisma, productsStub);
+    const service = new SalesCommandService(prisma, productsStub);
 
     const order = await service.createSale(SHOP, "user-1", {
       opId: "op-1",
@@ -98,7 +96,7 @@ describe("SalesService.createSale", () => {
       saleOrderCreateThrows: p2002,
       existingOrder: existing, // 外层 findUnique 回查命中已存在单
     }) as any;
-    const service = new SalesService(prisma, productsStub);
+    const service = new SalesCommandService(prisma, productsStub);
 
     const order = await service.createSale(SHOP, "user-1", {
       opId: "op-1",
@@ -127,7 +125,7 @@ describe("SalesService.createSale", () => {
     }) as any;
     // 让 $transaction 抛 P2034（模拟 PG 中止整个事务）
     prisma.$transaction = vi.fn().mockRejectedValue(p2034);
-    const service = new SalesService(prisma, productsStub);
+    const service = new SalesCommandService(prisma, productsStub);
 
     const order = await service.createSale(SHOP, "user-1", {
       opId: "op-race",
@@ -145,7 +143,7 @@ describe("SalesService.createSale", () => {
       sku: { ...okSku, stock: 1 },
       updateManyCount: 0, // 库存 1 < 需 5，updateMany 不命中
     }) as any;
-    const service = new SalesService(prisma, productsStub);
+    const service = new SalesCommandService(prisma, productsStub);
 
     await expect(
       service.createSale(SHOP, "user-1", {
@@ -161,7 +159,7 @@ describe("SalesService.createSale", () => {
       sku: { ...okSku, product: { shopId: "other-shop" } },
       updateManyCount: 0, // 门店隔离过滤使 updateMany 不命中
     }) as any;
-    const service = new SalesService(prisma, productsStub);
+    const service = new SalesCommandService(prisma, productsStub);
 
     await expect(
       service.createSale(SHOP, "user-1", {
@@ -172,111 +170,7 @@ describe("SalesService.createSale", () => {
   });
 });
 
-describe("SalesService.getSummary", () => {
-  it("????/???????????????", async () => {
-    const prisma = {
-      saleOrder: {
-        aggregate: vi
-          .fn()
-          .mockResolvedValueOnce({ _sum: { totalAmount: 11800 }, _count: 2 })
-          .mockResolvedValueOnce({ _sum: { totalAmount: 30000 }, _count: 5 })
-          .mockResolvedValueOnce({ _sum: { totalAmount: 88000 }, _count: 12 }),
-      },
-      saleItem: {
-        aggregate: vi
-          .fn()
-          .mockResolvedValueOnce({ _sum: { quantity: 3 } })
-          .mockResolvedValueOnce({ _sum: { quantity: 8 } })
-          .mockResolvedValueOnce({ _sum: { quantity: 20 } }),
-        groupBy: vi
-          .fn()
-          .mockResolvedValue([
-            { skuId: "sku-1", _sum: { quantity: 5, subtotal: 29500 } },
-          ]),
-      },
-      sku: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: "sku-1",
-            color: "?",
-            size: "M",
-            barcode: "DEMO-WHITE-M",
-            product: { name: "??T?" },
-          },
-        ]),
-      },
-    } as any;
-    const service = new SalesService(prisma, productsStub);
-
-    const summary = await service.getSummary(SHOP);
-
-    expect(summary.today).toEqual({ revenue: 11800, orders: 2, quantity: 3 });
-    expect(summary.week).toEqual({ revenue: 30000, orders: 5, quantity: 8 });
-    expect(summary.month).toEqual({ revenue: 88000, orders: 12, quantity: 20 });
-    expect(summary.topSkus).toHaveLength(1);
-    expect(summary.topSkus[0]).toMatchObject({
-      productName: "??T?",
-      quantity: 5,
-      revenue: 29500,
-    });
-  });
-
-  it("??????????????", async () => {
-    const prisma = {
-      saleOrder: {
-        aggregate: vi
-          .fn()
-          .mockResolvedValue({ _sum: { totalAmount: null }, _count: 0 }),
-      },
-      saleItem: {
-        aggregate: vi.fn().mockResolvedValue({ _sum: { quantity: null } }),
-        groupBy: vi.fn().mockResolvedValue([]),
-      },
-      sku: { findMany: vi.fn() },
-    } as any;
-    const service = new SalesService(prisma, productsStub);
-
-    const summary = await service.getSummary(SHOP);
-
-    expect(summary.today).toEqual({ revenue: 0, orders: 0, quantity: 0 });
-    expect(summary.topSkus).toEqual([]);
-    expect(prisma.sku.findMany).not.toHaveBeenCalled();
-  });
-});
-
-describe("SalesService.report", () => {
-  it("利润 = 营业额 - 进价快照×数量（今日档，无下钻桶）", async () => {
-    const prisma = {
-      saleOrder: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: "order-1",
-            totalAmount: 11800,
-            createdAt: new Date(),
-            items: [{ quantity: 2, price: 5900, cost: 3000, subtotal: 11800 }],
-          },
-        ]),
-      },
-      saleItem: { groupBy: vi.fn().mockResolvedValue([]) },
-      sku: { findMany: vi.fn() },
-    } as any;
-    const service = new SalesService(prisma, productsStub);
-
-    const report = await service.report(SHOP, "today");
-
-    expect(report.total).toEqual({
-      revenue: 11800,
-      cost: 6000,
-      profit: 5800,
-      orders: 1,
-      quantity: 2,
-    });
-    expect(report.buckets).toEqual([]);
-    expect(report.topSkus).toEqual([]);
-  });
-});
-
-describe("SalesService.deleteOrder", () => {
+describe("SalesCommandService.deleteOrder", () => {
   it("整单软删除：库存加回 + 删出库流水 + 单据置 voided/deletedAt（不级联删 SaleItem）", async () => {
     const tx = {
       sku: { update: vi.fn().mockResolvedValue({ productId: "p1" }) },
@@ -295,7 +189,7 @@ describe("SalesService.deleteOrder", () => {
       },
       $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
     } as any;
-    const service = new SalesService(prisma, productsStub);
+    const service = new SalesCommandService(prisma, productsStub);
 
     const res = await service.deleteOrder(SHOP, "o1");
 
@@ -318,11 +212,12 @@ describe("SalesService.deleteOrder", () => {
   });
 });
 
-describe("SalesService.editOrder", () => {
+describe("SalesCommandService.editOrder", () => {
   it("减少数量会回滚库存并重算总价", async () => {
     const editable = {
       id: "o1",
       shopId: SHOP,
+      orderDiscountCents: 0,
       items: [
         {
           id: "i1",
@@ -334,6 +229,7 @@ describe("SalesService.editOrder", () => {
         },
       ],
     };
+    // editOrder 走 refetchDetail 回读详情
     const detail = {
       id: "o1",
       shopId: SHOP,
@@ -342,6 +238,7 @@ describe("SalesService.editOrder", () => {
       status: "completed",
       deletedAt: null,
       totalAmount: 5000,
+      orderDiscountCents: 0,
       createdAt: new Date(),
       items: [
         {
@@ -349,6 +246,7 @@ describe("SalesService.editOrder", () => {
           skuId: "s1",
           quantity: 1,
           price: 5000,
+          cost: 0,
           subtotal: 5000,
           sku: {
             color: "白",
@@ -376,12 +274,13 @@ describe("SalesService.editOrder", () => {
       saleOrder: {
         findUnique: vi
           .fn()
+          // 第一次：editOrder 取 editable（含 sku）；第二次：refetchDetail 取 detail（含 product）
           .mockResolvedValueOnce(editable)
           .mockResolvedValueOnce(detail),
       },
       $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
     } as any;
-    const service = new SalesService(prisma, productsStub);
+    const service = new SalesCommandService(prisma, productsStub);
 
     const result = await service.editOrder(SHOP, "o1", {
       items: [{ id: "i1", quantity: 1, price: 5000 }],
@@ -408,80 +307,5 @@ describe("SalesService.editOrder", () => {
       data: { totalAmount: 5000 },
     });
     expect(result.totalAmount).toBe(5000);
-  });
-});
-
-describe("SalesService.getOrder", () => {
-  const orderRow = {
-    id: "order-1",
-    shopId: SHOP,
-    operatorId: "user-1",
-    operator: { name: "??" },
-    status: "completed",
-    deletedAt: null,
-    totalAmount: 11800,
-    createdAt: new Date("2026-06-08T10:00:00.000Z"),
-    items: [
-      {
-        id: "it-1",
-        skuId: "sku-1",
-        quantity: 2,
-        price: 5900,
-        subtotal: 11800,
-        sku: {
-          color: "?",
-          size: "M",
-          barcode: "DEMO-WHITE-M",
-          product: { name: "??T?", coverImage: null },
-        },
-      },
-    ],
-  };
-
-  it("????????????????????", async () => {
-    const prisma = {
-      saleOrder: { findUnique: vi.fn().mockResolvedValue(orderRow) },
-    } as any;
-    const service = new SalesService(prisma, productsStub);
-
-    const detail = await service.getOrder(SHOP, "order-1");
-
-    expect(detail.operatorName).toBe("??");
-    expect(detail.itemCount).toBe(2);
-    expect(detail.items[0]).toMatchObject({
-      productName: "??T?",
-      color: "?",
-      size: "M",
-    });
-  });
-
-  it("?????? NotFoundException", async () => {
-    const prisma = {
-      saleOrder: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({ ...orderRow, shopId: "other-shop" }),
-      },
-    } as any;
-    const service = new SalesService(prisma, productsStub);
-
-    await expect(service.getOrder(SHOP, "order-1")).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
-  });
-
-  it("软删单（voided + deletedAt 非空）视为不存在，抛 NotFoundException", async () => {
-    const prisma = {
-      saleOrder: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({ ...orderRow, status: "voided", deletedAt: new Date() }),
-      },
-    } as any;
-    const service = new SalesService(prisma, productsStub);
-
-    await expect(service.getOrder(SHOP, "order-1")).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
   });
 });
