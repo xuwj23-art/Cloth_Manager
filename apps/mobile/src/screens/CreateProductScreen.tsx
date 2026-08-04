@@ -16,6 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 import { expandSkuMatrix, CreateProductInput } from "@cloth-scan/shared";
 import { createProduct, imageUrl, uploadImage } from "../api";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { colors as themeColors, font, radius, space, touch } from "../theme/tokens";
 
 type CreateProductNav = NativeStackNavigationProp<RootStackParamList, "CreateProduct">;
 
@@ -294,70 +295,85 @@ export function CreateProductScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.topbarBtn}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>商品建档</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      {/* 封面图 */}
-      <Text style={styles.label}>封面图</Text>
-      <View style={styles.imageRow}>
-        <View style={styles.imageBox}>
-          {uploading ? (
-            <ActivityIndicator />
-          ) : coverPath ? (
-            <Image source={{ uri: imageUrl(coverPath) }} style={styles.image} />
-          ) : (
-            <Text style={styles.imagePlaceholder}>无图</Text>
-          )}
-        </View>
-        <View style={styles.imageBtns}>
-          <Pressable style={styles.smallBtn} onPress={() => pickImage(true)}>
-            <Text style={styles.smallBtnText}>拍照</Text>
-          </Pressable>
-          <Pressable style={styles.smallBtn} onPress={() => pickImage(false)}>
-            <Text style={styles.smallBtnText}>从相册选</Text>
-          </Pressable>
-        </View>
+      {/* 顶部大照片区（Vestiaire §2.5）：建档视觉焦点，点击区≥48dp */}
+      <View style={styles.photoBox}>
+        {uploading ? (
+          <ActivityIndicator size="large" color={themeColors.primary} />
+        ) : coverPath ? (
+          <Image source={{ uri: imageUrl(coverPath) }} style={styles.photo} />
+        ) : (
+          <View style={styles.photoPlaceholder}>
+            <Text style={styles.photoIcon}>📷</Text>
+            <Text style={styles.photoHint}>添加封面图</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.photoBtns}>
+        <Pressable
+          style={({ pressed }) => [styles.photoBtn, pressed && styles.photoBtnPressed]}
+          onPress={() => pickImage(true)}
+        >
+          <Text style={styles.photoBtnText}>📷 拍照</Text>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.photoBtn, pressed && styles.photoBtnPressed]}
+          onPress={() => pickImage(false)}
+        >
+          <Text style={styles.photoBtnText}>🖼️ 从相册选</Text>
+        </Pressable>
       </View>
 
-      {/* 价格 / 库存（必填，普通服装填这三项即可建档） */}
-      <View style={styles.row}>
-        <View style={styles.flex1}>
-          <Text style={styles.label}>进价（元）</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            value={costPrice}
-            onChangeText={setCostPrice}
-          />
-        </View>
-        <View style={styles.flex1}>
-          <Text style={styles.label}>售价（元）</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            value={salePrice}
-            onChangeText={setSalePrice}
-          />
-        </View>
+      {/* 价格 / 库存（必填，垂直字段） */}
+      <View style={styles.fieldGroup}>
+        <Text style={styles.label}>进价（元）</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="decimal-pad"
+          placeholder="0.00"
+          placeholderTextColor={themeColors.textMuted}
+          value={costPrice}
+          onChangeText={setCostPrice}
+        />
       </View>
-      <Text style={styles.label}>库存</Text>
-      <TextInput
-        style={styles.input}
-        keyboardType="number-pad"
-        placeholder="1"
-        value={initialStock}
-        onChangeText={setInitialStock}
-      />
+      <View style={styles.fieldGroup}>
+        <Text style={styles.label}>
+          售价（元）<Text style={styles.required}> *</Text>
+        </Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="decimal-pad"
+          placeholder="0.00"
+          placeholderTextColor={themeColors.textMuted}
+          value={salePrice}
+          onChangeText={setSalePrice}
+        />
+      </View>
+      <View style={styles.fieldGroup}>
+        <Text style={styles.label}>库存</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="number-pad"
+          placeholder="1"
+          placeholderTextColor={themeColors.textMuted}
+          value={initialStock}
+          onChangeText={setInitialStock}
+        />
+      </View>
 
       {/* 详细设置（品名 / 颜色 / 尺码）：默认折叠 */}
       <Pressable
-        style={[styles.detailToggle, detailExpanded && styles.detailToggleActive]}
+        style={({ pressed }) => [
+          styles.detailToggle,
+          detailExpanded && styles.detailToggleActive,
+          pressed && styles.detailTogglePressed,
+        ]}
         onPress={() => setDetailExpanded((v) => !v)}
       >
         <View style={styles.detailToggleLeft}>
@@ -377,6 +393,7 @@ export function CreateProductScreen() {
           <TextInput
             style={styles.input}
             placeholder="留空将按材质+品类或「未命名商品」自动命名"
+            placeholderTextColor={themeColors.textMuted}
             value={name}
             onChangeText={setName}
           />
@@ -410,11 +427,15 @@ export function CreateProductScreen() {
             <TextInput
               style={[styles.input, styles.flex1, styles.miniInput]}
               placeholder="自定义材质"
+              placeholderTextColor={themeColors.textMuted}
               value={customMaterial}
               onChangeText={setCustomMaterial}
               onSubmitEditing={addCustomMaterial}
             />
-            <Pressable style={styles.miniAddBtn} onPress={addCustomMaterial}>
+            <Pressable
+              style={({ pressed }) => [styles.miniAddBtn, pressed && styles.miniAddPressed]}
+              onPress={addCustomMaterial}
+            >
               <Text style={styles.addBtnText}>+</Text>
             </Pressable>
           </View>
@@ -445,11 +466,15 @@ export function CreateProductScreen() {
             <TextInput
               style={[styles.input, styles.flex1, styles.miniInput]}
               placeholder="自定义品类"
+              placeholderTextColor={themeColors.textMuted}
               value={customCategory}
               onChangeText={setCustomCategory}
               onSubmitEditing={addCustomCategory}
             />
-            <Pressable style={styles.miniAddBtn} onPress={addCustomCategory}>
+            <Pressable
+              style={({ pressed }) => [styles.miniAddBtn, pressed && styles.miniAddPressed]}
+              onPress={addCustomCategory}
+            >
               <Text style={styles.addBtnText}>+</Text>
             </Pressable>
           </View>
@@ -470,6 +495,7 @@ export function CreateProductScreen() {
             <TextInput
               style={[styles.input, styles.flex1]}
               placeholder="自定义颜色"
+              placeholderTextColor={themeColors.textMuted}
               value={customColor}
               onChangeText={setCustomColor}
               onSubmitEditing={() =>
@@ -477,7 +503,7 @@ export function CreateProductScreen() {
               }
             />
             <Pressable
-              style={styles.addBtn}
+              style={({ pressed }) => [styles.addBtn, pressed && styles.addBtnPressed]}
               onPress={() => addCustom(customColor, colors, setColors, () => setCustomColor(""))}
             >
               <Text style={styles.addBtnText}>添加</Text>
@@ -500,6 +526,7 @@ export function CreateProductScreen() {
             <TextInput
               style={[styles.input, styles.flex1]}
               placeholder="自定义尺码"
+              placeholderTextColor={themeColors.textMuted}
               value={customSize}
               onChangeText={setCustomSize}
               onSubmitEditing={() =>
@@ -507,7 +534,7 @@ export function CreateProductScreen() {
               }
             />
             <Pressable
-              style={styles.addBtn}
+              style={({ pressed }) => [styles.addBtn, pressed && styles.addBtnPressed]}
               onPress={() => addCustom(customSize, sizes, setSizes, () => setCustomSize(""))}
             >
               <Text style={styles.addBtnText}>添加</Text>
@@ -517,18 +544,18 @@ export function CreateProductScreen() {
       ) : null}
 
       <Text style={styles.preview}>{preview}</Text>
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Pressable
-        style={[styles.submit, (submitting || salePrice.trim() === "") && styles.disabled]}
+        style={({ pressed }) => [
+          styles.submit,
+          (submitting || salePrice.trim() === "") && styles.disabled,
+          pressed && !(submitting || salePrice.trim() === "") && styles.submitPressed,
+        ]}
         disabled={submitting || salePrice.trim() === ""}
         onPress={submit}
       >
-        {submitting ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.submitText}>保存建档</Text>
-        )}
+        <Text style={styles.submitText}>保存建档</Text>
       </Pressable>
     </ScrollView>
   );
@@ -536,154 +563,184 @@ export function CreateProductScreen() {
 
 function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable style={[styles.chip, active && styles.chipActive]} onPress={onPress}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    <Pressable
+      style={({ pressed }) => [
+        styles.chip,
+        active && styles.chipActive,
+        pressed && styles.chipPressed,
+      ]}
+      onPress={onPress}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+        {active ? "✓ " : ""}
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  content: { padding: 16, paddingBottom: 48, gap: 6 },
+  container: { flex: 1, backgroundColor: themeColors.bg },
+  content: { padding: space.lg, paddingBottom: space.xxl * 2, gap: space.sm },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 8,
+    marginBottom: space.sm,
   },
-  back: { color: "#2563eb", fontSize: 16, width: 40 },
-  title: { fontSize: 20, fontWeight: "800", color: "#111" },
-  label: { fontSize: 14, color: "#374151", marginTop: 12, fontWeight: "600" },
-  input: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    marginTop: 4,
-  },
-  imageRow: { flexDirection: "row", gap: 12, alignItems: "center", marginTop: 4 },
-  imageBox: {
-    width: 88,
-    height: 88,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
+  topbarBtn: { minHeight: touch.minSize, justifyContent: "center" },
+  back: { color: themeColors.primary, fontSize: font.body, width: 40 },
+  title: { fontSize: font.title + 2, fontWeight: "800", color: themeColors.text },
+
+  // 顶部大照片区（Vestiaire §2.5）
+  photoBox: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: radius.lg,
+    backgroundColor: themeColors.card,
+    borderWidth: 1.5,
+    borderColor: themeColors.border,
+    borderStyle: "dashed",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    backgroundColor: "#f9fafb",
+    marginBottom: space.sm,
   },
-  image: { width: "100%", height: "100%" },
-  imagePlaceholder: { color: "#9ca3af" },
-  imageBtns: { gap: 8 },
-  smallBtn: {
+  photo: { width: "100%", height: "100%" },
+  photoPlaceholder: { alignItems: "center", justifyContent: "center", gap: space.sm },
+  photoIcon: { fontSize: 48 },
+  photoHint: { color: themeColors.textMuted, fontSize: font.body },
+  photoBtns: { flexDirection: "row", gap: space.md, marginBottom: space.md },
+  photoBtn: {
+    flex: 1,
+    minHeight: touch.buttonHeight,
+    borderRadius: radius.md,
     borderWidth: 1.5,
-    borderColor: "#2563eb",
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderColor: themeColors.primary,
+    backgroundColor: themeColors.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  smallBtnText: { color: "#2563eb", fontWeight: "600" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  quickHint: { fontSize: 12, color: "#9ca3af", marginTop: 8, lineHeight: 17 },
+  photoBtnPressed: { opacity: 0.7 },
+  photoBtnText: { color: themeColors.primary, fontWeight: "800", fontSize: font.body },
+
+  // 垂直字段（Vestiaire §2.5）
+  fieldGroup: { gap: space.xs, marginBottom: space.xs },
+  label: { fontSize: font.body, color: themeColors.text, fontWeight: "700" },
+  required: { color: themeColors.danger },
+  input: {
+    borderWidth: 1.5,
+    borderColor: themeColors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
+    minHeight: touch.buttonHeight,
+    fontSize: font.body,
+    color: themeColors.text,
+    backgroundColor: themeColors.card,
+  },
+  quickHint: {
+    fontSize: font.caption,
+    color: themeColors.textMuted,
+    marginTop: space.sm,
+    lineHeight: 20,
+  },
   pickerHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 12,
+    marginTop: space.md,
   },
-  pickerColTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#374151",
-  },
-  expandLink: { fontSize: 13, color: "#2563eb", fontWeight: "600" },
+  pickerColTitle: { fontSize: font.body, fontWeight: "700", color: themeColors.text },
+  expandLink: { fontSize: font.caption, color: themeColors.primary, fontWeight: "700" },
   detailToggle: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 18,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: "#f8fafc",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
+    marginTop: space.lg,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    backgroundColor: themeColors.card,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: themeColors.border,
+    minHeight: touch.minSize + 8,
   },
   detailToggleActive: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#bfdbfe",
+    backgroundColor: themeColors.primarySoft,
+    borderColor: themeColors.primary,
   },
-  detailToggleLeft: { flex: 1, paddingRight: 12 },
-  detailToggleText: { fontSize: 15, fontWeight: "700", color: "#1f2937" },
-  detailToggleSub: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
-  detailToggleRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    flexShrink: 0,
-  },
-  detailToggleAction: { fontSize: 14, color: "#2563eb", fontWeight: "700" },
+  detailTogglePressed: { opacity: 0.85 },
+  detailToggleLeft: { flex: 1, paddingRight: space.md },
+  detailToggleText: { fontSize: font.body, fontWeight: "700", color: themeColors.text },
+  detailToggleSub: { fontSize: font.caption, color: themeColors.textMuted, marginTop: 2 },
+  detailToggleRight: { flexDirection: "row", alignItems: "center", gap: space.xs, flexShrink: 0 },
+  detailToggleAction: { fontSize: font.body, color: themeColors.primary, fontWeight: "700" },
   detailBody: {
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    paddingTop: 2,
-    backgroundColor: "#fcfdff",
-    borderRadius: 12,
+    marginTop: space.sm,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.md,
+    paddingTop: space.xs,
+    backgroundColor: themeColors.card,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#eef2f7",
-    gap: 6,
+    borderColor: themeColors.border,
+    gap: space.xs,
   },
-  miniInput: { paddingVertical: 7, fontSize: 14 },
+  miniInput: { minHeight: touch.minSize + 4, paddingVertical: space.xs },
   miniAddBtn: {
-    backgroundColor: "#e5edff",
-    borderRadius: 10,
-    width: 42,
-    height: 40,
+    backgroundColor: themeColors.primarySoft,
+    borderRadius: radius.md,
+    width: touch.buttonHeight,
+    minHeight: touch.buttonHeight,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 4,
   },
+  miniAddPressed: { opacity: 0.7 },
+
+  // chips（§2.5 大点击区、选中态高对比 + 勾）
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm, marginTop: space.xs },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    backgroundColor: "#fff",
-  },
-  chipActive: { backgroundColor: "#2563eb", borderColor: "#2563eb" },
-  chipText: { color: "#374151", fontSize: 15 },
-  chipTextActive: { color: "#fff", fontWeight: "700" },
-  addRow: { flexDirection: "row", gap: 8, alignItems: "flex-end" },
-  addBtn: {
-    backgroundColor: "#e5edff",
-    borderRadius: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: space.md,
+    minHeight: touch.minSize,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: themeColors.border,
+    backgroundColor: themeColors.card,
+    alignItems: "center",
     justifyContent: "center",
-    marginTop: 4,
-    height: 42,
   },
-  addBtnText: { color: "#2563eb", fontWeight: "700" },
-  row: { flexDirection: "row", gap: 12 },
+  chipActive: { backgroundColor: themeColors.primary, borderColor: themeColors.primary },
+  chipPressed: { opacity: 0.85 },
+  chipText: { color: themeColors.text, fontSize: font.body },
+  chipTextActive: { color: "#fff", fontWeight: "800" },
+
+  addRow: { flexDirection: "row", gap: space.sm, alignItems: "center", marginTop: space.xs },
+  addBtn: {
+    backgroundColor: themeColors.primarySoft,
+    borderRadius: radius.md,
+    paddingHorizontal: space.lg,
+    justifyContent: "center",
+    minHeight: touch.buttonHeight,
+  },
+  addBtnPressed: { opacity: 0.7 },
+  addBtnText: { color: themeColors.primary, fontWeight: "800", fontSize: font.body },
   flex1: { flex: 1 },
   preview: {
-    marginTop: 16,
-    fontSize: 14,
-    color: "#2563eb",
-    fontWeight: "600",
+    marginTop: space.lg,
+    fontSize: font.body,
+    color: themeColors.primary,
+    fontWeight: "700",
   },
-  error: { color: "#dc2626", marginTop: 8 },
+  error: { color: themeColors.danger, marginTop: space.sm, fontSize: font.body },
   submit: {
-    backgroundColor: "#2563eb",
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: themeColors.primary,
+    minHeight: touch.buttonHeight + 4,
+    borderRadius: radius.md,
     alignItems: "center",
-    marginTop: 16,
+    justifyContent: "center",
+    marginTop: space.lg,
   },
+  submitPressed: { backgroundColor: themeColors.primaryPressed },
   disabled: { opacity: 0.5 },
-  submitText: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  submitText: { color: "#fff", fontSize: font.body, fontWeight: "800" },
 });
