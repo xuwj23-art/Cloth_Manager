@@ -45,6 +45,10 @@ describe("ProductsService.seedDemo", () => {
         count: vi.fn().mockResolvedValue(0),
         create,
       },
+      // generateUniqueBarcodes 调用 sku.findMany 查重，空门店返回空数组（条码均未占用）
+      sku: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     } as unknown as PrismaService;
     const service = new ProductsService(prisma);
 
