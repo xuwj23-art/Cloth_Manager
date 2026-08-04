@@ -24,7 +24,7 @@
 4. **删除是软删除**：商品用 `deletedAt`（且必须先 `archivedAt` 售罄/下架才能删）、订单删除会回滚库存。**删除商品不删除任何图片**（保留历史账单可看图，这是已确认的策略）。永远不要物理删 Product/Sku，会破坏销售外键与报表。
 5. **门店隔离**：几乎所有查询都要带 `shopId`（从 JWT 取，不要信任客户端传入）。新接口默认按当前用户 `shopId` 过滤。
 6. **角色权限**：`owner`（店主）能做一切；`staff`（店员）只能登录/查商品/扫码/开单。后端用 `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles("owner")` 控制，前端按角色隐藏入口。**权限以后端为准**。
-7. **改了共享包要先 build**：`packages/shared` 是 server 的依赖（编译产物），改完跑 `pnpm --filter @cloth-scan/shared build`，否则 server 用的是旧类型。（mobile 经 Metro 直读 shared 源码，无需 build。）
+7. **typecheck/test 无需先 build shared；但 server build 仍需**：server 的 `typecheck`（`tsc -p tsconfig.typecheck.json`）通过 `paths` 直读 `packages/shared/src` 源码，不依赖 `dist`；turbo 的 `typecheck`/`test` 任务也已去掉 `^build` 依赖。所以改完 shared 直接跑 typecheck/test 即可看到新类型。**但 server 运行时（`node dist/main.js`）读 shared 的 `dist`**，所以 `nest build`/部署前必须先 `pnpm --filter @cloth-scan/shared build`（turbo `build` 任务的 `^build` 链保留就是这个原因）。（mobile 经 Metro 直读 shared 源码，无需 build。）
 8. **Windows / PowerShell**：本机是 PowerShell，**不能用 `&&` 串联命令**，用 `;` 或分行。仓库里的 bash 脚本（部署文档）才用 `&&`。
 9. **提交规范**：用 Conventional Commits（`feat:` `fix:` `docs:` `chore:`），中文描述正文。仅在用户明确要求时才 commit/push。
 10. **改完必做自检**：对应包跑 `typecheck` + `test`；后端改业务逻辑要保证 `vitest` 全绿。
@@ -62,17 +62,17 @@ cloth_scan/                      pnpm + turbo monorepo
 
 ## 4. 技术栈与版本
 
-| 层 | 选型 | 版本 |
-|----|------|------|
-| 包管理 | pnpm | 10.34.1（corepack 固定，`packageManager` 字段） |
-| 任务编排 | Turbo | ^2.3.3 |
-| Node | — | ≥ 20（Docker 用 node:20-bookworm-slim） |
-| 后端 | NestJS / Prisma | ^10.4.15 / ^6.1.0 |
-| 后端其他 | @nestjs/jwt, bcryptjs, multer, sharp, qrcode, zod | — |
-| 数据库 | PostgreSQL | 16-alpine |
-| 移动端 | Expo / React Native / React | ~54.0.35 / 0.81.5 / 19.1.0 |
-| 移动端关键库 | expo-camera, expo-sqlite, expo-updates, expo-dev-client, expo-secure-store, expo-haptics | — |
-| 共享 | zod | ^3.24.1 |
+| 层           | 选型                                                                                     | 版本                                            |
+| ------------ | ---------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 包管理       | pnpm                                                                                     | 10.34.1（corepack 固定，`packageManager` 字段） |
+| 任务编排     | Turbo                                                                                    | ^2.3.3                                          |
+| Node         | —                                                                                        | ≥ 20（Docker 用 node:20-bookworm-slim）         |
+| 后端         | NestJS / Prisma                                                                          | ^10.4.15 / ^6.1.0                               |
+| 后端其他     | @nestjs/jwt, bcryptjs, multer, sharp, qrcode, zod                                        | —                                               |
+| 数据库       | PostgreSQL                                                                               | 16-alpine                                       |
+| 移动端       | Expo / React Native / React                                                              | ~54.0.35 / 0.81.5 / 19.1.0                      |
+| 移动端关键库 | expo-camera, expo-sqlite, expo-updates, expo-dev-client, expo-secure-store, expo-haptics | —                                               |
+| 共享         | zod                                                                                      | ^3.24.1                                         |
 
 ---
 
@@ -106,14 +106,14 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 **常用校验命令**
 
-| 命令 | 作用 |
-|------|------|
-| `pnpm --filter @cloth-scan/server typecheck` | 后端类型检查 |
-| `pnpm --filter @cloth-scan/server test` | 后端单测（vitest，25 例） |
-| `pnpm --filter @cloth-scan/server build` | `nest build`（Docker 也用它） |
-| `pnpm --filter @cloth-scan/mobile typecheck` | 移动端类型检查 |
-| `pnpm --filter @cloth-scan/shared build && ...test` | 共享包构建/测试 |
-| `pnpm --filter @cloth-scan/server prisma:studio` | 可视化看库 |
+| 命令                                                | 作用                          |
+| --------------------------------------------------- | ----------------------------- |
+| `pnpm --filter @cloth-scan/server typecheck`        | 后端类型检查                  |
+| `pnpm --filter @cloth-scan/server test`             | 后端单测（vitest，25 例）     |
+| `pnpm --filter @cloth-scan/server build`            | `nest build`（Docker 也用它） |
+| `pnpm --filter @cloth-scan/mobile typecheck`        | 移动端类型检查                |
+| `pnpm --filter @cloth-scan/shared build && ...test` | 共享包构建/测试               |
+| `pnpm --filter @cloth-scan/server prisma:studio`    | 可视化看库                    |
 
 > ⚠️ `lint` 脚本存在但本机/各包未必装了 ESLint 二进制，跑不起来属环境问题，不代表代码有错。以 `typecheck` + `test` 为准。
 
@@ -123,55 +123,55 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.1 模块职责（`src/app.module.ts`）
 
-| 模块 | 职责 |
-|------|------|
-| `prisma/` | PrismaClient 单例 |
-| `auth/` | 注册（需邀请码）/登录/JWT/`me`/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles` |
-| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据 |
-| `sales/` | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单 |
-| `uploads/` | 图片上传 + sharp 压缩主图/缩略图（仅 owner） |
-| `download/` | 公开 APK 下载页 `/download`（服务端生成二维码，流式发送 APK） |
-| `health/` | `GET /api/v1/health` |
+| 模块        | 职责                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| `prisma/`   | PrismaClient 单例                                                                                |
+| `auth/`     | 注册（需邀请码）/登录/JWT/`me`/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles` |
+| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据              |
+| `sales/`    | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单                                         |
+| `uploads/`  | 图片上传 + sharp 压缩主图/缩略图（仅 owner）                                                     |
+| `download/` | 公开 APK 下载页 `/download`（服务端生成二维码，流式发送 APK）                                    |
+| `health/`   | `GET /api/v1/health`                                                                             |
 
 ### 6.2 数据模型（`prisma/schema.prisma`）
 
 枚举：`UserRole(owner|staff)`、`StockMovementType(in|out|adjust|transfer)`、`SaleOrderStatus(draft|completed|voided)`。
 
-| 模型 | 关键字段 | 备注 |
-|------|----------|------|
-| `Shop` | name | 多租户根 |
-| `User` | shopId, phone(unique), passwordHash, role | 登录主体 |
-| `Category` | shopId, name | 当前业务少用 |
-| `Product` | archivedAt(软归档), deletedAt(软删除), coverImage, images[] | 一个「款」 |
-| `Sku` | barcode(unique=QR内容), costPrice/salePrice(分), stock, version | 颜色×尺码的具体单品 |
-| `StockMovement` | type, quantity(±), opId(unique 幂等), refOrderId | 库存唯一真相来源 |
-| `SaleOrder` | status, totalAmount(分), opId(unique) | 一笔销售单 |
-| `SaleItem` | price, cost(进价快照), subtotal | 报表利润 = Σ(price−cost) |
+| 模型            | 关键字段                                                        | 备注                     |
+| --------------- | --------------------------------------------------------------- | ------------------------ |
+| `Shop`          | name                                                            | 多租户根                 |
+| `User`          | shopId, phone(unique), passwordHash, role                       | 登录主体                 |
+| `Category`      | shopId, name                                                    | 当前业务少用             |
+| `Product`       | archivedAt(软归档), deletedAt(软删除), coverImage, images[]     | 一个「款」               |
+| `Sku`           | barcode(unique=QR内容), costPrice/salePrice(分), stock, version | 颜色×尺码的具体单品      |
+| `StockMovement` | type, quantity(±), opId(unique 幂等), refOrderId                | 库存唯一真相来源         |
+| `SaleOrder`     | status, totalAmount(分), opId(unique)                           | 一笔销售单               |
+| `SaleItem`      | price, cost(进价快照), subtotal                                 | 报表利润 = Σ(price−cost) |
 
 ### 6.3 关键业务逻辑去哪找
 
-| 能力 | 位置 |
-|------|------|
-| 注册邀请码校验（`REGISTER_CODE`） | `auth/auth.service.ts`（未配置则禁止注册） |
-| JWT/角色守卫 | `auth/jwt-auth.guard.ts`、`auth/roles.guard.ts`、`auth/roles.decorator.ts` |
-| 售罄自动归档/补货恢复/已删不复活 | `products/products.service.ts` `recomputeArchive` |
-| 商品软删除（须先 archived，不删图） | `products/products.service.ts` `deleteProduct` |
-| 列表过滤（deletedAt:null + scope） | `products/products.service.ts` `listProducts` |
-| 销售开单（事务/幂等/防超卖/售罄归档） | `sales/sales.service.ts` `createSale` |
-| 账单编辑（改价/改量/删行，不能加货） | `sales/sales.service.ts` `editOrder` |
-| 删除整单（回滚库存） | `sales/sales.service.ts` `deleteOrder` |
-| 销售报表（today/week/month + 利润 + 下钻） | `sales/sales.service.ts` `report` |
-| 图片压缩/缩略图 | `uploads/uploads.controller.ts`（sharp，主图1280/缩略320） |
+| 能力                                       | 位置                                                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| 注册邀请码校验（`REGISTER_CODE`）          | `auth/auth.service.ts`（未配置则禁止注册）                                 |
+| JWT/角色守卫                               | `auth/jwt-auth.guard.ts`、`auth/roles.guard.ts`、`auth/roles.decorator.ts` |
+| 售罄自动归档/补货恢复/已删不复活           | `products/products.service.ts` `recomputeArchive`                          |
+| 商品软删除（须先 archived，不删图）        | `products/products.service.ts` `deleteProduct`                             |
+| 列表过滤（deletedAt:null + scope）         | `products/products.service.ts` `listProducts`                              |
+| 销售开单（事务/幂等/防超卖/售罄归档）      | `sales/sales.service.ts` `createSale`                                      |
+| 账单编辑（改价/改量/删行，不能加货）       | `sales/sales.service.ts` `editOrder`                                       |
+| 删除整单（回滚库存）                       | `sales/sales.service.ts` `deleteOrder`                                     |
+| 销售报表（today/week/month + 利润 + 下钻） | `sales/sales.service.ts` `report`                                          |
+| 图片压缩/缩略图                            | `uploads/uploads.controller.ts`（sharp，主图1280/缩略320）                 |
 
 ### 6.4 环境变量
 
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `DATABASE_URL` | ✅ | PG 连接串（本地 docker 端口 55432） |
-| `JWT_SECRET` | ✅ | 生产必须改随机长串 |
+| 变量            | 必填   | 说明                                                |
+| --------------- | ------ | --------------------------------------------------- |
+| `DATABASE_URL`  | ✅     | PG 连接串（本地 docker 端口 55432）                 |
+| `JWT_SECRET`    | ✅     | 生产必须改随机长串                                  |
 | `REGISTER_CODE` | 生产✅ | 注册邀请码；**未设置=关闭注册**。本地测注册需手动加 |
-| `PORT` | ✗ | 默认 3000 |
-| `DB_PASSWORD` | 生产✅ | 仅 `docker-compose.prod.yml` 用（根目录 `.env`） |
+| `PORT`          | ✗      | 默认 3000                                           |
+| `DB_PASSWORD`   | 生产✅ | 仅 `docker-compose.prod.yml` 用（根目录 `.env`）    |
 
 ### 6.5 迁移
 
@@ -180,37 +180,40 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.6 API 路由速查（除 `/download` 外都带 `/api/v1`）
 
-| 方法 路径 | 角色 |
-|-----------|------|
-| POST `/auth/register`（需 inviteCode）/ `/auth/login` | 公开 |
-| GET `/auth/me` | 登录 |
-| GET/POST/DELETE `/auth/staff` | owner |
+| 方法 路径                                                 | 角色                    |
+| --------------------------------------------------------- | ----------------------- |
+| POST `/auth/register`（需 inviteCode）/ `/auth/login`     | 公开                    |
+| GET `/auth/me`                                            | 登录                    |
+| GET/POST/DELETE `/auth/staff`                             | owner                   |
 | POST/GET/PATCH/DELETE `/products*`、POST `/products/demo` | owner（列表/扫码=登录） |
-| GET `/skus/by-barcode/:barcode` | 登录 |
-| POST `/sales`（开单=owner+staff）、GET/PATCH/DELETE 其余 | owner |
-| POST `/uploads` | owner |
-| GET `/health` | 公开 |
-| GET `/download`、`/download/app.apk` | 公开（无前缀） |
+| GET `/skus/by-barcode/:barcode`                           | 登录                    |
+| POST `/sales`（开单=owner+staff）、GET/PATCH/DELETE 其余  | owner                   |
+| POST `/uploads`                                           | owner                   |
+| GET `/health`                                             | 公开                    |
+| GET `/download`、`/download/app.apk`                      | 公开（无前缀）          |
 
 ---
 
 ## 7. 移动端 `apps/mobile`
 
 ### 7.1 屏幕与导航
+
 无 React Navigation：`App.tsx` 用 `useState<Screen>` 切屏 + `BackHandler` 逐级返回；`AuthProvider` 决定登录态、登录后包 `SyncProvider`。
 
-| 屏幕 | 职责 |
-|------|------|
-| `LoginScreen` | 登录 / 注册门店 |
-| `HomeScreen` | 入口、今日营业额（新手引导已移除） |
-| `CashierScreen` | 扫码收银、购物车、结算确认弹窗 |
-| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 建档 / 编辑下架 |
-| `LabelPrintScreen` | 标签打印（蓝牙 / PDF 降级） |
-| `SalesScreen` / `SaleDetailScreen` | 报表流水 / 单据详情·编辑·删除（owner） |
-| `StaffScreen` | 店员管理（owner） |
+| 屏幕                                                           | 职责                                   |
+| -------------------------------------------------------------- | -------------------------------------- |
+| `LoginScreen`                                                  | 登录 / 注册门店                        |
+| `HomeScreen`                                                   | 入口、今日营业额（新手引导已移除）     |
+| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗         |
+| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 建档 / 编辑下架             |
+| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）            |
+| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner） |
+| `StaffScreen`                                                  | 店员管理（owner）                      |
 
 ### 7.2 网络 & 后端地址
+
 `src/config.ts` 的 `API_HOST` 是后端地址：
+
 - 当前指向阿里云公网 `http://39.108.186.58:3000`（试运行）。
 - 本地调试改成电脑局域网 IP，或 Android 模拟器用 `http://10.0.2.2:3000`。
 - 后端目前**明文 HTTP**，`app.json` 已开 `usesCleartextTraffic: true`。
@@ -218,14 +221,17 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 `src/api.ts` 封装全部 REST + Bearer token；`imageUrl/thumbUrl` 拼接静态图地址；`ApiError` 带 HTTP status（同步引擎据此区分重试/失败）。
 
 ### 7.3 离线同步
+
 `src/db/database.ts`（SQLite：`skus_cache` + `outbox`）+ `src/sync/sync.ts`（先 push outbox 后 pull 目录）+ `src/sync/sync-context.tsx`（15s 自动同步）。
 
 ### 7.4 蓝牙标签打印（驰腾 CTPL / X1）
+
 - 原生模块 `modules/ct-printer/`（Kotlin 封装厂商 jar，**仅 Android**）；Expo Go 中模块为 null → 自动降级 PDF。
 - `src/printer/ctPrinter.ts`：权限、SPP/BLE 自动连接、打印。
 - `src/printer/labelLayout.ts`：`buildCtPrintJob()` 用 mm 排版（默认 60×40mm，二维码居中 + SKU 条码 + 全角￥价格），原生按 DPI 换算，203/300dpi 通用。
 
 ### 7.5 EAS / app.json 要点
+
 - **当前版本 `1.1.0`**（`app.json` `version`，Android `versionCode=2`）。
 - `runtimeVersion.policy = "appVersion"`；`updates.url` 指向 Expo（owner `wesleysho`，projectId `3b8070f8-...`）。
   - ⚠️ 改 `version` 会同时改 `runtimeVersion`，旧包收不到新 runtime 的 OTA；升版后须 `expo prebuild -p android`（同步 `build.gradle` 版本 + `strings.xml` 的 runtime + 重写渠道头）→ 重打包 → 再按新 runtime `eas update`。
@@ -243,12 +249,12 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ## 9. 构建 · 部署 · 分发
 
-| 场景 | 怎么做 | 详见 |
-|------|--------|------|
-| **JS/界面改动**（占绝大多数） | OTA：`cd apps/mobile && eas update --channel preview -m "说明"`，手机重开 App 即生效、**免重装** | `docs/本地打包环境部署指南-Windows.md` |
-| **原生改动**（权限/插件/原生模块/targetSdk） | 本地 `pnpm --filter @cloth-scan/mobile build:android` → APK 在 `android/app/build/outputs/apk/release/` | 同上 §3 |
-| **后端改动** | 服务器 `git pull` + `docker compose -f docker-compose.prod.yml up -d --build`（迁移自动跑） | `docs/服务器部署指南.md` |
-| **给别人装 APK** | 下载页 `http://39.108.186.58:3000/download`；更新：`scp app-release.apk root@39.108.186.58:/opt/Cloth_Manager/apk/app.apk` | `docs/本地打包环境部署指南-Windows.md` §7 |
+| 场景                                         | 怎么做                                                                                                                     | 详见                                      |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| **JS/界面改动**（占绝大多数）                | OTA：`cd apps/mobile && eas update --channel preview -m "说明"`，手机重开 App 即生效、**免重装**                           | `docs/本地打包环境部署指南-Windows.md`    |
+| **原生改动**（权限/插件/原生模块/targetSdk） | 本地 `pnpm --filter @cloth-scan/mobile build:android` → APK 在 `android/app/build/outputs/apk/release/`                    | 同上 §3                                   |
+| **后端改动**                                 | 服务器 `git pull` + `docker compose -f docker-compose.prod.yml up -d --build`（迁移自动跑）                                | `docs/服务器部署指南.md`                  |
+| **给别人装 APK**                             | 下载页 `http://39.108.186.58:3000/download`；更新：`scp app-release.apk root@39.108.186.58:/opt/Cloth_Manager/apk/app.apk` | `docs/本地打包环境部署指南-Windows.md` §7 |
 
 本地打包前提：`apps/mobile/.env` 需含 `EXPO_NO_METRO_WORKSPACE_ROOT=1`（gitignore，换机要重建）。
 EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可覆盖安装。
@@ -272,20 +278,20 @@ EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可�
 
 ## 10. 已知坑（踩过的，别再踩）
 
-| 坑 | 真相 / 对策 |
-|----|------------|
-| Metro 解析不到依赖 | `.npmrc` 必须 `node-linker=hoisted` |
-| release 打包入口指向 repo 根报错 | `apps/mobile/.env` 写 `EXPO_NO_METRO_WORKSPACE_ROOT=1` |
-| 本地 PG 连不上 | `docker-compose.yml` 宿主端口是 **55432**，不是 5432 |
-| 注册总是失败/被拒 | 后端没配 `REGISTER_CODE`（=关闭注册）或邀请码不匹配 |
-| 蓝牙打印在 Expo Go 不可用 | 需 dev-client/APK；Expo Go 中自动降级 PDF |
-| OTA 更新装到手机却不生效 | 本地 `gradlew` 包必须嵌入频道：`app.json` 已设 `updates.requestHeaders={"expo-channel-name":"preview"}`，改后需 `expo prebuild -p android` 再打包；验证 AndroidManifest 含 `expo-channel-name` |
-| 蓝牙打印首次连接闪退（第二次正常） | 已知待办：CTPL SDK 延迟到首次 connect 才 init 导致竞态崩溃。修法=把 init 提前到打开设备列表时。详见 `docs/archive/进度记录.md`「已知问题」与 `docs/product/TECH-NOTES.md` §4.1 |
-| PowerShell 报 `&&` 语法错 | 用 `;` 或分行 |
-| git push 连不上 GitHub | 多为本机代理端口问题，检查 `git config --get http.proxy` 与实际代理端口是否一致 |
-| scp 传 APK 报 `Permission denied (publickey)` | 服务器只认密钥；需把本机公钥加到服务器 `~/.ssh/authorized_keys`（见 `docs/本地打包环境部署指南-Windows.md` §7）。scp 要在**本机**跑，目标不带 `http://`/`:3000` |
-| 提交信息 heredoc 在 PowerShell 失败 | 把信息写临时文件用 `git commit -F 文件` |
-| 改 schema 不生效 | 必须新建迁移；生产靠 `prisma migrate deploy` |
+| 坑                                            | 真相 / 对策                                                                                                                                                                                    |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Metro 解析不到依赖                            | `.npmrc` 必须 `node-linker=hoisted`                                                                                                                                                            |
+| release 打包入口指向 repo 根报错              | `apps/mobile/.env` 写 `EXPO_NO_METRO_WORKSPACE_ROOT=1`                                                                                                                                         |
+| 本地 PG 连不上                                | `docker-compose.yml` 宿主端口是 **55432**，不是 5432                                                                                                                                           |
+| 注册总是失败/被拒                             | 后端没配 `REGISTER_CODE`（=关闭注册）或邀请码不匹配                                                                                                                                            |
+| 蓝牙打印在 Expo Go 不可用                     | 需 dev-client/APK；Expo Go 中自动降级 PDF                                                                                                                                                      |
+| OTA 更新装到手机却不生效                      | 本地 `gradlew` 包必须嵌入频道：`app.json` 已设 `updates.requestHeaders={"expo-channel-name":"preview"}`，改后需 `expo prebuild -p android` 再打包；验证 AndroidManifest 含 `expo-channel-name` |
+| 蓝牙打印首次连接闪退（第二次正常）            | 已知待办：CTPL SDK 延迟到首次 connect 才 init 导致竞态崩溃。修法=把 init 提前到打开设备列表时。详见 `docs/archive/进度记录.md`「已知问题」与 `docs/product/TECH-NOTES.md` §4.1                 |
+| PowerShell 报 `&&` 语法错                     | 用 `;` 或分行                                                                                                                                                                                  |
+| git push 连不上 GitHub                        | 多为本机代理端口问题，检查 `git config --get http.proxy` 与实际代理端口是否一致                                                                                                                |
+| scp 传 APK 报 `Permission denied (publickey)` | 服务器只认密钥；需把本机公钥加到服务器 `~/.ssh/authorized_keys`（见 `docs/本地打包环境部署指南-Windows.md` §7）。scp 要在**本机**跑，目标不带 `http://`/`:3000`                                |
+| 提交信息 heredoc 在 PowerShell 失败           | 把信息写临时文件用 `git commit -F 文件`                                                                                                                                                        |
+| 改 schema 不生效                              | 必须新建迁移；生产靠 `prisma migrate deploy`                                                                                                                                                   |
 
 ---
 
