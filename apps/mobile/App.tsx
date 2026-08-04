@@ -1,4 +1,10 @@
-import { Component, useEffect, useState, type ReactNode } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -52,6 +58,9 @@ function AuthedApp() {
     return { year: d.getFullYear(), month: d.getMonth() + 1 };
   });
   const [salesDay, setSalesDay] = useState<string | null>(null);
+  // 账单编辑/删除后置脏，触发 SalesScreen 重载（onChanged 回调接线）
+  const [salesRefreshKey, setSalesRefreshKey] = useState(0);
+  const refreshSales = useCallback(() => setSalesRefreshKey((k) => k + 1), []);
 
   // 老板：新结账弹窗 + 铃声 + 通知栏提醒
   useOwnerSaleAlerts(user?.role === "owner", user?.id ?? null);
@@ -163,6 +172,7 @@ function AuthedApp() {
             setOrderId(id);
             setScreen("saleDetail");
           }}
+          refreshKey={salesRefreshKey}
         />
       );
     case "saleDetail":
@@ -170,6 +180,7 @@ function AuthedApp() {
         <SaleDetailScreen
           orderId={orderId}
           onBack={() => setScreen("sales")}
+          onChanged={refreshSales}
         />
       ) : (
         <SalesScreen
@@ -184,6 +195,7 @@ function AuthedApp() {
             setOrderId(id);
             setScreen("saleDetail");
           }}
+          refreshKey={salesRefreshKey}
         />
       );
     default:

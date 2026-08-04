@@ -171,6 +171,7 @@ export function SalesScreen({
   onDay,
   onBack,
   onOpenOrder,
+  refreshKey,
 }: {
   tab: SalesTab;
   onTab: (t: SalesTab) => void;
@@ -180,6 +181,8 @@ export function SalesScreen({
   onDay: (d: string | null) => void;
   onBack: () => void;
   onOpenOrder: (id: string) => void;
+  /** 变化时强制重载列表/报表（用于账单编辑/删除后刷新） */
+  refreshKey?: number;
 }) {
   const [orders, setOrders] = useState<SaleOrderDetail[]>([]);
   const [report, setReport] = useState<SalesReport | null>(null);
@@ -220,7 +223,7 @@ export function SalesScreen({
 
   useEffect(() => {
     void load(tab, sel);
-  }, [load, tab, sel]);
+  }, [load, tab, sel, refreshKey]);
 
   // 当日流水：day 变化（含返回后重建）时按需加载
   useEffect(() => {
