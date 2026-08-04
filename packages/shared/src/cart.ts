@@ -105,6 +105,10 @@ export function cartTotalCents(lines: CartLine[]): number {
  *  - 仅用于优惠：targetCents ≥ 原总价 或购物车为空时原样返回。
  *  - 取整余数优先落到某个「数量=1」的行（服装多为单件，可分毫不差地命中目标）；
  *    若没有单件行，则按数量整除落到第一行（可能有几分误差，实际成交以摊后合计为准）。
+ *
+ * @deprecated 新方案用订单级优惠字段 `orderDiscountCents`（createSale 入参），
+ *   各行 price 保持原价、优惠单独记录，彻底避免多件行整数分摊无精确解的数学死角。
+ *   此函数仅保留用于 UI 显示各行参考分摊价，不再用于实际开单入库。
  */
 export function distributeOrderTotal(
   lines: CartLine[],
@@ -138,10 +142,15 @@ export function cartItemCount(lines: CartLine[]): number {
   return lines.reduce((sum, l) => sum + l.quantity, 0);
 }
 
-/** 转换为下单入参（带幂等 opId） */
+/**
+ * 转换为下单入参（带幂等 opId）。
+ * @param orderDiscountCents 整单优惠金额（分，可选）。各行按 lines 中的原价入库，
+ *   优惠由服务端从 totalAmount 中扣减；不传则 orderDiscountCents=0（无整单优惠）。
+ */
 export function cartToSaleInput(
   lines: CartLine[],
   opId: string,
+  orderDiscountCents?: number,
 ): CreateSaleOrderInput {
   return {
     opId,
@@ -150,5 +159,6 @@ export function cartToSaleInput(
       quantity: l.quantity,
       price: l.price,
     })),
+    ...(orderDiscountCents ? { orderDiscountCents } : {}),
   };
 }

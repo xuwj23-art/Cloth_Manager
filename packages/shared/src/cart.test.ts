@@ -139,5 +139,27 @@ describe("cart 纯函数", () => {
     const input = cartToSaleInput(c, "op-123");
     expect(input.opId).toBe("op-123");
     expect(input.items[0]).toMatchObject({ skuId: "a", quantity: 1, price: 4900 });
+    // 不传 orderDiscountCents 时不出现在输出（z.optional()）
+    expect(input.orderDiscountCents).toBeUndefined();
+  });
+
+  it("cartToSaleInput 带 orderDiscountCents 写入输出且各行保持原价", () => {
+    const cart: CartLine[] = [
+      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 3, stock: 5 },
+      { skuId: "b", barcode: "B", productName: "衫", color: "白", size: "L", price: 4100, quantity: 3, stock: 5 },
+    ];
+    // 原价合计 = 5900*3 + 4100*3 = 30000；目标实收 25000（A3 数学死角场景：3a+3b=250 无整数解）
+    const orig = cartTotalCents(cart);
+    const targetTotal = 25000;
+    const orderDiscountCents = orig - targetTotal; // 5000
+    const input = cartToSaleInput(cart, "op-disc", orderDiscountCents);
+    expect(input.opId).toBe("op-disc");
+    expect(input.orderDiscountCents).toBe(5000);
+    // 各行 price 保持原价，不再做整数分摊
+    expect(input.items[0]).toMatchObject({ skuId: "a", quantity: 3, price: 5900 });
+    expect(input.items[1]).toMatchObject({ skuId: "b", quantity: 3, price: 4100 });
+    // orderDiscountCents=0 时省略（保持与无优惠一致的入参形态）
+    const zeroInput = cartToSaleInput(cart, "op-zero", 0);
+    expect(zeroInput.orderDiscountCents).toBeUndefined();
   });
 });

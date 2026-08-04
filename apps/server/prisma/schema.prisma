@@ -134,6 +134,8 @@ model SaleOrder {
   operatorId  String?
   status      SaleOrderStatus @default(completed)
   totalAmount Int             @default(0)
+  /// 整单优惠金额（分，默认0）。各行按原价入库，订单实收 = Σ各行subtotal - orderDiscountCents
+  orderDiscountCents Int      @default(0)
   // 客户端幂等键，防止重复提交销售单
   opId        String          @unique
   createdAt   DateTime        @default(now())

@@ -184,3 +184,68 @@ describe("deleteOrder 软删除（A4）", () => {
     expect(ids).not.toContain(toDelete.id); // 软删单对流水不可见
   });
 });
+
+/**
+ * Task 4: 订单级优惠字段 orderDiscountCents（A3）。
+ * 解决多件行整数分摊无精确解的数学死角：各行按原价入库，优惠单独记。
+ * 实收 = Σ各行subtotal - orderDiscountCents；totalAmount 即实收，不可为负。
+ */
+describe("createSale 订单级优惠 orderDiscountCents（A3）", () => {
+  let prisma: PrismaClient;
+  let sales: SalesService;
+  beforeAll(async () => {
+    prisma = await startPg();
+    sales = new SalesService(
+      prisma as unknown as PrismaService,
+      new ProductsService(prisma as unknown as PrismaService),
+    );
+  });
+  afterAll(async () => { await stopPg(); });
+
+  it("带 orderDiscountCents 开单：totalAmount=Σsubtotal-discount，字段已存储", async () => {
+    const { shopId, userId, skuId } = await seedFixture(prisma);
+    // 卖 3 件 @9900 = 29700；整单优惠 4700；实收应为 25000
+    const order = await sales.createSale(shopId, userId, {
+      opId: "op-disc-1",
+      items: [{ skuId, quantity: 3, price: 9900 }],
+      orderDiscountCents: 4700,
+    });
+    expect(order.totalAmount).toBe(25000); // 实收
+    expect(order.orderDiscountCents).toBe(4700);
+    // 各行按原价入库（subtotal = price * qty，未做分摊）
+    expect(order.items[0]!.price).toBe(9900);
+    expect(order.items[0]!.subtotal).toBe(29700);
+
+    // 详情接口返回 orderDiscountCents
+    const detail = await sales.getOrder(shopId, order.id);
+    expect(detail.orderDiscountCents).toBe(4700);
+    expect(detail.totalAmount).toBe(25000);
+  });
+
+  it("优惠超过原价合计应 BadRequest（不允许实收为负）", async () => {
+    const { shopId, userId, skuId } = await seedFixture(prisma);
+    await expect(
+      sales.createSale(shopId, userId, {
+        opId: "op-disc-over",
+        items: [{ skuId, quantity: 1, price: 9900 }],
+        orderDiscountCents: 10000, // > 9900
+      }),
+    ).rejects.toThrow(/整单优惠/);
+  });
+
+  it("报表 revenue 基于实收 totalAmount（含优惠扣减），profit = revenue - cost", async () => {
+    const { shopId, userId, skuId } = await seedFixture(prisma);
+    // 卖 2 件 @9900 = 19800；优惠 1800；实收 18000；进价 5000*2 = 10000；毛利 8000
+    await sales.createSale(shopId, userId, {
+      opId: "op-disc-report",
+      items: [{ skuId, quantity: 2, price: 9900 }],
+      orderDiscountCents: 1800,
+    });
+    const rep = await sales.report(shopId, "today");
+    expect(rep.total.revenue).toBe(18000); // 实收，不是原价 19800
+    expect(rep.total.cost).toBe(10000);
+    expect(rep.total.profit).toBe(8000); // 18000 - 10000
+    expect(rep.total.orders).toBe(1);
+    expect(rep.total.quantity).toBe(2);
+  });
+});

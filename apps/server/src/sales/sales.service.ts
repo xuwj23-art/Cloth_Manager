@@ -126,12 +126,23 @@ export class SalesService {
             });
           }
 
+          // 整单优惠：各行按原价入库（subtotal 不变），优惠单独记录；
+          // totalAmount 即实收 = Σ各行subtotal - orderDiscountCents。优惠不得使实收为负。
+          const orderDiscountCents = input.orderDiscountCents ?? 0;
+          if (orderDiscountCents > total) {
+            throw new BadRequestException(
+              `整单优惠（${orderDiscountCents} 分）不能超过原价合计（${total} 分）`,
+            );
+          }
+          const paidAmount = total - orderDiscountCents;
+
           const order = await tx.saleOrder.create({
             data: {
               shopId,
               operatorId,
               status: "completed",
-              totalAmount: total,
+              totalAmount: paidAmount,
+              orderDiscountCents,
               opId: input.opId,
               items: { create: itemsData },
             },
@@ -342,15 +353,21 @@ export class SalesService {
           }
         }
 
-        // 重算总价（取该单剩余明细）
+        // 重算实收：各行 subtotal 之和 - 该单已记录的 orderDiscountCents（≥0）
         const remaining = await tx.saleItem.findMany({ where: { orderId: id } });
         if (remaining.length === 0) {
           throw new BadRequestException(
             "账单不能为空，请保留至少一件商品，或使用「删除整单」",
           );
         }
-        const total = remaining.reduce((s, it) => s + it.subtotal, 0);
-        await tx.saleOrder.update({ where: { id }, data: { totalAmount: total } });
+        const subtotalSum = remaining.reduce((s, it) => s + it.subtotal, 0);
+        // 编辑不改优惠金额；若改后 subtotal 之和小于已记优惠，夹到 0（不允许实收为负）
+        const disc = order.orderDiscountCents ?? 0;
+        const paidAmount = Math.max(0, subtotalSum - disc);
+        await tx.saleOrder.update({
+          where: { id },
+          data: { totalAmount: paidAmount },
+        });
         for (const productId of affected) {
           await this.products.recomputeArchive(tx, productId);
         }
@@ -683,6 +700,7 @@ export class SalesService {
     operator: { name: string } | null;
     status: string;
     totalAmount: number;
+    orderDiscountCents: number;
     createdAt: Date;
     items: {
       id: string;
@@ -705,6 +723,7 @@ export class SalesService {
       operatorName: o.operator?.name ?? null,
       status: o.status as SaleOrderDetail["status"],
       totalAmount: o.totalAmount,
+      orderDiscountCents: o.orderDiscountCents,
       itemCount: o.items.reduce((s, it) => s + it.quantity, 0),
       createdAt: o.createdAt.toISOString(),
       items: o.items.map((it) => ({

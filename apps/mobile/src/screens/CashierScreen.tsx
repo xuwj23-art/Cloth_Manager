@@ -19,7 +19,6 @@ import {
   cartItemCount,
   cartToSaleInput,
   cartTotalCents,
-  distributeOrderTotal,
   removeFromCart,
   setLinePrice,
   setQuantity,
@@ -272,10 +271,12 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
+      const orig = cartTotalCents(cart);
       const fin = computeFinalTotal(cart, discountKind, discountValue);
-      const lines =
-        fin < cartTotalCents(cart) ? distributeOrderTotal(cart, fin) : cart;
-      const input = cartToSaleInput(lines, genOpId());
+      // 各行按原价入库；整单优惠作为订单级字段单独提交，避免整数分摊死角。
+      // orderDiscountCents = 原价合计 - 实收（≥0；无优惠时为 0）
+      const orderDiscountCents = Math.max(0, orig - fin);
+      const input = cartToSaleInput(cart, genOpId(), orderDiscountCents);
       await enqueueSale(input);
       for (const line of cart) {
         await applyLocalStockDelta(line.skuId, -line.quantity);
