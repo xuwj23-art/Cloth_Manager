@@ -77,7 +77,7 @@ model Product {
   images     String[]  @default([])
   // 软下架/归档时间（null = 在售）。售罄自动归档，店主可手动下架/恢复。
   archivedAt DateTime?
-  // 软删除时间（null = 未删除）。删除时清理图片释放磁盘，但保留行以维持销售历史外键。
+  /// 软删除时间戳（须先 archivedAt）。删除时不删图片，保留历史账单可看图（PRD §7 规则 5）。
   deletedAt  DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt

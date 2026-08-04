@@ -74,7 +74,7 @@ export class ProductsController {
     return this.products.setArchived(user.shopId, id, false);
   }
 
-  /** 删除商品（仅店主，且需先售罄/下架）：清理图片释放磁盘 */
+  /** 软删除商品：置 deletedAt（须先 archived）。不删除任何图片，保留历史账单可看图（PRD §7 规则 5）。 */
   @Delete("products/:id")
   @Roles("owner")
   remove(@CurrentUser() user: RequestUser, @Param("id") id: string) {
