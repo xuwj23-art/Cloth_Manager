@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { config as loadDotenv } from "dotenv";
+import { resolve } from "node:path";
 
 /**
  * 启动期环境变量校验（E7：fail-fast）。
@@ -13,7 +15,9 @@ import { z } from "zod";
  *  - 那里是 JwtModule 注册时的二次防线（防御性），保留不动；
  *  - 本模块是统一入口，把 DATABASE_URL/PORT/REGISTER_CODE/JWT_SECRET 一起校验。
  *
- * 用法：main.ts 顶部 `import "./config/env";`（副作用模块，加载即校验）。
+ * 用法：main.ts 顶部 `import { loadEnv } from "./config/env"; loadEnv();`
+ * loadEnv 会先把同目录的 .env 文件读入 process.env（dotenv），再做 Zod 校验，
+ * 这样 NestFactory.create 之前 process.env 已就绪（PrismaClient / ConfigModule 都能读到）。
  * 同时 export parsed Env 供需要类型安全读取的代码使用。
  */
 
@@ -52,9 +56,22 @@ export type Env = z.infer<typeof envSchema>;
  * 解析 process.env 并返回类型安全的 Env 对象。
  * 失败时直接抛错（含全部字段的合并错误信息），由调用方/进程退出承载。
  *
+ * 流程：先从 .env 文件加载到 process.env（dotenv，不覆盖已存在的真实环境变量），
+ * 再做 Zod 校验。这样 main.ts 在所有其他 import 之前调用 loadEnv()，
+ * 后续 PrismaClient / ConfigModule 都能读到完整 process.env。
+ *
  * 不做缓存——单测需反复用不同 env 调用；生产侧 main.ts 也只调一次。
+ *
+ * @param env 默认 process.env；单测可传 mock 对象跳过 dotenv
+ * @param dotenvPath 默认 apps/server/.env，单测可传 null 跳过文件加载
  */
-export function loadEnv(env: NodeJS.ProcessEnv = process.env): Env {
+export function loadEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  dotenvPath: string | null = resolve(__dirname, "../../.env"),
+): Env {
+  if (dotenvPath) {
+    loadDotenv({ path: dotenvPath }); // 把 .env 合并进 process.env（不覆盖已存在的）
+  }
   const result = envSchema.safeParse(env);
   if (!result.success) {
     const issues = result.error.issues
