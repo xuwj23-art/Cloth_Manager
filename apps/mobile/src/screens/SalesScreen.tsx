@@ -8,6 +8,8 @@ import {
   Text,
   View,
 } from "react-native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
   DailySalesStat,
   MonthlySalesReport,
@@ -17,12 +19,10 @@ import type {
   SalesReport,
   SalesStat,
 } from "@cloth-scan/shared";
-import {
-  getMonthlySales,
-  getSalesByDay,
-  getSalesReport,
-  listSales,
-} from "../api";
+import { getMonthlySales, getSalesByDay, getSalesReport, listSales } from "../api";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type SalesNav = NativeStackNavigationProp<RootStackParamList, "Sales">;
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
@@ -31,9 +31,7 @@ function yuan(cents: number): string {
 function formatTime(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(
-    d.getMinutes(),
-  )}`;
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function formatClock(iso: string): string {
@@ -45,9 +43,7 @@ function formatClock(iso: string): string {
 /** YYYY-MM-DD → 「M月D日 周X」 */
 function formatDay(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
-  const wd = ["日", "一", "二", "三", "四", "五", "六"][
-    new Date(y!, m! - 1, d!).getDay()
-  ];
+  const wd = ["日", "一", "二", "三", "四", "五", "六"][new Date(y!, m! - 1, d!).getDay()];
   return `${m}月${d}日 周${wd}`;
 }
 
@@ -74,8 +70,7 @@ const TABS: { key: TabKey; label: string }[] = [
 
 /** 合计卡：营业额 + 毛利（含毛利率）+ 单数/件数 */
 function TotalCard({ total }: { total: SalesStat }) {
-  const margin =
-    total.revenue > 0 ? Math.round((total.profit / total.revenue) * 100) : 0;
+  const margin = total.revenue > 0 ? Math.round((total.profit / total.revenue) * 100) : 0;
   return (
     <View style={styles.totalCard}>
       <View style={styles.totalTop}>
@@ -85,12 +80,7 @@ function TotalCard({ total }: { total: SalesStat }) {
         </View>
         <View style={{ alignItems: "flex-end" }}>
           <Text style={styles.totalLabel}>毛利</Text>
-          <Text
-            style={[
-              styles.totalProfit,
-              { color: total.profit >= 0 ? "#16a34a" : "#dc2626" },
-            ]}
-          >
+          <Text style={[styles.totalProfit, { color: total.profit >= 0 ? "#16a34a" : "#dc2626" }]}>
             {yuan(total.profit)}
           </Text>
           <Text style={styles.totalMargin}>毛利率 {margin}%</Text>
@@ -138,21 +128,11 @@ function BucketChart({ report }: { report: SalesReport }) {
         <View key={b.key} style={styles.barRow}>
           <Text style={styles.barLabel}>{b.label}</Text>
           <View style={styles.barTrack}>
-            <View
-              style={[
-                styles.barFill,
-                { width: `${Math.max(2, (b.revenue / max) * 100)}%` },
-              ]}
-            />
+            <View style={[styles.barFill, { width: `${Math.max(2, (b.revenue / max) * 100)}%` }]} />
           </View>
           <View style={styles.barValues}>
             <Text style={styles.barRevenue}>{yuan(b.revenue)}</Text>
-            <Text
-              style={[
-                styles.barProfit,
-                { color: b.profit >= 0 ? "#16a34a" : "#dc2626" },
-              ]}
-            >
+            <Text style={[styles.barProfit, { color: b.profit >= 0 ? "#16a34a" : "#dc2626" }]}>
               利 {yuan(b.profit)}
             </Text>
           </View>
@@ -162,28 +142,15 @@ function BucketChart({ report }: { report: SalesReport }) {
   );
 }
 
-export function SalesScreen({
-  tab,
-  onTab,
-  month: sel,
-  onMonth,
-  day,
-  onDay,
-  onBack,
-  onOpenOrder,
-  refreshKey,
-}: {
-  tab: SalesTab;
-  onTab: (t: SalesTab) => void;
-  month: SalesMonth;
-  onMonth: (m: SalesMonth) => void;
-  day: string | null;
-  onDay: (d: string | null) => void;
-  onBack: () => void;
-  onOpenOrder: (id: string) => void;
-  /** 变化时强制重载列表/报表（用于账单编辑/删除后刷新） */
-  refreshKey?: number;
-}) {
+export function SalesScreen() {
+  const navigation = useNavigation<SalesNav>();
+  const [tab, setTab] = useState<SalesTab>("today");
+  const [sel, setSel] = useState<SalesMonth>(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() + 1 };
+  });
+  const [day, setDay] = useState<string | null>(null);
+
   const [orders, setOrders] = useState<SaleOrderDetail[]>([]);
   const [report, setReport] = useState<SalesReport | null>(null);
   const [monthly, setMonthly] = useState<MonthlySalesReport | null>(null);
@@ -197,33 +164,36 @@ export function SalesScreen({
   const [dayOrders, setDayOrders] = useState<SaleOrderDetail[]>([]);
   const [dayLoading, setDayLoading] = useState(false);
 
-  const load = useCallback(
-    async (t: TabKey, m: SelMonth) => {
-      setLoading(true);
-      setError(null);
-      try {
-        if (t === "history") {
-          setMonthly(await getMonthlySales(m.year, m.month));
-        } else {
-          const [rep, list] = await Promise.all([
-            getSalesReport(t),
-            listSales(),
-          ]);
-          setReport(rep);
-          setOrders(list);
-        }
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoading(false);
+  const load = useCallback(async (t: TabKey, m: SelMonth) => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (t === "history") {
+        setMonthly(await getMonthlySales(m.year, m.month));
+      } else {
+        const [rep, list] = await Promise.all([getSalesReport(t), listSales()]);
+        setReport(rep);
+        setOrders(list);
       }
-    },
-    [],
-  );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
+  // 切 tab/月份时重载
   useEffect(() => {
     void load(tab, sel);
-  }, [load, tab, sel, refreshKey]);
+  }, [load, tab, sel]);
+
+  // 返回本屏时自动刷新（替代原 salesRefreshKey 机制）：
+  // 从单据详情编辑/删除后返回，列表与报表会重新拉取最新数据。
+  useFocusEffect(
+    useCallback(() => {
+      void load(tab, sel);
+    }, [load, tab, sel]),
+  );
 
   // 当日流水：day 变化（含返回后重建）时按需加载
   useEffect(() => {
@@ -243,8 +213,8 @@ export function SalesScreen({
   }, [tab, day]);
 
   function switchTab(next: TabKey) {
-    onDay(null);
-    onTab(next);
+    setDay(null);
+    setTab(next);
   }
 
   const soldDays = (monthly?.days ?? []).filter((d) => d.orders > 0);
@@ -252,7 +222,7 @@ export function SalesScreen({
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={onBack} hitSlop={8}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>销售记录</Text>
@@ -266,9 +236,7 @@ export function SalesScreen({
             style={[styles.tab, tab === t.key && styles.tabActive]}
             onPress={() => switchTab(t.key)}
           >
-            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>
-              {t.label}
-            </Text>
+            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -290,25 +258,23 @@ export function SalesScreen({
           contentContainerStyle={styles.list}
           ListHeaderComponent={
             <View>
-              <Pressable style={styles.dayBack} onPress={() => onDay(null)}>
+              <Pressable style={styles.dayBack} onPress={() => setDay(null)}>
                 <Text style={styles.dayBackText}>‹ {sel.month}月明细</Text>
               </Pressable>
               <Text style={styles.dayTitle}>{formatDay(day)}</Text>
               {dayLoading ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
             </View>
           }
-          ListEmptyComponent={
-            dayLoading ? null : (
-              <Text style={styles.empty}>当日暂无流水</Text>
-            )
-          }
+          ListEmptyComponent={dayLoading ? null : <Text style={styles.empty}>当日暂无流水</Text>}
           renderItem={({ item }) => (
-            <Pressable style={styles.orderCard} onPress={() => onOpenOrder(item.id)}>
+            <Pressable
+              style={styles.orderCard}
+              onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
+            >
               <View style={styles.orderLeft}>
                 <Text style={styles.orderTime}>{formatClock(item.createdAt)}</Text>
                 <Text style={styles.orderMeta}>
-                  {item.itemCount} 件
-                  {item.operatorName ? ` · ${item.operatorName}` : ""}
+                  {item.itemCount} 件{item.operatorName ? ` · ${item.operatorName}` : ""}
                 </Text>
               </View>
               <Text style={styles.orderAmount}>{yuan(item.totalAmount)}</Text>
@@ -342,11 +308,9 @@ export function SalesScreen({
               </View>
             ) : null
           }
-          ListEmptyComponent={
-            <Text style={styles.empty}>该月暂无销售记录</Text>
-          }
+          ListEmptyComponent={<Text style={styles.empty}>该月暂无销售记录</Text>}
           renderItem={({ item }) => (
-            <Pressable style={styles.dayRow} onPress={() => onDay(item.date)}>
+            <Pressable style={styles.dayRow} onPress={() => setDay(item.date)}>
               <View>
                 <Text style={styles.dayDate}>{formatDay(item.date)}</Text>
                 <Text style={styles.dayMeta}>
@@ -357,10 +321,7 @@ export function SalesScreen({
                 <View style={{ alignItems: "flex-end" }}>
                   <Text style={styles.dayRevenue}>{yuan(item.revenue)}</Text>
                   <Text
-                    style={[
-                      styles.dayProfit,
-                      { color: item.profit >= 0 ? "#16a34a" : "#dc2626" },
-                    ]}
+                    style={[styles.dayProfit, { color: item.profit >= 0 ? "#16a34a" : "#dc2626" }]}
                   >
                     利 {yuan(item.profit)}
                   </Text>
@@ -393,12 +354,14 @@ export function SalesScreen({
             <Text style={styles.empty}>还没有销售记录，去「扫码收银」开张吧</Text>
           }
           renderItem={({ item }) => (
-            <Pressable style={styles.orderCard} onPress={() => onOpenOrder(item.id)}>
+            <Pressable
+              style={styles.orderCard}
+              onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
+            >
               <View style={styles.orderLeft}>
                 <Text style={styles.orderTime}>{formatTime(item.createdAt)}</Text>
                 <Text style={styles.orderMeta}>
-                  {item.itemCount} 件
-                  {item.operatorName ? ` · ${item.operatorName}` : ""}
+                  {item.itemCount} 件{item.operatorName ? ` · ${item.operatorName}` : ""}
                 </Text>
               </View>
               <Text style={styles.orderAmount}>{yuan(item.totalAmount)}</Text>
@@ -414,10 +377,7 @@ export function SalesScreen({
         animationType="fade"
         onRequestClose={() => setMonthOpen(false)}
       >
-        <Pressable
-          style={styles.monthBackdrop}
-          onPress={() => setMonthOpen(false)}
-        />
+        <Pressable style={styles.monthBackdrop} onPress={() => setMonthOpen(false)} />
         <View style={styles.monthSheet}>
           <Text style={styles.monthSheetTitle}>选择月份</Text>
           <FlatList
@@ -429,17 +389,12 @@ export function SalesScreen({
                 <Pressable
                   style={[styles.monthItem, active && styles.monthItemActive]}
                   onPress={() => {
-                    onMonth(item);
-                    onDay(null);
+                    setSel(item);
+                    setDay(null);
                     setMonthOpen(false);
                   }}
                 >
-                  <Text
-                    style={[
-                      styles.monthItemText,
-                      active && styles.monthItemTextActive,
-                    ]}
-                  >
+                  <Text style={[styles.monthItemText, active && styles.monthItemTextActive]}>
                     {item.year}年{item.month}月
                   </Text>
                   {active ? <Text style={styles.monthCheck}>✓</Text> : null}

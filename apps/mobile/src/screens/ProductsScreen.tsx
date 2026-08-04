@@ -9,23 +9,21 @@ import {
   Text,
   View,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ProductScope, ProductWithSkus } from "@cloth-scan/shared";
 import { deleteProduct, imageUrl, listProducts, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type ProductsNav = NativeStackNavigationProp<RootStackParamList, "Products">;
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
 }
 
-export function ProductsScreen({
-  onBack,
-  onCreate,
-  onEdit,
-}: {
-  onBack: () => void;
-  onCreate: () => void;
-  onEdit: (product: ProductWithSkus) => void;
-}) {
+export function ProductsScreen() {
+  const navigation = useNavigation<ProductsNav>();
   const [products, setProducts] = useState<ProductWithSkus[]>([]);
   const [scope, setScope] = useState<ProductScope>("active");
   const [loading, setLoading] = useState(true);
@@ -76,11 +74,11 @@ export function ProductsScreen({
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={onBack}>
+        <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>商品列表</Text>
-        <Pressable onPress={onCreate}>
+        <Pressable onPress={() => navigation.navigate("CreateProduct")}>
           <Text style={styles.add}>+ 建档</Text>
         </Pressable>
       </View>
@@ -90,19 +88,13 @@ export function ProductsScreen({
           style={[styles.tab, scope === "active" && styles.tabActive]}
           onPress={() => setScope("active")}
         >
-          <Text style={[styles.tabText, scope === "active" && styles.tabTextActive]}>
-            在售
-          </Text>
+          <Text style={[styles.tabText, scope === "active" && styles.tabTextActive]}>在售</Text>
         </Pressable>
         <Pressable
           style={[styles.tab, scope === "archived" && styles.tabActive]}
           onPress={() => setScope("archived")}
         >
-          <Text
-            style={[styles.tabText, scope === "archived" && styles.tabTextActive]}
-          >
-            已售罄
-          </Text>
+          <Text style={[styles.tabText, scope === "archived" && styles.tabTextActive]}>已售罄</Text>
         </Pressable>
       </View>
 
@@ -126,16 +118,17 @@ export function ProductsScreen({
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <Text style={styles.empty}>
-              {scope === "active"
-                ? "还没有在售商品，点右上角「+ 建档」开始"
-                : "没有已售罄的商品"}
+              {scope === "active" ? "还没有在售商品，点右上角「+ 建档」开始" : "没有已售罄的商品"}
             </Text>
           }
           renderItem={({ item }) => {
             const totalStock = item.skus.reduce((s, k) => s + k.stock, 0);
             const minPrice = Math.min(...item.skus.map((k) => k.salePrice));
             return (
-              <Pressable style={styles.card} onPress={() => onEdit(item)}>
+              <Pressable
+                style={styles.card}
+                onPress={() => navigation.navigate("EditProduct", { product: item })}
+              >
                 <Pressable
                   style={styles.cover}
                   onPress={() => {
@@ -144,10 +137,7 @@ export function ProductsScreen({
                   }}
                 >
                   {item.coverImage ? (
-                    <Image
-                      source={{ uri: thumbUrl(item.coverImage) }}
-                      style={styles.coverImg}
-                    />
+                    <Image source={{ uri: thumbUrl(item.coverImage) }} style={styles.coverImg} />
                   ) : (
                     <Text style={styles.coverPlaceholder}>无图</Text>
                   )}

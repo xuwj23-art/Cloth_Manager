@@ -9,10 +9,11 @@ import {
   Text,
   View,
 } from "react-native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import QRCode from "react-native-qrcode-svg";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import type { ProductWithSkus } from "@cloth-scan/shared";
 import {
   connectPrinterAuto,
   disconnectPrinter,
@@ -24,6 +25,10 @@ import {
 } from "../printer/ctPrinter";
 import { buildCtPrintJob, totalLabelCount } from "../printer/labelLayout";
 import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.types";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type LabelPrintNav = NativeStackNavigationProp<RootStackParamList, "LabelPrint">;
+type LabelPrintRoute = RouteProp<RootStackParamList, "LabelPrint">;
 
 /** 常见服装吊牌/不干胶尺寸（mm） */
 const LABEL_SIZES = [
@@ -47,14 +52,13 @@ function yuan(cents: number): string {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** 把 QRCode 组件 ref 转成 base64 PNG（无 data: 前缀） */
-function refToDataURL(ref: { toDataURL?: (cb: (d: string) => void) => void } | undefined): Promise<string> {
+function refToDataURL(
+  ref: { toDataURL?: (cb: (d: string) => void) => void } | undefined,
+): Promise<string> {
   return new Promise((resolve) => {
     if (!ref?.toDataURL) {
       resolve("");
@@ -70,11 +74,7 @@ interface LabelItem {
   price: string;
 }
 
-function buildLabelsHtml(
-  labels: LabelItem[],
-  size: LabelSize,
-  orientation: Orientation,
-): string {
+function buildLabelsHtml(labels: LabelItem[], size: LabelSize, orientation: Orientation): string {
   const portrait = orientation === "portrait";
   // 纵向：物理标签仍是 size.w×size.h，但内容按 (h×w) 排版后旋转 90° 填入
   const innerW = portrait ? size.h : size.w;
@@ -109,22 +109,17 @@ function buildLabelsHtml(
   </style></head><body>${cells}</body></html>`;
 }
 
-export function LabelPrintScreen({
-  product,
-  onBack,
-}: {
-  product: ProductWithSkus;
-  onBack: () => void;
-}) {
+export function LabelPrintScreen() {
+  const navigation = useNavigation<LabelPrintNav>();
+  const route = useRoute<LabelPrintRoute>();
+  const { product } = route.params;
   const [size, setSize] = useState<LabelSize>(LABEL_SIZES[0]);
   const [orientation, setOrientation] = useState<Orientation>("portrait");
   const [qty, setQty] = useState<Record<string, number>>(() =>
     Object.fromEntries(product.skus.map((s) => [s.id, 1])),
   );
   const [busy, setBusy] = useState(false);
-  const refs = useRef<Map<string, { toDataURL?: (cb: (d: string) => void) => void }>>(
-    new Map(),
-  );
+  const refs = useRef<Map<string, { toDataURL?: (cb: (d: string) => void) => void }>>(new Map());
   const [btOpen, setBtOpen] = useState(false);
   const [devices, setDevices] = useState<CtBondedDevice[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -260,7 +255,7 @@ export function LabelPrintScreen({
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={onBack} hitSlop={8}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>打印吊牌</Text>
@@ -277,9 +272,7 @@ export function LabelPrintScreen({
             style={[styles.sizeChip, size.id === s.id && styles.sizeChipOn]}
             onPress={() => setSize(s)}
           >
-            <Text
-              style={[styles.sizeChipText, size.id === s.id && styles.sizeChipTextOn]}
-            >
+            <Text style={[styles.sizeChipText, size.id === s.id && styles.sizeChipTextOn]}>
               {s.label}
             </Text>
           </Pressable>
@@ -294,12 +287,7 @@ export function LabelPrintScreen({
             style={[styles.sizeChip, orientation === o.id && styles.sizeChipOn]}
             onPress={() => setOrientation(o.id)}
           >
-            <Text
-              style={[
-                styles.sizeChipText,
-                orientation === o.id && styles.sizeChipTextOn,
-              ]}
-            >
+            <Text style={[styles.sizeChipText, orientation === o.id && styles.sizeChipTextOn]}>
               {o.label}
             </Text>
           </Pressable>
@@ -345,7 +333,8 @@ export function LabelPrintScreen({
           </View>
         ))}
         <Text style={styles.hint}>
-          二维码内容即该规格的唯一条码，扫码收银可直接匹配。先用普通打印机 + 不干胶标签纸即可；后续接蓝牙标签机一键打印。
+          二维码内容即该规格的唯一条码，扫码收银可直接匹配。先用普通打印机 +
+          不干胶标签纸即可；后续接蓝牙标签机一键打印。
         </Text>
       </ScrollView>
 
@@ -401,7 +390,12 @@ export function LabelPrintScreen({
         )}
       </View>
 
-      <Modal visible={btOpen} transparent animationType="slide" onRequestClose={() => setBtOpen(false)}>
+      <Modal
+        visible={btOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setBtOpen(false)}
+      >
         <View style={styles.modalMask}>
           <View style={styles.modalCard}>
             <View style={styles.modalHead}>

@@ -1,26 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth-context";
 import { useSync } from "../sync/sync-context";
 import { getSalesSummary } from "../api";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type HomeNav = NativeStackNavigationProp<RootStackParamList, "Home">;
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
 }
 
-export function HomeScreen({
-  onScan,
-  onProducts,
-  onCreate,
-  onSales,
-  onStaff,
-}: {
-  onScan: () => void;
-  onProducts: () => void;
-  onCreate: () => void;
-  onSales: () => void;
-  onStaff: () => void;
-}) {
+export function HomeScreen() {
+  const navigation = useNavigation<HomeNav>();
   const { user, logout } = useAuth();
   const { online, syncing, pendingCount, syncNow } = useSync();
   const isOwner = user?.role === "owner";
@@ -60,20 +54,16 @@ export function HomeScreen({
         <Text style={styles.subtitle}>扫吊牌二维码，秒匹配商品</Text>
 
         {isOwner ? (
-          <Pressable style={styles.todayCard} onPress={onSales}>
+          <Pressable style={styles.todayCard} onPress={() => navigation.navigate("Sales")}>
             <Text style={styles.todayLabel}>今日营业额</Text>
-            <Text style={styles.todayRevenue}>
-              {today ? yuan(today.revenue) : "—"}
-            </Text>
+            <Text style={styles.todayRevenue}>{today ? yuan(today.revenue) : "—"}</Text>
             <Text style={styles.todayMeta}>
-              {today
-                ? `${today.orders} 单 · 点击查看销售记录`
-                : "点击查看销售记录"}
+              {today ? `${today.orders} 单 · 点击查看销售记录` : "点击查看销售记录"}
             </Text>
           </Pressable>
         ) : null}
 
-        <Pressable style={styles.primaryBtn} onPress={onScan}>
+        <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("Cashier")}>
           <Text style={styles.primaryText}>扫码收银</Text>
         </Pressable>
 
@@ -81,14 +71,14 @@ export function HomeScreen({
           {isOwner ? (
             <Pressable
               style={[styles.secondaryBtn, styles.flex1]}
-              onPress={onCreate}
+              onPress={() => navigation.navigate("CreateProduct")}
             >
               <Text style={styles.secondaryText}>商品建档</Text>
             </Pressable>
           ) : null}
           <Pressable
             style={[styles.secondaryBtn, styles.flex1]}
-            onPress={onProducts}
+            onPress={() => navigation.navigate("Products")}
           >
             <Text style={styles.secondaryText}>商品列表</Text>
           </Pressable>
@@ -98,13 +88,13 @@ export function HomeScreen({
           <>
             <Pressable
               style={[styles.secondaryBtn, styles.fullWidth]}
-              onPress={onSales}
+              onPress={() => navigation.navigate("Sales")}
             >
               <Text style={styles.secondaryText}>销售记录 / 报表</Text>
             </Pressable>
             <Pressable
               style={[styles.secondaryBtn, styles.fullWidth]}
-              onPress={onStaff}
+              onPress={() => navigation.navigate("Staff")}
             >
               <Text style={styles.secondaryText}>店员管理</Text>
             </Pressable>
@@ -116,9 +106,7 @@ export function HomeScreen({
         </Pressable>
 
         <View style={styles.syncRow}>
-          <Text style={[styles.dot, online ? styles.online : styles.offline]}>
-            ●
-          </Text>
+          <Text style={[styles.dot, online ? styles.online : styles.offline]}>●</Text>
           <Text style={styles.syncText}>
             {online ? "在线" : "离线"}
             {pendingCount > 0 ? ` · ${pendingCount} 笔待同步` : " · 已全部同步"}

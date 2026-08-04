@@ -10,15 +10,15 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { SaleOrderDetail } from "@cloth-scan/shared";
-import {
-  deleteSaleOrder,
-  editSaleOrder,
-  getSale,
-  imageUrl,
-  thumbUrl,
-} from "../api";
+import { deleteSaleOrder, editSaleOrder, getSale, imageUrl, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type SaleDetailNav = NativeStackNavigationProp<RootStackParamList, "SaleDetail">;
+type SaleDetailRoute = RouteProp<RootStackParamList, "SaleDetail">;
 
 function yuan(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
@@ -44,15 +44,10 @@ interface DraftLine {
   priceStr: string;
 }
 
-export function SaleDetailScreen({
-  orderId,
-  onBack,
-  onChanged,
-}: {
-  orderId: string;
-  onBack: () => void;
-  onChanged?: () => void;
-}) {
+export function SaleDetailScreen() {
+  const navigation = useNavigation<SaleDetailNav>();
+  const route = useRoute<SaleDetailRoute>();
+  const { orderId } = route.params;
   const [order, setOrder] = useState<SaleOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,9 +91,7 @@ export function SaleDetailScreen({
   }
 
   function setQty(id: string, q: number) {
-    setDraft((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, quantity: Math.max(0, q) } : l)),
-    );
+    setDraft((prev) => prev.map((l) => (l.id === id ? { ...l, quantity: Math.max(0, q) } : l)));
   }
   function setPrice(id: string, v: string) {
     setDraft((prev) => prev.map((l) => (l.id === id ? { ...l, priceStr: v } : l)));
@@ -129,7 +122,7 @@ export function SaleDetailScreen({
       const updated = await editSaleOrder(orderId, items);
       setOrder(updated);
       setEditing(false);
-      onChanged?.();
+      // 销售列表通过 useFocusEffect 在返回时自动刷新，无需显式回调
     } catch (e) {
       Alert.alert("保存失败", (e as Error).message);
     } finally {
@@ -138,32 +131,31 @@ export function SaleDetailScreen({
   }
 
   function confirmDeleteOrder() {
-    Alert.alert(
-      "删除整单",
-      "确认删除这笔销售？已售出的库存会自动加回，此操作不可撤销。",
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "删除",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteSaleOrder(orderId);
-              onChanged?.();
-              onBack();
-            } catch (e) {
-              Alert.alert("删除失败", (e as Error).message);
-            }
-          },
+    Alert.alert("删除整单", "确认删除这笔销售？已售出的库存会自动加回，此操作不可撤销。", [
+      { text: "取消", style: "cancel" },
+      {
+        text: "删除",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteSaleOrder(orderId);
+            // 返回销售列表，focus 监听会自动刷新
+            navigation.goBack();
+          } catch (e) {
+            Alert.alert("删除失败", (e as Error).message);
+          }
         },
-      ],
-    );
+      },
+    ]);
   }
 
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={editing ? () => setEditing(false) : onBack} hitSlop={8}>
+        <Pressable
+          onPress={editing ? () => setEditing(false) : () => navigation.goBack()}
+          hitSlop={8}
+        >
           <Text style={styles.back}>{editing ? "取消" : "返回"}</Text>
         </Pressable>
         <Text style={styles.title}>{editing ? "编辑账单" : "单据详情"}</Text>
@@ -191,9 +183,7 @@ export function SaleDetailScreen({
         <>
           <ScrollView contentContainerStyle={styles.body}>
             <View style={styles.summaryBox}>
-              <Text style={styles.amount}>
-                {yuan(editing ? draftTotal : order.totalAmount)}
-              </Text>
+              <Text style={styles.amount}>{yuan(editing ? draftTotal : order.totalAmount)}</Text>
               <Text style={styles.metaLine}>{formatTime(order.createdAt)}</Text>
               <Text style={styles.metaLine}>
                 收银员：{order.operatorName ?? "—"} ·{" "}
@@ -214,10 +204,7 @@ export function SaleDetailScreen({
                       }}
                     >
                       {it.coverImage ? (
-                        <Image
-                          source={{ uri: thumbUrl(it.coverImage) }}
-                          style={styles.coverImg}
-                        />
+                        <Image source={{ uri: thumbUrl(it.coverImage) }} style={styles.coverImg} />
                       ) : (
                         <Text style={styles.coverPlaceholder}>无图</Text>
                       )}
@@ -239,15 +226,9 @@ export function SaleDetailScreen({
               : draft.map((l) => {
                   const removed = l.quantity === 0;
                   return (
-                    <View
-                      key={l.id}
-                      style={[styles.itemRow, removed && styles.itemRemoved]}
-                    >
+                    <View key={l.id} style={[styles.itemRow, removed && styles.itemRemoved]}>
                       <View style={styles.editInfo}>
-                        <Text
-                          style={[styles.itemName, removed && styles.struck]}
-                          numberOfLines={1}
-                        >
+                        <Text style={[styles.itemName, removed && styles.struck]} numberOfLines={1}>
                           {l.productName}
                         </Text>
                         <Text style={styles.itemSpec}>
@@ -286,10 +267,7 @@ export function SaleDetailScreen({
                               <Text style={styles.stepText}>＋</Text>
                             </Pressable>
                           </View>
-                          <Pressable
-                            style={styles.lineDelete}
-                            onPress={() => setQty(l.id, 0)}
-                          >
+                          <Pressable style={styles.lineDelete} onPress={() => setQty(l.id, 0)}>
                             <Text style={styles.lineDeleteText}>删除</Text>
                           </Pressable>
                         </View>
@@ -307,10 +285,7 @@ export function SaleDetailScreen({
 
           {editing ? (
             <View style={styles.editFooter}>
-              <Pressable
-                style={styles.cancelBtn}
-                onPress={() => setEditing(false)}
-              >
+              <Pressable style={styles.cancelBtn} onPress={() => setEditing(false)}>
                 <Text style={styles.cancelText}>取消</Text>
               </Pressable>
               <Pressable

@@ -9,8 +9,13 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ShopMember } from "@cloth-scan/shared";
 import { apiCreateStaff, apiDeleteStaff, apiListStaff } from "../api";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type StaffNav = NativeStackNavigationProp<RootStackParamList, "Staff">;
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -18,7 +23,8 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-export function StaffScreen({ onBack }: { onBack: () => void }) {
+export function StaffScreen() {
+  const navigation = useNavigation<StaffNav>();
   const [members, setMembers] = useState<ShopMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +99,7 @@ export function StaffScreen({ onBack }: { onBack: () => void }) {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={onBack} hitSlop={8}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>店员管理</Text>
@@ -134,9 +140,7 @@ export function StaffScreen({ onBack }: { onBack: () => void }) {
               onPress={submit}
               disabled={submitting}
             >
-              <Text style={styles.addText}>
-                {submitting ? "添加中…" : "添加店员"}
-              </Text>
+              <Text style={styles.addText}>{submitting ? "添加中…" : "添加店员"}</Text>
             </Pressable>
             <Text style={styles.sectionTitle}>门店成员</Text>
             {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -154,9 +158,7 @@ export function StaffScreen({ onBack }: { onBack: () => void }) {
             <View style={styles.memberInfo}>
               <Text style={styles.memberName}>
                 {item.name}
-                <Text
-                  style={item.role === "owner" ? styles.ownerTag : styles.staffTag}
-                >
+                <Text style={item.role === "owner" ? styles.ownerTag : styles.staffTag}>
                   {"  "}
                   {item.role === "owner" ? "店主" : "店员"}
                 </Text>
@@ -166,11 +168,7 @@ export function StaffScreen({ onBack }: { onBack: () => void }) {
               </Text>
             </View>
             {item.role !== "owner" ? (
-              <Pressable
-                style={styles.deleteBtn}
-                onPress={() => confirmDelete(item)}
-                hitSlop={8}
-              >
+              <Pressable style={styles.deleteBtn} onPress={() => confirmDelete(item)} hitSlop={8}>
                 <Text style={styles.deleteText}>删除</Text>
               </Pressable>
             ) : null}

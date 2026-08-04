@@ -11,6 +11,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import { useAudioPlayer } from "expo-audio";
@@ -34,6 +36,9 @@ import { enqueueSale } from "../db/outbox";
 import { imageUrl, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
 import { useSync } from "../sync/sync-context";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type CashierNav = NativeStackNavigationProp<RootStackParamList, "Cashier">;
 
 /** 绿色扫描框边长（dp），与样式 frame 保持一致 */
 const FRAME_SIZE = 150;
@@ -80,7 +85,8 @@ function haptic(kind: "success" | "error" | "light") {
   }
 }
 
-export function CashierScreen({ onBack }: { onBack: () => void }) {
+export function CashierScreen() {
+  const navigation = useNavigation<CashierNav>();
   const [permission, requestPermission] = useCameraPermissions();
   const { online, pendingCount, syncNow, refreshPending } = useSync();
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -99,9 +105,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   const [priceEdit, setPriceEdit] = useState<CartLine | null>(null);
   const [priceValue, setPriceValue] = useState("");
   // 整单优惠：打折(zhe，如 8.8 折)或改价(total，优惠后总价分)
-  const [discountKind, setDiscountKind] = useState<"none" | "zhe" | "total">(
-    "none",
-  );
+  const [discountKind, setDiscountKind] = useState<"none" | "zhe" | "total">("none");
   const [discountValue, setDiscountValue] = useState(0);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustTab, setAdjustTab] = useState<"zhe" | "total">("zhe");
@@ -257,14 +261,10 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
             discountKind === "zhe" ? ` · ${discountValue}折` : " · 已改价"
           }）`
         : `合计 ${yuan(orig)}`;
-    Alert.alert(
-      "确认结算",
-      `共 ${cnt} 件商品，${priceLine}\n确认收款并记录这笔销售？`,
-      [
-        { text: "再看看", style: "cancel" },
-        { text: "确认结算", onPress: () => void doCheckout() },
-      ],
-    );
+    Alert.alert("确认结算", `共 ${cnt} 件商品，${priceLine}\n确认收款并记录这笔销售？`, [
+      { text: "再看看", style: "cancel" },
+      { text: "确认结算", onPress: () => void doCheckout() },
+    ]);
   }
 
   async function doCheckout() {
@@ -287,9 +287,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
       void syncNow();
       Alert.alert(
         "已结算",
-        online
-          ? "销售已记录并正在同步到云端"
-          : "当前离线，已记录在本地，联网后自动同步",
+        online ? "销售已记录并正在同步到云端" : "当前离线，已记录在本地，联网后自动同步",
       );
       setHint("对准吊牌二维码扫描");
     } catch (e) {
@@ -313,7 +311,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
         <Pressable style={styles.btn} onPress={requestPermission}>
           <Text style={styles.btnText}>授予相机权限</Text>
         </Pressable>
-        <Pressable onPress={onBack}>
+        <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.link}>返回</Text>
         </Pressable>
       </View>
@@ -325,16 +323,12 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
   const finalTotal = computeFinalTotal(cart, discountKind, discountValue);
   const discounted = finalTotal < total;
   const discountTag =
-    discountKind === "zhe"
-      ? `${discountValue}折`
-      : discountKind === "total"
-        ? "已改价"
-        : "";
+    discountKind === "zhe" ? `${discountValue}折` : discountKind === "total" ? "已改价" : "";
 
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={onBack}>
+        <Pressable onPress={() => navigation.goBack()}>
           <Text style={styles.link}>返回</Text>
         </Pressable>
         <Text style={styles.title}>扫码收银</Text>
@@ -384,9 +378,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
               <Pressable
                 style={styles.stepBtn}
                 onPress={() =>
-                  applyCart((prev) =>
-                    setQuantity(prev, item.skuId, item.quantity - 1),
-                  )
+                  applyCart((prev) => setQuantity(prev, item.skuId, item.quantity - 1))
                 }
               >
                 <Text style={styles.stepText}>−</Text>
@@ -395,9 +387,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
               <Pressable
                 style={styles.stepBtn}
                 onPress={() =>
-                  applyCart((prev) =>
-                    setQuantity(prev, item.skuId, item.quantity + 1),
-                  )
+                  applyCart((prev) => setQuantity(prev, item.skuId, item.quantity + 1))
                 }
               >
                 <Text style={styles.stepText}>＋</Text>
@@ -418,12 +408,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
           <View style={styles.totalLabelRow}>
             <Text style={styles.totalLabel}>合计（{count} 件）</Text>
             <Pressable onPress={openAdjust} disabled={cart.length === 0} hitSlop={6}>
-              <Text
-                style={[
-                  styles.adjustLink,
-                  cart.length === 0 && styles.adjustLinkDisabled,
-                ]}
-              >
+              <Text style={[styles.adjustLink, cart.length === 0 && styles.adjustLinkDisabled]}>
                 {discounted ? "修改优惠" : "优惠 / 改价"}
               </Text>
             </Pressable>
@@ -459,98 +444,86 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
         onRequestClose={closeSheet}
       >
         <Pressable style={styles.backdrop} onPress={closeSheet} />
-        {pending ? (
-          (() => {
-            const already = inCartQty(pending.skuId);
-            const maxAddable = Math.max(pending.stock - already, 0);
-            const canAdd = maxAddable > 0;
-            const qty = Math.min(pendingQty, Math.max(maxAddable, 1));
-            return (
-              <View style={styles.sheet}>
-                <View style={styles.sheetHeader}>
-                  <Pressable
-                    style={styles.sheetCover}
-                    onPress={() => {
-                      const u = imageUrl(pending.coverImage);
-                      if (u) setViewerUri(u);
-                    }}
-                  >
-                    {pending.coverImage ? (
-                      <Image
-                        source={{ uri: thumbUrl(pending.coverImage) }}
-                        style={styles.sheetCoverImg}
-                      />
-                    ) : (
-                      <Text style={styles.coverPlaceholder}>无图</Text>
-                    )}
-                  </Pressable>
-                  <View style={styles.sheetInfo}>
-                    <Text style={styles.sheetName} numberOfLines={2}>
-                      {pending.productName}
+        {pending
+          ? (() => {
+              const already = inCartQty(pending.skuId);
+              const maxAddable = Math.max(pending.stock - already, 0);
+              const canAdd = maxAddable > 0;
+              const qty = Math.min(pendingQty, Math.max(maxAddable, 1));
+              return (
+                <View style={styles.sheet}>
+                  <View style={styles.sheetHeader}>
+                    <Pressable
+                      style={styles.sheetCover}
+                      onPress={() => {
+                        const u = imageUrl(pending.coverImage);
+                        if (u) setViewerUri(u);
+                      }}
+                    >
+                      {pending.coverImage ? (
+                        <Image
+                          source={{ uri: thumbUrl(pending.coverImage) }}
+                          style={styles.sheetCoverImg}
+                        />
+                      ) : (
+                        <Text style={styles.coverPlaceholder}>无图</Text>
+                      )}
+                    </Pressable>
+                    <View style={styles.sheetInfo}>
+                      <Text style={styles.sheetName} numberOfLines={2}>
+                        {pending.productName}
+                      </Text>
+                      <Text style={styles.sheetSpec}>
+                        {pending.color}/{pending.size}
+                      </Text>
+                      <Text style={styles.sheetPrice}>{yuan(pending.salePrice)}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.sheetRow}>
+                    <Text style={[styles.stockText, pending.stock <= 3 && styles.stockLow]}>
+                      库存 {pending.stock}
+                      {already > 0 ? ` · 购物车已有 ${already} 件` : ""}
                     </Text>
-                    <Text style={styles.sheetSpec}>
-                      {pending.color}/{pending.size}
-                    </Text>
-                    <Text style={styles.sheetPrice}>{yuan(pending.salePrice)}</Text>
+                    <View style={styles.sheetStepper}>
+                      <Pressable
+                        style={[styles.stepBtnLg, qty <= 1 && styles.disabled]}
+                        disabled={qty <= 1}
+                        onPress={() => setPendingQty(Math.max(1, qty - 1))}
+                      >
+                        <Text style={styles.stepTextLg}>−</Text>
+                      </Pressable>
+                      <Text style={styles.sheetQty}>{canAdd ? qty : 0}</Text>
+                      <Pressable
+                        style={[styles.stepBtnLg, qty >= maxAddable && styles.disabled]}
+                        disabled={qty >= maxAddable}
+                        onPress={() => setPendingQty(Math.min(maxAddable, qty + 1))}
+                      >
+                        <Text style={styles.stepTextLg}>＋</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {!canAdd ? <Text style={styles.warnText}>购物车已达该商品库存上限</Text> : null}
+
+                  <View style={styles.sheetActions}>
+                    <Pressable style={styles.cancelBtn} onPress={closeSheet}>
+                      <Text style={styles.cancelText}>取消</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.addBtn, !canAdd && styles.disabled]}
+                      disabled={!canAdd}
+                      onPress={confirmAdd}
+                    >
+                      <Text style={styles.addText}>
+                        加入购物车 · {canAdd ? yuan(pending.salePrice * qty) : "—"}
+                      </Text>
+                    </Pressable>
                   </View>
                 </View>
-
-                <View style={styles.sheetRow}>
-                  <Text
-                    style={[
-                      styles.stockText,
-                      pending.stock <= 3 && styles.stockLow,
-                    ]}
-                  >
-                    库存 {pending.stock}
-                    {already > 0 ? ` · 购物车已有 ${already} 件` : ""}
-                  </Text>
-                  <View style={styles.sheetStepper}>
-                    <Pressable
-                      style={[styles.stepBtnLg, qty <= 1 && styles.disabled]}
-                      disabled={qty <= 1}
-                      onPress={() => setPendingQty(Math.max(1, qty - 1))}
-                    >
-                      <Text style={styles.stepTextLg}>−</Text>
-                    </Pressable>
-                    <Text style={styles.sheetQty}>{canAdd ? qty : 0}</Text>
-                    <Pressable
-                      style={[
-                        styles.stepBtnLg,
-                        qty >= maxAddable && styles.disabled,
-                      ]}
-                      disabled={qty >= maxAddable}
-                      onPress={() => setPendingQty(Math.min(maxAddable, qty + 1))}
-                    >
-                      <Text style={styles.stepTextLg}>＋</Text>
-                    </Pressable>
-                  </View>
-                </View>
-
-                {!canAdd ? (
-                  <Text style={styles.warnText}>
-                    购物车已达该商品库存上限
-                  </Text>
-                ) : null}
-
-                <View style={styles.sheetActions}>
-                  <Pressable style={styles.cancelBtn} onPress={closeSheet}>
-                    <Text style={styles.cancelText}>取消</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.addBtn, !canAdd && styles.disabled]}
-                    disabled={!canAdd}
-                    onPress={confirmAdd}
-                  >
-                    <Text style={styles.addText}>
-                      加入购物车 · {canAdd ? yuan(pending.salePrice * qty) : "—"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            );
-          })()
-        ) : null}
+              );
+            })()
+          : null}
       </Modal>
 
       {/* 未找到条码提示卡 */}
@@ -580,10 +553,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
         animationType="fade"
         onRequestClose={() => setManualOpen(false)}
       >
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => setManualOpen(false)}
-        />
+        <Pressable style={styles.backdrop} onPress={() => setManualOpen(false)} />
         <View style={styles.notFoundSheet}>
           <Text style={styles.notFoundTitle}>手动输入条码</Text>
           <TextInput
@@ -596,10 +566,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
             onSubmitEditing={submitManual}
           />
           <View style={styles.sheetActions}>
-            <Pressable
-              style={styles.cancelBtn}
-              onPress={() => setManualOpen(false)}
-            >
+            <Pressable style={styles.cancelBtn} onPress={() => setManualOpen(false)}>
               <Text style={styles.cancelText}>取消</Text>
             </Pressable>
             <Pressable
@@ -641,10 +608,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
             </View>
             <Text style={styles.notFoundHint}>每件成交单价，用于讨价还价/优惠。</Text>
             <View style={styles.sheetActions}>
-              <Pressable
-                style={styles.cancelBtn}
-                onPress={() => setPriceEdit(null)}
-              >
+              <Pressable style={styles.cancelBtn} onPress={() => setPriceEdit(null)}>
                 <Text style={styles.cancelText}>取消</Text>
               </Pressable>
               <Pressable style={styles.addBtn} onPress={confirmPriceEdit}>
@@ -656,12 +620,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
       </Modal>
 
       {/* 整单优惠：打折 / 改价 */}
-      <Modal
-        visible={adjustOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={closeAdjust}
-      >
+      <Modal visible={adjustOpen} transparent animationType="fade" onRequestClose={closeAdjust}>
         <Pressable style={styles.backdrop} onPress={closeAdjust} />
         <View style={styles.notFoundSheet}>
           <Text style={styles.notFoundTitle}>整单优惠</Text>
@@ -674,10 +633,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
               }}
             >
               <Text
-                style={[
-                  styles.adjustTabText,
-                  adjustTab === "zhe" && styles.adjustTabTextActive,
-                ]}
+                style={[styles.adjustTabText, adjustTab === "zhe" && styles.adjustTabTextActive]}
               >
                 打折
               </Text>
@@ -690,10 +646,7 @@ export function CashierScreen({ onBack }: { onBack: () => void }) {
               }}
             >
               <Text
-                style={[
-                  styles.adjustTabText,
-                  adjustTab === "total" && styles.adjustTabTextActive,
-                ]}
+                style={[styles.adjustTabText, adjustTab === "total" && styles.adjustTabTextActive]}
               >
                 改价
               </Text>

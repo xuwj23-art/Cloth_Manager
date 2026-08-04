@@ -9,8 +9,14 @@ import {
   TextInput,
   View,
 } from "react-native";
-import type { ProductWithSkus, UpdateSkuInput } from "@cloth-scan/shared";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { UpdateSkuInput } from "@cloth-scan/shared";
 import { imageUrl, setProductArchived, updateProduct } from "../api";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+
+type EditProductNav = NativeStackNavigationProp<RootStackParamList, "EditProduct">;
+type EditProductRoute = RouteProp<RootStackParamList, "EditProduct">;
 
 function centsToYuan(cents: number): string {
   return (cents / 100).toFixed(2);
@@ -31,15 +37,10 @@ interface SkuDraft {
   stock: string;
 }
 
-export function EditProductScreen({
-  product,
-  onDone,
-  onPrintLabels,
-}: {
-  product: ProductWithSkus;
-  onDone: () => void;
-  onPrintLabels: (product: ProductWithSkus) => void;
-}) {
+export function EditProductScreen() {
+  const navigation = useNavigation<EditProductNav>();
+  const route = useRoute<EditProductRoute>();
+  const { product } = route.params;
   const [name, setName] = useState(product.name);
   const [skus, setSkus] = useState<SkuDraft[]>(
     product.skus.map((s) => ({
@@ -80,7 +81,7 @@ export function EditProductScreen({
     try {
       await updateProduct(product.id, { name: name.trim(), skus: skuInputs });
       Alert.alert("已保存", "商品信息已更新");
-      onDone();
+      navigation.goBack();
     } catch (e) {
       Alert.alert("保存失败", (e as Error).message);
     } finally {
@@ -103,7 +104,7 @@ export function EditProductScreen({
           onPress: async () => {
             try {
               await setProductArchived(product.id, next);
-              onDone();
+              navigation.goBack();
             } catch (e) {
               Alert.alert("操作失败", (e as Error).message);
             }
@@ -116,14 +117,12 @@ export function EditProductScreen({
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={onDone} hitSlop={8}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={styles.back}>取消</Text>
         </Pressable>
         <Text style={styles.title}>编辑商品</Text>
         <Pressable onPress={save} hitSlop={8} disabled={saving}>
-          <Text style={[styles.saveLink, saving && styles.dim]}>
-            {saving ? "保存中" : "保存"}
-          </Text>
+          <Text style={[styles.saveLink, saving && styles.dim]}>{saving ? "保存中" : "保存"}</Text>
         </Pressable>
       </View>
 
@@ -131,10 +130,7 @@ export function EditProductScreen({
         <View style={styles.headerRow}>
           <View style={styles.cover}>
             {product.coverImage ? (
-              <Image
-                source={{ uri: imageUrl(product.coverImage) }}
-                style={styles.coverImg}
-              />
+              <Image source={{ uri: imageUrl(product.coverImage) }} style={styles.coverImg} />
             ) : (
               <Text style={styles.coverPlaceholder}>无图</Text>
             )}
@@ -179,7 +175,7 @@ export function EditProductScreen({
 
         <Pressable
           style={styles.printBtn}
-          onPress={() => onPrintLabels(product)}
+          onPress={() => navigation.navigate("LabelPrint", { product })}
         >
           <Text style={styles.printText}>打印吊牌二维码</Text>
         </Pressable>
@@ -189,10 +185,7 @@ export function EditProductScreen({
           onPress={toggleArchive}
         >
           <Text
-            style={[
-              styles.archiveText,
-              archived ? styles.restoreText : styles.archiveTextColor,
-            ]}
+            style={[styles.archiveText, archived ? styles.restoreText : styles.archiveTextColor]}
           >
             {archived ? "恢复在售" : "下架商品"}
           </Text>
