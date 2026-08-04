@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import type {
   CatalogSyncResponse,
   CreateProductInput,
@@ -8,10 +9,6 @@ import type {
 } from "@cloth-scan/shared";
 import { expandSkuMatrix, shouldArchive } from "@cloth-scan/shared";
 import { PrismaService } from "../prisma/prisma.service";
-
-/** Prisma 事务客户端（$transaction 回调参数）。用宽松类型避免引入庞大的生成类型。 */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type TxClient = any;
 
 /** 新手「一键体验」的演示商品模板 */
 const DEMO_PRODUCTS = [
@@ -305,7 +302,7 @@ export class ProductsService {
    *
    * 归档判定逻辑抽到 shared 的 {@link shouldArchive}，前端可复用同一语义。
    */
-  async recomputeArchive(tx: TxClient, productId: string): Promise<void> {
+  async recomputeArchive(tx: Prisma.TransactionClient, productId: string): Promise<void> {
     const agg = await tx.sku.aggregate({
       where: { productId },
       _sum: { stock: true },
