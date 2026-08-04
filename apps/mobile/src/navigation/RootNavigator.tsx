@@ -9,6 +9,7 @@ import { ProductsScreen } from "../screens/ProductsScreen";
 import { SaleDetailScreen } from "../screens/SaleDetailScreen";
 import { SalesScreen } from "../screens/SalesScreen";
 import { StaffScreen } from "../screens/StaffScreen";
+import { SyncErrorsScreen } from "../screens/SyncErrorsScreen";
 
 /**
  * 根 Stack 路由参数表。
@@ -25,6 +26,7 @@ export type RootStackParamList = {
   SaleDetail: { orderId: string };
   Staff: undefined;
   LabelPrint: { product: ProductWithSkus };
+  SyncErrors: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -76,6 +78,11 @@ export function RootNavigator() {
         options={{ title: "单据详情" }}
       />
       <Stack.Screen name="Staff" component={StaffScreen} options={{ title: "店员管理" }} />
+      <Stack.Screen
+        name="SyncErrors"
+        component={SyncErrorsScreen}
+        options={{ title: "同步失败" }}
+      />
     </Stack.Navigator>
   );
 }

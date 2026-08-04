@@ -38,10 +38,7 @@ export async function markOpSynced(opId: string): Promise<void> {
 
 export async function markOpFailed(opId: string, error: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync(`UPDATE outbox SET status = 'failed', error = ? WHERE opId = ?`, [
-    error,
-    opId,
-  ]);
+  await db.runAsync(`UPDATE outbox SET status = 'failed', error = ? WHERE opId = ?`, [error, opId]);
 }
 
 export async function countPendingOps(): Promise<number> {
@@ -50,6 +47,42 @@ export async function countPendingOps(): Promise<number> {
     `SELECT COUNT(*) as n FROM outbox WHERE status = 'pending'`,
   );
   return row?.n ?? 0;
+}
+
+/** 同步失败（4xx 永久失败）的 op 数量，用于首页警告条徽标 */
+export async function countFailedOps(): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) as n FROM outbox WHERE status = 'failed'`,
+  );
+  return row?.n ?? 0;
+}
+
+/** 列出全部失败 op，按时间倒序，供同步异常列表展示 */
+export async function listFailedOps(): Promise<OutboxItem[]> {
+  const db = await getDb();
+  return db.getAllAsync<OutboxItem>(
+    `SELECT * FROM outbox WHERE status = 'failed' ORDER BY createdAt DESC`,
+  );
+}
+
+/**
+ * 重试某笔失败 op：状态改回 pending、清空错误信息，
+ * 同步引擎下一轮（poll 或 syncNow）会重新拾取。
+ * opId 不变，服务端按 opId 幂等去重，不会重复入账。
+ */
+export async function retryOp(opId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE outbox SET status = 'pending', error = NULL, syncedAt = NULL WHERE opId = ?`,
+    [opId],
+  );
+}
+
+/** 永久放弃某笔失败 op：从队列删除，不再同步。 */
+export async function abandonOp(opId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`DELETE FROM outbox WHERE opId = ?`, [opId]);
 }
 
 /**

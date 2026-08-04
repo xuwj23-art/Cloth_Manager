@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth-context";
 import { useSync } from "../sync/sync-context";
 import { getSalesSummary } from "../api";
+import { countFailedOps } from "../db/outbox";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { yuan } from "../utils/format";
 
@@ -19,6 +20,7 @@ export function HomeScreen() {
     revenue: number;
     orders: number;
   } | null>(null);
+  const [failedCount, setFailedCount] = useState(0);
 
   const loadToday = useCallback(async () => {
     if (!isOwner) return; // 报表为店主专属，店员不请求
@@ -35,6 +37,17 @@ export function HomeScreen() {
     void loadToday();
   }, [loadToday, pendingCount]);
 
+  // 进入/返回首页时刷新失败同步计数：从同步异常列表重试/放弃返回后需要更新徽标
+  useFocusEffect(
+    useCallback(() => {
+      void countFailedOps()
+        .then(setFailedCount)
+        .catch(() => {
+          /* 读取失败忽略，不影响主流程 */
+        });
+    }, []),
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -45,6 +58,12 @@ export function HomeScreen() {
           <Text style={styles.logout}>退出</Text>
         </Pressable>
       </View>
+
+      {failedCount > 0 ? (
+        <Pressable style={styles.failedBanner} onPress={() => navigation.navigate("SyncErrors")}>
+          <Text style={styles.failedBannerText}>⚠️ 有 {failedCount} 笔同步失败，点查看</Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.body}>
         <Text style={styles.title}>服装进销存</Text>
@@ -127,6 +146,16 @@ const styles = StyleSheet.create({
   },
   welcome: { fontSize: 16, fontWeight: "600", color: "#111" },
   logout: { fontSize: 15, color: "#dc2626" },
+  failedBanner: {
+    backgroundColor: "#fef3c7",
+    borderBottomWidth: 1,
+    borderBottomColor: "#fde68a",
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    minHeight: 48,
+    justifyContent: "center",
+  },
+  failedBannerText: { fontSize: 16, fontWeight: "700", color: "#b45309" },
   body: {
     flex: 1,
     alignItems: "center",
