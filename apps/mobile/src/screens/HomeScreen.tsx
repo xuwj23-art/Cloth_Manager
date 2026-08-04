@@ -6,12 +6,9 @@ import { useAuth } from "../auth-context";
 import { useSync } from "../sync/sync-context";
 import { getSalesSummary } from "../api";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { yuan } from "../utils/format";
 
 type HomeNav = NativeStackNavigationProp<RootStackParamList, "Home">;
-
-function yuan(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
-}
 
 export function HomeScreen() {
   const navigation = useNavigation<HomeNav>();

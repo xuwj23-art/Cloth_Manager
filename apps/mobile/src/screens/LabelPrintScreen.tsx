@@ -26,6 +26,7 @@ import {
 import { buildCtPrintJob, totalLabelCount } from "../printer/labelLayout";
 import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.types";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { yuan } from "../utils/format";
 
 type LabelPrintNav = NativeStackNavigationProp<RootStackParamList, "LabelPrint">;
 type LabelPrintRoute = RouteProp<RootStackParamList, "LabelPrint">;
@@ -46,10 +47,6 @@ const ORIENTATIONS = [
 type Orientation = (typeof ORIENTATIONS)[number]["id"];
 
 type LabelSize = (typeof LABEL_SIZES)[number];
-
-function yuan(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
-}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

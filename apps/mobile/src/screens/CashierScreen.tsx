@@ -11,7 +11,7 @@ import { enqueueSale } from "../db/outbox";
 import { useSync } from "../sync/sync-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space } from "../theme/tokens";
-import { yuan } from "./cashier/ui";
+import { yuan } from "../utils/format";
 import { useCashierStore } from "./cashier/store";
 import { CartList } from "./cashier/CartList";
 import { CheckoutBar } from "./cashier/CheckoutBar";

@@ -1,15 +1,13 @@
 import { StyleSheet } from "react-native";
 import { colors, font, radius, space, touch } from "../../theme/tokens";
 
-/** 分 → "¥123.45" */
-export function yuan(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
-}
-
 /**
  * Cashier 子组件共用样式。
  * 设计语言（UI-REFERENCES §3）：字号≥16sp、点击区≥48dp、墨绿品牌色、留白分层。
  */
+
+// 金额格式化统一走 utils/format；此处仅为 cashier 子组件历史 import 兼容再导出。
+export { yuan } from "../../utils/format";
 export const cashierStyles = StyleSheet.create({
   // ---- Sheet 容器 ----
   backdrop: {

@@ -15,12 +15,9 @@ import type { ProductScope, ProductWithSkus } from "@cloth-scan/shared";
 import { deleteProduct, imageUrl, listProducts, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { yuan } from "../utils/format";
 
 type ProductsNav = NativeStackNavigationProp<RootStackParamList, "Products">;
-
-function yuan(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
-}
 
 export function ProductsScreen() {
   const navigation = useNavigation<ProductsNav>();

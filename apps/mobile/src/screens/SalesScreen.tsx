@@ -21,19 +21,18 @@ import type {
 } from "@cloth-scan/shared";
 import { getMonthlySales, getSalesByDay, getSalesReport, listSales } from "../api";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { yuan } from "../utils/format";
 
 type SalesNav = NativeStackNavigationProp<RootStackParamList, "Sales">;
 
-function yuan(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
-}
-
-function formatTime(iso: string): string {
+/** 月报列表用：不含年份（月份由分组标题给出），仅 "MM-DD HH:mm" */
+function formatTimeNoYear(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 日列表用：仅 "HH:mm" */
 function formatClock(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
@@ -359,7 +358,7 @@ export function SalesScreen() {
               onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
             >
               <View style={styles.orderLeft}>
-                <Text style={styles.orderTime}>{formatTime(item.createdAt)}</Text>
+                <Text style={styles.orderTime}>{formatTimeNoYear(item.createdAt)}</Text>
                 <Text style={styles.orderMeta}>
                   {item.itemCount} 件{item.operatorName ? ` · ${item.operatorName}` : ""}
                 </Text>

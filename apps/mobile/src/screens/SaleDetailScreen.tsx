@@ -16,21 +16,10 @@ import type { SaleOrderDetail } from "@cloth-scan/shared";
 import { deleteSaleOrder, editSaleOrder, getSale, imageUrl, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { formatTime, yuan } from "../utils/format";
 
 type SaleDetailNav = NativeStackNavigationProp<RootStackParamList, "SaleDetail">;
 type SaleDetailRoute = RouteProp<RootStackParamList, "SaleDetail">;
-
-function yuan(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(
-    d.getHours(),
-  )}:${p(d.getMinutes())}`;
-}
 
 /** 编辑草稿行：priceStr 为元字符串，便于输入 */
 interface DraftLine {

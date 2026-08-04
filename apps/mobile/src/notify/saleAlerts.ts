@@ -3,6 +3,7 @@ import { Alert, AppState, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import type { SaleOrderDetail } from "@cloth-scan/shared";
 import { listSales } from "../api";
+import { yuan } from "../utils/format";
 
 /** 轮询间隔（App 在前台/后台存活时生效） */
 const POLL_MS = 20000;
@@ -19,10 +20,6 @@ function ensureHandler() {
       shouldSetBadge: false,
     }),
   });
-}
-
-function yuan(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
 }
 
 async function notifySale(o: SaleOrderDetail) {
