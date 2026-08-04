@@ -4,7 +4,7 @@
 全栈统一 **TypeScript**，方便零基础 + AI 辅助开发。
 
 > 👉 **接手开发（人或 AI）请先读 [`AGENTS.md`](AGENTS.md)** —— 项目向导、黄金规则、架构、部署、踩坑清单的统一入口。
-> 完整研发方案见 [`docs/服装进销存App-MVP研发方案.md`](docs/服装进销存App-MVP研发方案.md)，开发日志见 [`docs/进度记录.md`](docs/进度记录.md)。
+> 产品需求（权威）见 [`docs/product/PRD.md`](docs/product/PRD.md)；文档分层导航见 [`docs/README.md`](docs/README.md)。历史规划/开发日志见 `docs/archive/`（仅供溯源）。
 
 ---
 
