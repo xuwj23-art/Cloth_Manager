@@ -41,7 +41,7 @@
     "lint-staged": "^17.3.0",
     "prettier": "^3.9.6",
     "turbo": "^2.3.3",
-    "typescript": "~5.9.3",
+    "typescript": "catalog:",
     "typescript-eslint": "^8.66.0"
   }
 }

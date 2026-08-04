@@ -4,6 +4,24 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    "@prisma/client":
+      specifier: ^6.1.0
+      version: 6.19.3
+    prisma:
+      specifier: ^6.1.0
+      version: 6.19.3
+    typescript:
+      specifier: ~5.9.3
+      version: 5.9.3
+    vitest:
+      specifier: ^2.1.9
+      version: 2.1.9
+    zod:
+      specifier: ^3.24.1
+      version: 3.25.76
+
 importers:
   .:
     devDependencies:
@@ -35,7 +53,7 @@ importers:
         specifier: ^2.3.3
         version: 2.9.16
       typescript:
-        specifier: ~5.9.3
+        specifier: "catalog:"
         version: 5.9.3
       typescript-eslint:
         specifier: ^8.66.0
@@ -126,10 +144,10 @@ importers:
         specifier: ~19.1.17
         version: 19.1.17
       typescript:
-        specifier: ~5.9.3
+        specifier: "catalog:"
         version: 5.9.3
       vitest:
-        specifier: ^2.1.9
+        specifier: "catalog:"
         version: 2.1.9(@types/node@22.19.20)(lightningcss@1.32.0)(terser@5.48.0)
 
   apps/server:
@@ -153,7 +171,7 @@ importers:
         specifier: ^10.4.15
         version: 10.4.22(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@10.4.22)
       "@prisma/client":
-        specifier: ^6.1.0
+        specifier: "catalog:"
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       bcryptjs:
         specifier: ^2.4.3
@@ -174,7 +192,7 @@ importers:
         specifier: ^0.33.5
         version: 0.33.5
       zod:
-        specifier: ^3.24.1
+        specifier: "catalog:"
         version: 3.25.76
     devDependencies:
       "@nestjs/cli":
@@ -202,7 +220,7 @@ importers:
         specifier: ^1.5.6
         version: 1.5.6
       prisma:
-        specifier: ^6.1.0
+        specifier: "catalog:"
         version: 6.19.3(typescript@5.9.3)
       testcontainers:
         specifier: ^12.1.0
@@ -211,23 +229,23 @@ importers:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@22.19.20)(typescript@5.9.3)
       typescript:
-        specifier: ~5.9.3
+        specifier: "catalog:"
         version: 5.9.3
       vitest:
-        specifier: ^2.1.8
+        specifier: "catalog:"
         version: 2.1.9(@types/node@22.19.20)(lightningcss@1.32.0)(terser@5.48.0)
 
   packages/shared:
     dependencies:
       zod:
-        specifier: ^3.24.1
+        specifier: "catalog:"
         version: 3.25.76
     devDependencies:
       typescript:
-        specifier: ~5.9.3
+        specifier: "catalog:"
         version: 5.9.3
       vitest:
-        specifier: ^2.1.8
+        specifier: "catalog:"
         version: 2.1.9(@types/node@22.19.20)(lightningcss@1.32.0)(terser@5.48.0)
 
 packages:

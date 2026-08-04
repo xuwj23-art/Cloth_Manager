@@ -11,3 +11,15 @@ onlyBuiltDependencies:
   - "prisma"
   - "esbuild"
   - "msgpackr-extract"
+
+# 统一跨包依赖版本（F2）：所有 package.json 用 "typescript": "catalog:" 引用，
+# 改版本只需在此处改一处。详见 https://pnpm.io/catalogs
+catalog:
+  # 语言/工具链
+  typescript: "~5.9.3"
+  vitest: "^2.1.9"
+  # 业务依赖
+  zod: "^3.24.1"
+  # ORM（client 与 CLI 锁同版本，避免 generate/migrate 错位）
+  "@prisma/client": "^6.1.0"
+  prisma: "^6.1.0"
