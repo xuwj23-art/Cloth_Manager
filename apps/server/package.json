@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run",
+    "test:integration": "prisma generate && vitest run --config vitest.integration.config.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
@@ -33,12 +34,14 @@
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.0",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.2",
     "@types/qrcode": "^1.5.6",
     "prisma": "^6.1.0",
+    "testcontainers": "^12.1.0",
     "ts-node": "^10.9.2",
     "typescript": "~5.9.3",
     "vitest": "^2.1.8"
