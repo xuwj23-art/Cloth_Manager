@@ -11,7 +11,7 @@
     "experimentalDecorators": true,
     "declaration": false,
     "declarationMap": false,
-    "strictPropertyInitialization": false,
+    "strictPropertyInitialization": true,
     "noUncheckedIndexedAccess": false
   },
   "include": ["src/**/*"],
