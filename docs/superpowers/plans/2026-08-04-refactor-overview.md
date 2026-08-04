@@ -3,9 +3,14 @@
 > **说明**：本文件是 32 项重构机会（见 `docs/product/REFACTOR-OPPORTUNITIES.md`）的执行编排总纲。
 > 因规模大、跨四个独立子系统（后端/移动端/shared/工程化），按 superpowers:writing-plans 的 scope check 拆成 5 个独立 plan，每个 plan 产出可独立测试运行的软件。
 >
-> **决策前提**（用户已确认）：范围=全部 32 项；接受 React Navigation/CashierScreen 拆分/同步引擎重做/后端 Service 拆分；可接受停服切换（允许数据迁移脚本、不强制向后兼容）。
+> **决策前提**（用户已确认）：范围=全部 32 项；接受 React Navigation/CashierScreen 拆分/同步引擎重做/后端 Service 拆分；可接受停服切换（允许数据迁移脚本、不强制向后兼容）。**UI 面向中老年用户**，遵守 `docs/design/UI-REFERENCES.md` 设计语言（简洁精致、图标+文字双编码、字号≥16sp、动画 200-250ms）。
 >
 > 日期：2026-08-04
+>
+> **执行调整记录**：
+> - **第 1 波**：Task 1（A3 整单优惠取整）执行时发现数学死角（多件行整数分无解），用户决策改"订单级优惠字段"方案，**A3 并入第 2 波 Task 4**。第 1 波实际完成 4 个 task（C1/C2/E5/F1），均已提交（`24556b9..27011b5`）。
+> - **并发测试**：A1/A2 用 testcontainers 真实 PG 验证（第 2 波 Task 1）。
+> - **UI 设计语言**：第 4 波 Task 2 落地 CashierScreen + theme tokens，其余屏幕 UI 统一在第 5 波 Task 13。
 
 ---
 
@@ -25,14 +30,14 @@
 
 ## 各波内容明细
 
-### 第 1 波 · 快速止血（独立小修复，先行合入）
-- **A3** `distributeOrderTotal` 整单优惠取整误差 → 改"逐行累加+末行吸收余差"算法 + 补多件行单测
-- **C1** `SaleDetailScreen.onChanged` 未接线 → App.tsx 加置脏机制
-- **C2** `LabelPrintScreen` 变量先用后声明 → 复用 `totalLabelCount(job)`
-- **E5** 后端误导注释（"清理图片"实际不删图）→ 改注释
-- **F1** TypeScript 版本漂移 → 统一为 `~5.9.3`
+### 第 1 波 · 快速止血（**已执行**：4/5 完成，A3 并入第 2 波）
+- ~~**A3** distributeOrderTotal 整单优惠取整~~ → **DEFERRED 到第 2 波 Task 4**（执行时发现数学死角，改订单级优惠字段方案）
+- ✅ **C1** SaleDetailScreen.onChanged 接线（commit 24556b9）
+- ✅ **C2** LabelPrintScreen 变量先用后声明（commit c168c30）
+- ✅ **E5** 后端误导注释（commit 84cb677）
+- ✅ **F1** TypeScript 版本统一 ~5.9.3（commit 27011b5）
 
-### 第 2 波 · 正确性硬伤
+### 第 2 波 · 正确性硬伤（含 A3 订单级优惠字段）
 - **A1 + A2** createSale 幂等 TOCTOU + 防超卖缺锁（一起做，补并发测试，可能需真实 PG 集成测试）
 - **A4** 订单物理删除改软删除（用 `voided` 状态）
 - **D1** 乐观扣库存与 pull 的竞态（pull 时跳过 pending sku）
