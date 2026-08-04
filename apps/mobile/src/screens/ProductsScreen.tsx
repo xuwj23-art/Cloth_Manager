@@ -1,20 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Alert, FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ProductScope, ProductWithSkus } from "@cloth-scan/shared";
 import { deleteProduct, imageUrl, listProducts, thumbUrl } from "../api";
 import { ImageViewer } from "../components/ImageViewer";
+import { StateView } from "../components/StateView";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { colors, font, radius, space, touch } from "../theme/tokens";
 import { yuan } from "../utils/format";
 
 type ProductsNav = NativeStackNavigationProp<RootStackParamList, "Products">;
@@ -71,59 +64,66 @@ export function ProductsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.topbarBtn}>
           <Text style={styles.back}>返回</Text>
         </Pressable>
         <Text style={styles.title}>商品列表</Text>
-        <Pressable onPress={() => navigation.navigate("CreateProduct")}>
+        <Pressable
+          onPress={() => navigation.navigate("CreateProduct")}
+          hitSlop={8}
+          style={styles.topbarBtn}
+        >
           <Text style={styles.add}>+ 建档</Text>
         </Pressable>
       </View>
 
+      {/* 分段控件：在售 / 已售罄（§2.3 大段、不靠小图标） */}
       <View style={styles.tabs}>
         <Pressable
-          style={[styles.tab, scope === "active" && styles.tabActive]}
+          style={({ pressed }) => [
+            styles.tab,
+            scope === "active" && styles.tabActive,
+            pressed && scope === "active" && styles.tabActivePressed,
+          ]}
           onPress={() => setScope("active")}
         >
           <Text style={[styles.tabText, scope === "active" && styles.tabTextActive]}>在售</Text>
         </Pressable>
         <Pressable
-          style={[styles.tab, scope === "archived" && styles.tabActive]}
+          style={({ pressed }) => [
+            styles.tab,
+            scope === "archived" && styles.tabActive,
+            pressed && scope === "archived" && styles.tabActivePressed,
+          ]}
           onPress={() => setScope("archived")}
         >
           <Text style={[styles.tabText, scope === "archived" && styles.tabTextActive]}>已售罄</Text>
         </Pressable>
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-        </View>
-      ) : error ? (
-        <View style={styles.center}>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable style={styles.retry} onPress={load}>
-            <Text style={styles.retryText}>重试</Text>
-          </Pressable>
-        </View>
-      ) : (
+      <StateView
+        loading={loading}
+        error={error}
+        onRetry={load}
+        empty={!loading && !error && products.length === 0}
+        emptyText={
+          scope === "active" ? "还没有在售商品，点右上角「+ 建档」开始" : "没有已售罄的商品"
+        }
+        emptyActionText={scope === "active" ? "+ 建档" : undefined}
+        onEmptyAction={scope === "active" ? () => navigation.navigate("CreateProduct") : undefined}
+      >
         <FlatList
           data={products}
           keyExtractor={(p) => p.id}
           onRefresh={load}
           refreshing={loading}
           contentContainerStyle={styles.list}
-          ListEmptyComponent={
-            <Text style={styles.empty}>
-              {scope === "active" ? "还没有在售商品，点右上角「+ 建档」开始" : "没有已售罄的商品"}
-            </Text>
-          }
           renderItem={({ item }) => {
             const totalStock = item.skus.reduce((s, k) => s + k.stock, 0);
             const minPrice = Math.min(...item.skus.map((k) => k.salePrice));
             return (
               <Pressable
-                style={styles.card}
+                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 onPress={() => navigation.navigate("EditProduct", { product: item })}
               >
                 <Pressable
@@ -136,32 +136,34 @@ export function ProductsScreen() {
                   {item.coverImage ? (
                     <Image source={{ uri: thumbUrl(item.coverImage) }} style={styles.coverImg} />
                   ) : (
-                    <Text style={styles.coverPlaceholder}>无图</Text>
+                    <Text style={styles.coverPlaceholder}>👗</Text>
                   )}
                 </Pressable>
                 <View style={styles.info}>
-                  <Text style={styles.name}>{item.name}</Text>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {item.name}
+                  </Text>
                   <Text style={styles.meta}>
                     {item.skus.length} 个 SKU · 库存 {totalStock}
                   </Text>
                   <Text style={styles.price}>{yuan(minPrice)} 起</Text>
+                  {scope === "archived" ? (
+                    <Pressable
+                      style={styles.deleteBtn}
+                      onPress={() => confirmDelete(item)}
+                      hitSlop={8}
+                    >
+                      <Text style={styles.deleteText}>删除</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.editHint}>点击编辑 ›</Text>
+                  )}
                 </View>
-                {scope === "archived" ? (
-                  <Pressable
-                    style={styles.deleteBtn}
-                    onPress={() => confirmDelete(item)}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.deleteText}>删除</Text>
-                  </Pressable>
-                ) : (
-                  <Text style={styles.editArrow}>编辑 ›</Text>
-                )}
               </Pressable>
             );
           }}
         />
-      )}
+      </StateView>
 
       <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
@@ -169,78 +171,84 @@ export function ProductsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: colors.bg },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    backgroundColor: colors.card,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: colors.border,
   },
-  back: { color: "#2563eb", fontSize: 16 },
-  title: { fontSize: 18, fontWeight: "800", color: "#111" },
-  add: { color: "#2563eb", fontSize: 16, fontWeight: "700" },
+  topbarBtn: { minHeight: touch.minSize, justifyContent: "center" },
+  back: { color: colors.primary, fontSize: font.body },
+  title: { fontSize: font.title, fontWeight: "800", color: colors.text },
+  add: { color: colors.primary, fontSize: font.body, fontWeight: "700" },
+
+  // 分段控件（§2.3）
   tabs: {
     flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.md,
   },
   tab: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: "#f3f4f6",
-  },
-  tabActive: { backgroundColor: "#2563eb" },
-  tabText: { fontSize: 14, color: "#6b7280", fontWeight: "600" },
-  tabTextActive: { color: "#fff" },
-  editArrow: { color: "#9ca3af", fontSize: 13, alignSelf: "center" },
-  deleteBtn: {
-    alignSelf: "center",
+    flex: 1,
+    paddingVertical: space.md - 2,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderColor: colors.border,
+    alignItems: "center",
+    minHeight: touch.minSize,
+    justifyContent: "center",
   },
-  deleteText: { color: "#dc2626", fontSize: 13, fontWeight: "700" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  list: { padding: 12, gap: 10 },
-  empty: { textAlign: "center", color: "#9ca3af", marginTop: 48 },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabActivePressed: { backgroundColor: colors.primaryPressed },
+  tabText: { fontSize: font.body, color: colors.textMuted, fontWeight: "700" },
+  tabTextActive: { color: "#fff" },
+
+  list: { padding: space.md, gap: space.md },
+  // 大封面卡（Etsy §2.3）：图为主、品名 + SKU 数 + 价格强调
   card: {
     flexDirection: "row",
-    gap: 12,
-    padding: 10,
-    borderRadius: 12,
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: "#eee",
+    borderColor: colors.border,
+    alignItems: "center",
   },
+  cardPressed: { opacity: 0.85 },
   cover: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
-    backgroundColor: "#f3f4f6",
+    width: 96,
+    height: 96,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   coverImg: { width: "100%", height: "100%" },
-  coverPlaceholder: { color: "#9ca3af", fontSize: 12 },
-  info: { flex: 1, justifyContent: "center", gap: 2 },
-  name: { fontSize: 16, fontWeight: "700", color: "#111" },
-  meta: { fontSize: 13, color: "#6b7280" },
-  price: { fontSize: 15, color: "#e11d48", fontWeight: "700" },
-  error: { color: "#dc2626" },
-  retry: {
-    borderWidth: 1,
-    borderColor: "#2563eb",
-    borderRadius: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
+  coverPlaceholder: { fontSize: 36 },
+  info: { flex: 1, gap: space.xs, justifyContent: "center" },
+  name: { fontSize: font.title, fontWeight: "700", color: colors.text },
+  meta: { fontSize: font.caption, color: colors.textMuted },
+  price: { fontSize: font.body + 2, color: colors.primary, fontWeight: "800" },
+  editHint: { fontSize: font.caption, color: colors.textMuted, marginTop: space.xs },
+  deleteBtn: {
+    alignSelf: "flex-start",
+    borderWidth: 1.5,
+    borderColor: "#FECACA",
+    backgroundColor: colors.dangerSoft,
+    borderRadius: radius.sm,
+    paddingHorizontal: space.md,
+    minHeight: touch.minSize,
+    justifyContent: "center",
+    marginTop: space.xs,
   },
-  retryText: { color: "#2563eb" },
+  deleteText: { color: colors.danger, fontSize: font.caption, fontWeight: "700" },
 });
