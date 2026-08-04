@@ -113,3 +113,74 @@ describe("createSale 并发安全（A1 幂等 + A2 防超卖）", () => {
     expect(sku!.stock).toBeGreaterThanOrEqual(0); // 不得为负
   });
 });
+
+/**
+ * Task 3: 订单软删除（A4）。删单 = voided + deletedAt，库存回滚，
+ * SaleItem 行保留作审计痕迹，前台查询过滤掉软删单。
+ */
+describe("deleteOrder 软删除（A4）", () => {
+  let prisma: PrismaClient;
+  let sales: SalesService;
+  beforeAll(async () => {
+    prisma = await startPg();
+    sales = new SalesService(
+      prisma as unknown as PrismaService,
+      new ProductsService(prisma as unknown as PrismaService),
+    );
+  });
+  afterAll(async () => { await stopPg(); });
+
+  it("删单后：status=voided、deletedAt 非空、库存回滚、SaleItem 保留", async () => {
+    const { shopId, userId, skuId } = await seedFixture(prisma);
+    // 开一笔单卖 4 件（库存 10 → 6）
+    const order = await sales.createSale(shopId, userId, {
+      opId: "op-softdel-1",
+      items: [{ skuId, quantity: 4, price: 9900 }],
+    });
+    let sku = await prisma.sku.findUnique({ where: { id: skuId } });
+    expect(sku!.stock).toBe(6); // 10 - 4
+
+    // 记下明细 id 用于后续验证保留
+    const itemIds = order.items.map((it) => it.id);
+    expect(itemIds.length).toBe(1);
+
+    // 软删除
+    await sales.deleteOrder(shopId, order.id);
+
+    // 单据仍在 DB，但 status=voided + deletedAt 非空
+    const after = await prisma.saleOrder.findUnique({ where: { id: order.id } });
+    expect(after).not.toBeNull();
+    expect(after!.status).toBe("voided");
+    expect(after!.deletedAt).not.toBeNull();
+    expect(after!.deletedAt instanceof Date).toBe(true);
+
+    // 库存回滚回 seed 水平（10）
+    sku = await prisma.sku.findUnique({ where: { id: skuId } });
+    expect(sku!.stock).toBe(10);
+
+    // SaleItem 行仍存在（软删不级联删明细）
+    const remainingItems = await prisma.saleItem.findMany({
+      where: { orderId: order.id },
+    });
+    expect(remainingItems.length).toBe(1);
+    expect(remainingItems.map((it) => it.id)).toEqual(itemIds);
+  });
+
+  it("listOrders 不含软删单", async () => {
+    const { shopId, userId, skuId } = await seedFixture(prisma);
+    const live = await sales.createSale(shopId, userId, {
+      opId: "op-softdel-live",
+      items: [{ skuId, quantity: 1, price: 9900 }],
+    });
+    const toDelete = await sales.createSale(shopId, userId, {
+      opId: "op-softdel-del",
+      items: [{ skuId, quantity: 1, price: 9900 }],
+    });
+    await sales.deleteOrder(shopId, toDelete.id);
+
+    const list = await sales.listOrders(shopId);
+    const ids = list.map((o) => o.id);
+    expect(ids).toContain(live.id);
+    expect(ids).not.toContain(toDelete.id); // 软删单对流水不可见
+  });
+});

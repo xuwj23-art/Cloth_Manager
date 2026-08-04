@@ -277,17 +277,19 @@ describe("SalesService.report", () => {
 });
 
 describe("SalesService.deleteOrder", () => {
-  it("整单删除会把库存加回并删除单据", async () => {
+  it("整单软删除：库存加回 + 删出库流水 + 单据置 voided/deletedAt（不级联删 SaleItem）", async () => {
     const tx = {
       sku: { update: vi.fn().mockResolvedValue({ productId: "p1" }) },
       stockMovement: { deleteMany: vi.fn().mockResolvedValue({}) },
-      saleOrder: { delete: vi.fn().mockResolvedValue({}) },
+      saleOrder: { update: vi.fn().mockResolvedValue({}) },
     };
     const prisma = {
       saleOrder: {
         findUnique: vi.fn().mockResolvedValue({
           id: "o1",
           shopId: SHOP,
+          status: "completed",
+          deletedAt: null,
           items: [{ skuId: "s1", quantity: 2 }],
         }),
       },
@@ -307,7 +309,12 @@ describe("SalesService.deleteOrder", () => {
     expect(tx.stockMovement.deleteMany).toHaveBeenCalledWith({
       where: { refOrderId: "o1" },
     });
-    expect(tx.saleOrder.delete).toHaveBeenCalledWith({ where: { id: "o1" } });
+    // 软删除：update 置 voided + deletedAt，不再物理 delete
+    expect(tx.saleOrder.update).toHaveBeenCalledWith({
+      where: { id: "o1" },
+      data: { status: "voided", deletedAt: expect.any(Date) },
+    });
+    expect((tx.saleOrder as any).delete).toBeUndefined();
   });
 });
 
@@ -333,6 +340,7 @@ describe("SalesService.editOrder", () => {
       operatorId: null,
       operator: null,
       status: "completed",
+      deletedAt: null,
       totalAmount: 5000,
       createdAt: new Date(),
       items: [
@@ -410,6 +418,7 @@ describe("SalesService.getOrder", () => {
     operatorId: "user-1",
     operator: { name: "??" },
     status: "completed",
+    deletedAt: null,
     totalAmount: 11800,
     createdAt: new Date("2026-06-08T10:00:00.000Z"),
     items: [
@@ -452,6 +461,21 @@ describe("SalesService.getOrder", () => {
         findUnique: vi
           .fn()
           .mockResolvedValue({ ...orderRow, shopId: "other-shop" }),
+      },
+    } as any;
+    const service = new SalesService(prisma, productsStub);
+
+    await expect(service.getOrder(SHOP, "order-1")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it("软删单（voided + deletedAt 非空）视为不存在，抛 NotFoundException", async () => {
+    const prisma = {
+      saleOrder: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ ...orderRow, status: "voided", deletedAt: new Date() }),
       },
     } as any;
     const service = new SalesService(prisma, productsStub);

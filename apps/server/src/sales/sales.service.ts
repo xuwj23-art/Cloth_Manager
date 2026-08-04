@@ -192,10 +192,10 @@ export class SalesService {
     }
   }
 
-  /** 销售流水（最近 500 笔），含明细名称与操作人 */
+  /** 销售流水（最近 500 笔），含明细名称与操作人。过滤软删单（voided + deletedAt 非空） */
   async listOrders(shopId: string): Promise<SaleOrderDetail[]> {
     const orders = await this.prisma.saleOrder.findMany({
-      where: { shopId },
+      where: { shopId, status: "completed", deletedAt: null },
       include: {
         operator: true,
         items: { include: { sku: { include: { product: true } } } },
@@ -207,8 +207,10 @@ export class SalesService {
   }
 
   /**
-   * 删除整单（误操作兜底）：把每件已扣的库存加回，删除该单的库存流水与单据，
-   * 并刷新受影响商品的售罄归档状态。事务保证一致。
+   * 删除整单（误操作兜底）：软删除——把每件已扣的库存加回、删除该单的库存出库流水，
+   * 然后把单据置为 voided + 写 deletedAt（保留行 + 明细作为审计痕迹，不级联删 SaleItem）。
+   * 所有报表/流水查询过滤 status=completed + deletedAt=null，使已删单对前台不可见。
+   * 事务保证一致。
    */
   async deleteOrder(shopId: string, id: string): Promise<{ ok: true }> {
     const order = await this.prisma.saleOrder.findUnique({
@@ -231,9 +233,13 @@ export class SalesService {
         });
         affected.add(sku.productId);
       }
-      // 删除该单的库存流水（出库记录），再删单据（明细随单据级联删除）
+      // 删除该单的库存出库流水（原 createSale 写的 type=out 记录）。
+      // 软删后保留 SaleItem 行作为审计痕迹，不再级联删单据。
       await tx.stockMovement.deleteMany({ where: { refOrderId: id } });
-      await tx.saleOrder.delete({ where: { id } });
+      await tx.saleOrder.update({
+        where: { id },
+        data: { status: "voided", deletedAt: new Date() },
+      });
       for (const productId of affected) {
         await this.products.recomputeArchive(tx, productId);
       }
@@ -356,14 +362,19 @@ export class SalesService {
     return this.getOrder(shopId, id);
   }
 
-  /** 某一天（本地日期 YYYY-MM-DD）的销售流水，按时间倒序 */
+  /** 某一天（本地日期 YYYY-MM-DD）的销售流水，按时间倒序。过滤软删单 */
   async listByDay(shopId: string, date: string): Promise<SaleOrderDetail[]> {
     const [y, m, d] = date.split("-").map(Number);
     if (!y || !m || !d) return [];
     const start = new Date(y, m - 1, d, 0, 0, 0, 0);
     const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
     const orders = await this.prisma.saleOrder.findMany({
-      where: { shopId, createdAt: { gte: start, lt: end } },
+      where: {
+        shopId,
+        status: "completed",
+        deletedAt: null,
+        createdAt: { gte: start, lt: end },
+      },
       include: {
         operator: true,
         items: { include: { sku: { include: { product: true } } } },
@@ -373,7 +384,7 @@ export class SalesService {
     return orders.map((o) => this.toDetail(o));
   }
 
-  /** 单据详情 */
+  /** 单据详情。软删单（voided + deletedAt 非空）视为不存在 */
   async getOrder(shopId: string, id: string): Promise<SaleOrderDetail> {
     const order = await this.prisma.saleOrder.findUnique({
       where: { id },
@@ -382,7 +393,12 @@ export class SalesService {
         items: { include: { sku: { include: { product: true } } } },
       },
     });
-    if (!order || order.shopId !== shopId) {
+    if (
+      !order ||
+      order.shopId !== shopId ||
+      order.status === "voided" ||
+      order.deletedAt !== null
+    ) {
       throw new NotFoundException("单据不存在");
     }
     return this.toDetail(order);
@@ -416,7 +432,12 @@ export class SalesService {
           : startOfMonth();
 
     const orders = await this.prisma.saleOrder.findMany({
-      where: { shopId, status: "completed", createdAt: { gte: start } },
+      where: {
+        shopId,
+        status: "completed",
+        deletedAt: null,
+        createdAt: { gte: start },
+      },
       include: { items: true, operator: true },
       orderBy: { createdAt: "asc" },
     });
@@ -477,6 +498,7 @@ export class SalesService {
       where: {
         shopId,
         status: "completed",
+        deletedAt: null,
         createdAt: { gte: start, lt: end },
       },
       include: { items: true, operator: true },
@@ -596,6 +618,7 @@ export class SalesService {
     const where = {
       shopId,
       status: "completed" as const,
+      deletedAt: null,
       createdAt: { gte: since },
     };
     const [orderAgg, itemAgg] = await Promise.all([
@@ -620,7 +643,12 @@ export class SalesService {
     const grouped = await this.prisma.saleItem.groupBy({
       by: ["skuId"],
       where: {
-        order: { shopId, status: "completed", createdAt: { gte: since } },
+        order: {
+          shopId,
+          status: "completed",
+          deletedAt: null,
+          createdAt: { gte: since },
+        },
       },
       _sum: { quantity: true, subtotal: true },
       orderBy: { _sum: { quantity: "desc" } },

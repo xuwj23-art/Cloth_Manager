@@ -137,6 +137,8 @@ model SaleOrder {
   // 客户端幂等键，防止重复提交销售单
   opId        String          @unique
   createdAt   DateTime        @default(now())
+  /// 软删除时间戳（null = 未删除）。删除时置 voided 状态 + 此时间戳，保留审计痕迹
+  deletedAt   DateTime?
 
   shop     Shop       @relation(fields: [shopId], references: [id])
   operator User?      @relation(fields: [operatorId], references: [id])
