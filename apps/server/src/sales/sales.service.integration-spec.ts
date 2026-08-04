@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { startPg, stopPg, resetDb } from "../../test/pg-container";
+import { SalesService } from "./sales.service";
+import { PrismaService } from "../prisma/prisma.service";
+import { ProductsService } from "../products/products.service";
 
 describe("PG 容器集成测试基础设施", () => {
   let prisma: PrismaClient;
@@ -19,5 +22,94 @@ describe("PG 容器集成测试基础设施", () => {
     await resetDb(prisma);
     const count = await prisma.shop.count();
     expect(count).toBe(0);
+  });
+});
+
+/**
+ * 并发安全测试（Task 2: A1 幂等 + A2 防超卖）。
+ * 用独立 describe 块 + 自己的 beforeAll/afterAll，避免与上面的基础设施冒烟测试
+ * 共享同一 prisma 单例导致 resetDb 互相干扰。
+ */
+async function seedFixture(p: PrismaClient) {
+  await resetDb(p);
+  const shop = await p.shop.create({ data: { name: "并发测试店" } });
+  const user = await p.user.create({
+    data: {
+      shopId: shop.id,
+      name: "测试店主",
+      phone: "13900000000",
+      passwordHash: "x",
+      role: "owner",
+    },
+  });
+  const product = await p.product.create({
+    data: { shopId: shop.id, name: "测试款", coverImage: null },
+  });
+  const sku = await p.sku.create({
+    data: {
+      productId: product.id,
+      barcode: "CONC-001",
+      color: "默认",
+      size: "均",
+      costPrice: 5000,
+      salePrice: 9900,
+      stock: 10,
+      version: 0,
+    },
+  });
+  // 初始库存流水
+  await p.stockMovement.create({
+    data: { skuId: sku.id, type: "in", quantity: 10, opId: "seed-in" },
+  });
+  return { shopId: shop.id, userId: user.id, skuId: sku.id };
+}
+
+describe("createSale 并发安全（A1 幂等 + A2 防超卖）", () => {
+  let prisma: PrismaClient;
+  let sales: SalesService;
+  beforeAll(async () => {
+    prisma = await startPg();
+    sales = new SalesService(
+      prisma as unknown as PrismaService,
+      new ProductsService(prisma as unknown as PrismaService),
+    );
+  });
+  afterAll(async () => { await stopPg(); });
+
+  it("A1: 同一 opId 并发提交两次，只扣一次库存且都返回同一单", async () => {
+    const { shopId, userId, skuId } = await seedFixture(prisma);
+    const input = {
+      opId: "op-concurrent-1",
+      items: [{ skuId, quantity: 3, price: 9900 }],
+    };
+    const [r1, r2] = await Promise.all([
+      sales.createSale(shopId, userId, input),
+      sales.createSale(shopId, userId, input),
+    ]);
+    expect(r1.id).toBe(r2.id); // 同一单
+    const sku = await prisma.sku.findUnique({ where: { id: skuId } });
+    expect(sku!.stock).toBe(7); // 10 - 3，只扣一次
+  });
+
+  it("A2: 并发各买剩余全部库存，不应超卖（stock 不得为负）", async () => {
+    const { shopId, userId, skuId } = await seedFixture(prisma);
+    // 库存 10，两个请求各买 8（合计 16 > 10），应一个成功一个失败
+    const results = await Promise.allSettled([
+      sales.createSale(shopId, userId, {
+        opId: "op-race-a",
+        items: [{ skuId, quantity: 8, price: 9900 }],
+      }),
+      sales.createSale(shopId, userId, {
+        opId: "op-race-b",
+        items: [{ skuId, quantity: 8, price: 9900 }],
+      }),
+    ]);
+    const ok = results.filter((r) => r.status === "fulfilled");
+    const failed = results.filter((r) => r.status === "rejected");
+    expect(ok.length).toBe(1); // 只有一个成功
+    expect(failed.length).toBe(1);
+    const sku = await prisma.sku.findUnique({ where: { id: skuId } });
+    expect(sku!.stock).toBe(2); // 10 - 8
+    expect(sku!.stock).toBeGreaterThanOrEqual(0); // 不得为负
   });
 });

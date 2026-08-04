@@ -56,97 +56,140 @@ export class SalesService {
    * 创建一笔销售并扣减库存。
    * 关键保证：
    *  1) 幂等 —— 同一 opId 重复提交直接返回已存在的单（离线重传安全）。
-   *  2) 事务 —— 校验库存、写销售单、写库存流水、扣减 stock 一起成功或一起失败。
-   *  3) 防超卖 —— 库存不足直接报错。
+   *     不做外层 findUnique(opId) 预检查（会与事务内 create 形成 TOCTOU 窗口），
+   *     改为直接进事务 create，捕获 P2002 后回查已存在单返回。
+   *  2) 事务 —— 校验库存、写销售单、写库存流水、扣减 stock 一起成功或一起失败，
+   *     隔离级别 Serializable（彻底杜绝并发超卖）。
+   *  3) 防超卖 —— 用 updateMany 带 stock>=qty 条件做原子条件更新，count!==1 即库存不足，
+   *     读写不再分离，无超卖窗口。
    */
   async createSale(
     shopId: string,
     operatorId: string | null,
     input: CreateSaleOrderInput,
   ) {
-    // 幂等检查
-    const existing = await this.prisma.saleOrder.findUnique({
-      where: { opId: input.opId },
-      include: { items: true },
-    });
-    if (existing) return existing;
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          let total = 0;
+          const itemsData: {
+            skuId: string;
+            quantity: number;
+            price: number;
+            cost: number;
+            subtotal: number;
+          }[] = [];
+          const affectedProductIds = new Set<string>();
 
-    return this.prisma.$transaction(async (tx) => {
-      let total = 0;
-      const itemsData: {
-        skuId: string;
-        quantity: number;
-        price: number;
-        cost: number;
-        subtotal: number;
-      }[] = [];
-      const affectedProductIds = new Set<string>();
+          for (const item of input.items) {
+            // 原子防超卖：updateMany 带 stock>=qty 条件，count===1 才算扣减成功。
+            // product.shopId 关系过滤提供 DB 层门店隔离（与应用层 shopId 校验互为兜底）。
+            const updated = await tx.sku.updateMany({
+              where: {
+                id: item.skuId,
+                product: { shopId },
+                stock: { gte: item.quantity },
+              },
+              data: {
+                stock: { decrement: item.quantity },
+                version: { increment: 1 },
+              },
+            });
+            if (updated.count !== 1) {
+              // 库存不足或 SKU 不存在/跨店——回查给准确错误信息
+              const sku = await tx.sku.findUnique({
+                where: { id: item.skuId },
+                include: { product: true },
+              });
+              if (!sku || sku.product.shopId !== shopId) {
+                throw new NotFoundException(`SKU 不存在：${item.skuId}`);
+              }
+              throw new BadRequestException(
+                `库存不足：${sku.barcode} 现有 ${sku.stock}，需 ${item.quantity}`,
+              );
+            }
+            // 回查拿 costPrice（进价快照）和 salePrice（price 兜底）
+            const sku = await tx.sku.findUnique({
+              where: { id: item.skuId },
+              include: { product: true },
+            });
+            affectedProductIds.add(sku!.productId);
+            const price = item.price ?? sku!.salePrice;
+            const subtotal = price * item.quantity;
+            total += subtotal;
+            itemsData.push({
+              skuId: sku!.id,
+              quantity: item.quantity,
+              price,
+              cost: sku!.costPrice, // 快照当时进价，保证历史利润不被后续改价影响
+              subtotal,
+            });
+          }
 
-      for (const item of input.items) {
-        const sku = await tx.sku.findUnique({
-          where: { id: item.skuId },
-          include: { product: true },
-        });
-        if (!sku || sku.product.shopId !== shopId) {
-          throw new NotFoundException(`SKU 不存在：${item.skuId}`);
-        }
-        affectedProductIds.add(sku.productId);
-        if (sku.stock < item.quantity) {
-          throw new BadRequestException(
-            `库存不足：${sku.barcode} 现有 ${sku.stock}，需 ${item.quantity}`,
-          );
-        }
-        const price = item.price ?? sku.salePrice;
-        const subtotal = price * item.quantity;
-        total += subtotal;
-        itemsData.push({
-          skuId: sku.id,
-          quantity: item.quantity,
-          price,
-          cost: sku.costPrice, // 快照当时进价，保证历史利润不被后续改价影响
-          subtotal,
-        });
-      }
+          const order = await tx.saleOrder.create({
+            data: {
+              shopId,
+              operatorId,
+              status: "completed",
+              totalAmount: total,
+              opId: input.opId,
+              items: { create: itemsData },
+            },
+            include: { items: true },
+          });
 
-      const order = await tx.saleOrder.create({
-        data: {
-          shopId,
-          operatorId,
-          status: "completed",
-          totalAmount: total,
-          opId: input.opId,
-          items: { create: itemsData },
+          for (const item of itemsData) {
+            await tx.stockMovement.create({
+              data: {
+                skuId: item.skuId,
+                type: "out",
+                quantity: -item.quantity,
+                refOrderId: order.id,
+                operatorId,
+                opId: randomUUID(),
+              },
+            });
+          }
+
+          // 售罄自动归档：受影响商品库存清零则自动下架
+          for (const productId of affectedProductIds) {
+            await this.products.recomputeArchive(tx, productId);
+          }
+
+          return order;
         },
-        include: { items: true },
-      });
-
-      for (const item of itemsData) {
-        await tx.stockMovement.create({
-          data: {
-            skuId: item.skuId,
-            type: "out",
-            quantity: -item.quantity,
-            refOrderId: order.id,
-            operatorId,
-            opId: randomUUID(),
-          },
+        // A2：关键写事务用 Serializable，彻底杜绝并发超卖
+        { isolationLevel: "Serializable" },
+      );
+    } catch (e: unknown) {
+      // A1：保证 opId 幂等不被并发破坏。两种竞态失败都需要兜底：
+      //  - P2002：loser 跑到 saleOrder.create 时撞 opId unique 约束（说明 winner 已提交同 opId 单）
+      //  - P2034：Serializable 隔离级别下，loser 在 updateMany 阶段被 PG 检测到序列化冲突
+      //           而中止（SQLSTATE 40001，Prisma 标记可重试）。对幂等 create 而言，
+      //           "重试"= winner 已用同 opId 提交了同一单，直接回查返回它即可。
+      //   注意：只有当 DB 里确有同 opId 单时才视为幂等命中，否则 P2034 是真并发冲突，
+      //   应向上抛（调用方决定重试）。不减弱 Serializable 隔离级别。
+      const code = (e as { code?: unknown } | null)?.code;
+      const isIdempotencyRace =
+        code === "P2002" ||
+        code === "P2034";
+      if (isIdempotencyRace) {
+        // P2002 还要确认是 opId 字段冲突（SaleOrder 唯一约束目前只有 opId，防御性判断）
+        if (code === "P2002") {
+          const target = (e as { meta?: { target?: unknown[] } }).meta?.target;
+          if (!Array.isArray(target) || !(target as string[]).includes("opId")) {
+            throw e;
+          }
+        }
+        const existing = await this.prisma.saleOrder.findUnique({
+          where: { opId: input.opId },
+          include: { items: true },
         });
-        await tx.sku.update({
-          where: { id: item.skuId },
-          data: {
-            stock: { decrement: item.quantity },
-            version: { increment: 1 },
-          },
-        });
+        if (existing) return existing;
+        // P2034 但无同 opId 单：真并发冲突（非幂等重复），向上抛由调用方重试
       }
-
-      // 售罄自动归档：受影响商品库存清零则自动下架
-      for (const productId of affectedProductIds) {
-        await this.products.recomputeArchive(tx, productId);
-      }
-
-      return order;
-    });
+      throw e;
+    }
   }
 
   /** 销售流水（最近 500 笔），含明细名称与操作人 */
@@ -223,58 +266,92 @@ export class SalesService {
       }
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      const affected = new Set<string>();
-      for (const r of input.items) {
-        const existing = byId.get(r.id)!;
-        affected.add(existing.sku.productId);
-        const delta = r.quantity - existing.quantity; // >0 多卖（扣库存），<0 退回（加库存）
-        if (delta > 0 && existing.sku.stock < delta) {
+    await this.prisma.$transaction(
+      async (tx) => {
+        const affected = new Set<string>();
+        for (const r of input.items) {
+          const existing = byId.get(r.id)!;
+          affected.add(existing.sku.productId);
+          const delta = r.quantity - existing.quantity; // >0 多卖（扣库存），<0 退回（加库存）
+          if (delta !== 0) {
+            if (delta > 0) {
+              // 原子防超卖：updateMany 带 stock>=delta 条件，count===1 才算扣减成功。
+              // product.shopId 关系过滤提供 DB 层门店隔离。
+              const updated = await tx.sku.updateMany({
+                where: {
+                  id: existing.skuId,
+                  product: { shopId },
+                  stock: { gte: delta },
+                },
+                data: {
+                  stock: { decrement: delta },
+                  version: { increment: 1 },
+                },
+              });
+              if (updated.count !== 1) {
+                // 库存不足或 SKU 不存在/跨店——回查给准确错误
+                const sku = await tx.sku.findUnique({
+                  where: { id: existing.skuId },
+                  include: { product: true },
+                });
+                if (!sku || sku.product.shopId !== shopId) {
+                  throw new NotFoundException(`SKU 不存在：${existing.skuId}`);
+                }
+                throw new BadRequestException(
+                  `库存不足：${sku.barcode} 现有 ${sku.stock}，需再扣 ${delta}`,
+                );
+              }
+            } else {
+              // 加库存（用户减量或删行）：无库存上限约束，仍带门店隔离
+              const returnQty = -delta;
+              const updated = await tx.sku.updateMany({
+                where: { id: existing.skuId, product: { shopId } },
+                data: {
+                  stock: { increment: returnQty },
+                  version: { increment: 1 },
+                },
+              });
+              if (updated.count !== 1) {
+                // SKU 不存在或跨店——理论上不应发生（前面已校验属于本单本店）
+                throw new NotFoundException(`SKU 不存在：${existing.skuId}`);
+              }
+            }
+            await tx.stockMovement.create({
+              data: {
+                skuId: existing.skuId,
+                type: "adjust",
+                quantity: -delta,
+                refOrderId: id,
+                opId: randomUUID(),
+              },
+            });
+          }
+          if (r.quantity === 0) {
+            await tx.saleItem.delete({ where: { id: r.id } });
+          } else {
+            await tx.saleItem.update({
+              where: { id: r.id },
+              data: { quantity: r.quantity, price: r.price, subtotal: r.price * r.quantity },
+            });
+          }
+        }
+
+        // 重算总价（取该单剩余明细）
+        const remaining = await tx.saleItem.findMany({ where: { orderId: id } });
+        if (remaining.length === 0) {
           throw new BadRequestException(
-            `库存不足：${existing.sku.barcode} 现有 ${existing.sku.stock}，需再扣 ${delta}`,
+            "账单不能为空，请保留至少一件商品，或使用「删除整单」",
           );
         }
-        if (delta !== 0) {
-          await tx.sku.update({
-            where: { id: existing.skuId },
-            data: {
-              stock: { increment: -delta },
-              version: { increment: 1 },
-            },
-          });
-          await tx.stockMovement.create({
-            data: {
-              skuId: existing.skuId,
-              type: "adjust",
-              quantity: -delta,
-              refOrderId: id,
-              opId: randomUUID(),
-            },
-          });
+        const total = remaining.reduce((s, it) => s + it.subtotal, 0);
+        await tx.saleOrder.update({ where: { id }, data: { totalAmount: total } });
+        for (const productId of affected) {
+          await this.products.recomputeArchive(tx, productId);
         }
-        if (r.quantity === 0) {
-          await tx.saleItem.delete({ where: { id: r.id } });
-        } else {
-          await tx.saleItem.update({
-            where: { id: r.id },
-            data: { quantity: r.quantity, price: r.price, subtotal: r.price * r.quantity },
-          });
-        }
-      }
-
-      // 重算总价（取该单剩余明细）
-      const remaining = await tx.saleItem.findMany({ where: { orderId: id } });
-      if (remaining.length === 0) {
-        throw new BadRequestException(
-          "账单不能为空，请保留至少一件商品，或使用「删除整单」",
-        );
-      }
-      const total = remaining.reduce((s, it) => s + it.subtotal, 0);
-      await tx.saleOrder.update({ where: { id }, data: { totalAmount: total } });
-      for (const productId of affected) {
-        await this.products.recomputeArchive(tx, productId);
-      }
-    });
+      },
+      // 防超卖：关键写事务用 Serializable
+      { isolationLevel: "Serializable" },
+    );
 
     return this.getOrder(shopId, id);
   }
