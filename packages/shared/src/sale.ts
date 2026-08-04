@@ -8,6 +8,7 @@ export const SaleItemSchema = z.object({
   skuId: z.string().uuid(),
   quantity: z.number().int().positive(),
   price: Money, // 成交单价（分），可因折扣不同于 salePrice
+  cost: Money, // 进价快照（分），PRD §7 规则 8
   subtotal: Money,
 });
 export type SaleItem = z.infer<typeof SaleItemSchema>;
@@ -77,6 +78,8 @@ export interface SaleItemDetail {
   skuId: string;
   quantity: number;
   price: number;
+  /** 进价快照（分），PRD §7 规则 8。owner 可见，用于单据层面单件毛利展示 */
+  cost: number;
   subtotal: number;
   productName: string;
   color: string;

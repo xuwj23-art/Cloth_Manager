@@ -707,6 +707,7 @@ export class SalesService {
       skuId: string;
       quantity: number;
       price: number;
+      cost: number;
       subtotal: number;
       sku: {
         color: string;
@@ -731,6 +732,7 @@ export class SalesService {
         skuId: it.skuId,
         quantity: it.quantity,
         price: it.price,
+        cost: it.cost,
         subtotal: it.subtotal,
         productName: it.sku.product.name,
         color: it.sku.color,
