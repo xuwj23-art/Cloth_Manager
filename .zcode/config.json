@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/zcode-config.json",
+  "$comment": "项目级 ZCode 配置（仅对本仓库生效）。覆盖规则：MCP 同名 server 用户级覆盖工作区；此处用 enabled:false 关闭本项目重构期间用不到的常驻 MCP 进程以省内存。插件整体的 enable/disable 仅在用户级 (~/.zcode/cli/config.json) 控制，无法按项目覆盖，故不在此处理。",
+  "mcp": {
+    "servers": {
+      "playwright": {
+        "comment": "浏览器自动化。本项目主体是 Android App + NestJS REST 后端，API 测试用 curl/fetch 即可，不需要常驻浏览器进程。",
+        "enabled": false
+      },
+      "mobbin": {
+        "comment": "移动端 UI 参考库。重构阶段聚焦架构/质量而非新视觉设计，暂不需要。",
+        "enabled": false
+      },
+      "ios-simulator": {
+        "comment": "iOS 模拟器。本项目明确仅 Android（驰腾蓝牙 SDK 仅 Android、targetSdk 33 刻意降级），永不需要。",
+        "enabled": false
+      }
+    }
+  }
+}
