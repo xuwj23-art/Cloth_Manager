@@ -193,10 +193,87 @@ describe("deleteOrder 软删除（A4）", () => {
     });
     await command.deleteOrder(shopId, toDelete.id);
 
-    const list = await reports.listOrders(shopId);
-    const ids = list.map((o) => o.id);
+    const page = await reports.listOrders(shopId);
+    const ids = page.items.map((o) => o.id);
     expect(ids).toContain(live.id);
     expect(ids).not.toContain(toDelete.id); // 软删单对流水不可见
+  });
+});
+
+/**
+ * E7：listOrders cursor 分页测试。
+ * 验证首页 + 翻页（nextCursor 串联）能取到全部订单，且不重复、不漏单。
+ */
+describe("listOrders cursor 分页（E7）", () => {
+  let prisma: PrismaClient;
+  let command: SalesCommandService;
+  let reports: SalesReportService;
+
+  beforeAll(async () => {
+    prisma = await startPg();
+    command = new SalesCommandService(
+      prisma as unknown as PrismaService,
+      new ProductsService(prisma as unknown as PrismaService),
+    );
+    reports = new SalesReportService(prisma as unknown as PrismaService);
+  });
+  afterAll(async () => {
+    await stopPg();
+  });
+
+  it("首页 + 翻页能取完全部订单，无重复无遗漏", async () => {
+    await resetDb(prisma);
+    const shop = await prisma.shop.create({ data: { name: "分页测试店" } });
+    const user = await prisma.user.create({
+      data: {
+        shopId: shop.id,
+        name: "店主",
+        phone: "1",
+        passwordHash: "x",
+        role: "owner",
+      },
+    });
+    const product = await prisma.product.create({ data: { shopId: shop.id, name: "款" } });
+    const sku = await prisma.sku.create({
+      data: {
+        productId: product.id,
+        barcode: "PAGE-001",
+        color: "默认",
+        size: "均",
+        salePrice: 1000,
+        costPrice: 500,
+        stock: 100,
+      },
+    });
+
+    // 造 5 笔单，每页 take=2 → 应得 3 页（2+2+1），最后页 nextCursor=null
+    const opIds: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const o = await command.createSale(shop.id, user.id, {
+        opId: `page-op-${i}`,
+        items: [{ skuId: sku.id, quantity: 1, price: 1000 }],
+      });
+      opIds.push(o.id);
+    }
+
+    const allReturned: string[] = [];
+    let cursor: string | undefined;
+    let nextCursor: string | null = "init";
+    let iterations = 0;
+    while (nextCursor !== null && iterations < 10) {
+      const page = await reports.listOrders(shop.id, cursor, 2);
+      expect(page.items.length).toBeGreaterThan(0);
+      allReturned.push(...page.items.map((o) => o.id));
+      nextCursor = page.nextCursor;
+      cursor = nextCursor ?? undefined;
+      iterations++;
+    }
+    expect(iterations).toBe(3); // 5 单 / 每页 2 = 3 页
+    expect(allReturned).toHaveLength(5);
+    // 无重复
+    expect(new Set(allReturned).size).toBe(5);
+    // 不漏单（全部 5 笔都覆盖）
+    for (const id of opIds) expect(allReturned).toContain(id);
   });
 });
 

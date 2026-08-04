@@ -189,9 +189,17 @@ export function createSale(input: CreateSaleOrderInput): Promise<SaleOrderWithIt
   });
 }
 
-/** 销售流水（最近 500 笔，含明细名称与操作人） */
-export function listSales(): Promise<SaleOrderDetail[]> {
-  return request("/sales");
+/**
+ * 销售流水（cursor 分页首页，默认 50 条；含明细名称与操作人）。
+ *
+ * E7：服务端 listOrders 已改 cursor 分页，响应为 { items, nextCursor }。
+ * 移动端当前 UI（SalesScreen / saleAlerts）只需首屏数据，故此处透明取 items，
+ * 对调用方保持 `Promise<SaleOrderDetail[]>` 签名不变（向后兼容）。
+ * 后续若要做"加载更多"，可新增 listSalesPaged(cursor?) 直接返回带 nextCursor 的结构。
+ */
+export async function listSales(): Promise<SaleOrderDetail[]> {
+  const data = await request<{ items: SaleOrderDetail[]; nextCursor: string | null }>("/sales");
+  return data.items;
 }
 
 /** 单据详情 */

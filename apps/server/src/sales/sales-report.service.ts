@@ -34,18 +34,42 @@ import { PrismaService } from "../prisma/prisma.service";
 export class SalesReportService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** 销售流水（最近 500 笔），含明细名称与操作人。过滤软删单（voided + deletedAt 非空） */
-  async listOrders(shopId: string): Promise<SaleOrderDetail[]> {
-    const orders = await this.prisma.saleOrder.findMany({
+  /**
+   * 销售流水（cursor 分页，默认每页 50，最大 200），含明细名称与操作人。
+   * 过滤软删单（voided + deletedAt 非空）。
+   *
+   * E7：原 take:500 一次性拉全量，单店长期运营后订单可能上千条，首屏耗时不必要。
+   * 改 cursor-based：客户端传上一页最后一笔的 id 作为 cursor（按 createdAt desc + id 排序），
+   * 服务端 take+1 检测是否还有下一页（hasMore = 行数 > take），nextCursor = 本页最后一条 id。
+   * 不传 cursor 时返回第一页。nextCursor=null 表示已到末尾。
+   */
+  async listOrders(
+    shopId: string,
+    cursor?: string,
+    take = 50,
+  ): Promise<{ items: SaleOrderDetail[]; nextCursor: string | null }> {
+    // 上限保护，避免客户端传超大 take 拖垮 DB
+    const limit = Math.max(1, Math.min(take, 200));
+    const rows = await this.prisma.saleOrder.findMany({
       where: { shopId, status: "completed", deletedAt: null },
       include: {
         operator: true,
         items: { include: { sku: { include: { product: true } } } },
       },
-      orderBy: { createdAt: "desc" },
-      take: 500,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1, // 多取 1 条用于判断 hasMore
+      ...(cursor
+        ? {
+            skip: 1, // 跳过 cursor 自身（它已在上一页末尾返回过）
+            cursor: { id: cursor },
+          }
+        : {}),
     });
-    return orders.map((o) => this.toDetail(o));
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const items = page.map((o) => this.toDetail(o));
+    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].id : null;
+    return { items, nextCursor };
   }
 
   /** 某一天（本地日期 YYYY-MM-DD）的销售流水，按时间倒序。过滤软删单 */
