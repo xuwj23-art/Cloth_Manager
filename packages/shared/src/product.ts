@@ -43,6 +43,20 @@ export const ProductWithSkusSchema = ProductSchema.extend({
 });
 export type ProductWithSkus = z.infer<typeof ProductWithSkusSchema>;
 
+/**
+ * 增量同步响应（D2 + D3）。
+ * - products: 自 since 起 updatedAt 有变更的「在售/已下架」商品（用于 upsert）
+ * - deletedBarcodes: 自 since 起被软删的商品下辖 SKU 条码（客户端据此清理本地缓存）
+ * - serverTime: 本次响应的服务端时间（ISO8601），作为下次请求的 since
+ *
+ * 首次同步（since 缺省）: products 返回全量在售商品、deletedBarcodes 为空。
+ */
+export interface CatalogSyncResponse {
+  products: ProductWithSkus[];
+  deletedBarcodes: string[];
+  serverTime: string;
+}
+
 /* ----------------------------- 建档输入 DTO ----------------------------- */
 
 /** 单个 SKU 的录入项（颜色/尺码/价格/初始库存） */

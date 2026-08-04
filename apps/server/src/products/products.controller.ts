@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { CreateProductInput, UpdateProductInput } from "@cloth-scan/shared";
-import type { ProductScope } from "@cloth-scan/shared";
+import type { CatalogSyncResponse, ProductScope } from "@cloth-scan/shared";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
@@ -35,11 +35,29 @@ export class ProductsController {
   }
 
   @Get("products")
-  list(
-    @CurrentUser() user: RequestUser,
-    @Query("scope") scope?: ProductScope,
-  ) {
+  list(@CurrentUser() user: RequestUser, @Query("scope") scope?: ProductScope) {
     return this.products.listProducts(user.shopId, scope ?? "active");
+  }
+
+  /**
+   * 增量同步专用（D2 + D3）：返回自 since 起 updatedAt 有变更的商品 +
+   * 被软删商品的 SKU 条码列表 + 本次服务端时间。
+   *
+   * 注意：本路由必须声明在 `@Get("products/:id")` 之前（当前虽无该路由，
+   * 但保留顺序以防后续新增时 `sync` 被 :id 参数捕获）。
+   */
+  @Get("products/sync")
+  sync(
+    @CurrentUser() user: RequestUser,
+    @Query("since") since?: string,
+  ): Promise<CatalogSyncResponse> {
+    // since 缺省 → 首次同步，全量在售商品；since 非法 → 视同缺省（容错）
+    let sinceDate: Date | undefined;
+    if (since) {
+      const d = new Date(since);
+      sinceDate = Number.isNaN(d.getTime()) ? undefined : d;
+    }
+    return this.products.listProductsForSync(user.shopId, sinceDate);
   }
 
   /** 新手一键体验：为空门店灌入演示商品（仅店主） */
@@ -82,10 +100,7 @@ export class ProductsController {
   }
 
   @Get("skus/by-barcode/:barcode")
-  findByBarcode(
-    @CurrentUser() user: RequestUser,
-    @Param("barcode") barcode: string,
-  ) {
+  findByBarcode(@CurrentUser() user: RequestUser, @Param("barcode") barcode: string) {
     return this.products.findByBarcode(user.shopId, barcode);
   }
 }

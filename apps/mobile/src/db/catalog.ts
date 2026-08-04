@@ -40,34 +40,14 @@ export async function upsertCatalog(
             `INSERT OR IGNORE INTO skus_cache
                (barcode, skuId, productId, productName, color, size, salePrice, stock, coverImage, updatedAt)
              VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-            [
-              s.barcode,
-              s.id,
-              p.id,
-              p.name,
-              s.color,
-              s.size,
-              s.salePrice,
-              p.coverImage,
-              now,
-            ],
+            [s.barcode, s.id, p.id, p.name, s.color, s.size, s.salePrice, p.coverImage, now],
           );
           await db.runAsync(
             `UPDATE skus_cache
                SET skuId = ?, productId = ?, productName = ?, color = ?, size = ?,
                    salePrice = ?, coverImage = ?, updatedAt = ?
              WHERE barcode = ?`,
-            [
-              s.id,
-              p.id,
-              p.name,
-              s.color,
-              s.size,
-              s.salePrice,
-              p.coverImage,
-              now,
-              s.barcode,
-            ],
+            [s.id, p.id, p.name, s.color, s.size, s.salePrice, p.coverImage, now, s.barcode],
           );
         } else {
           await db.runAsync(
@@ -96,9 +76,7 @@ export async function upsertCatalog(
 }
 
 /** 本地优先扫码匹配 */
-export async function getCachedSkuByBarcode(
-  barcode: string,
-): Promise<CachedSku | null> {
+export async function getCachedSkuByBarcode(barcode: string): Promise<CachedSku | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<CachedSku>(
     `SELECT barcode, skuId, productId, productName, color, size, salePrice, stock, coverImage
@@ -108,23 +86,46 @@ export async function getCachedSkuByBarcode(
   return row ?? null;
 }
 
-/** 乐观地调整本地库存（离线下单后立即反映） */
-export async function applyLocalStockDelta(
-  skuId: string,
-  delta: number,
-): Promise<void> {
+/**
+ * 按条码批量删除本地缓存（D3：清理服务端已软删的商品）。
+ * 调用方应先扣除 pending outbox 涉及的 skuId 对应条码，避免删掉用户刚卖掉
+ * 但服务端同步窗口内被删的 SKU（极端边界，安全冗余）。
+ *
+ * 空列表直接返回，避免 `WHERE barcode IN ()` SQL 语法错。
+ */
+export async function deleteSkusByBarcodes(barcodes: string[]): Promise<number> {
+  if (barcodes.length === 0) return 0;
   const db = await getDb();
-  await db.runAsync(`UPDATE skus_cache SET stock = stock + ? WHERE skuId = ?`, [
-    delta,
-    skuId,
-  ]);
+  const placeholders = barcodes.map(() => "?").join(",");
+  await db.runAsync(`DELETE FROM skus_cache WHERE barcode IN (${placeholders})`, barcodes);
+  return barcodes.length;
+}
+
+/**
+ * 查询本地缓存里 skuId 命中给定集合的 barcode 列表（用于增量同步删除前的
+ * pending 排除：见 sync.ts pullCatalog）。空集合直接返回空数组。
+ */
+export async function barcodesForSkuIds(skuIds: Set<string>): Promise<string[]> {
+  if (skuIds.size === 0) return [];
+  const db = await getDb();
+  const ids = [...skuIds];
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = await db.getAllAsync<{ barcode: string }>(
+    `SELECT barcode FROM skus_cache WHERE skuId IN (${placeholders})`,
+    ids,
+  );
+  return rows.map((r) => r.barcode);
+}
+
+/** 乐观地调整本地库存（离线下单后立即反映） */
+export async function applyLocalStockDelta(skuId: string, delta: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`UPDATE skus_cache SET stock = stock + ? WHERE skuId = ?`, [delta, skuId]);
 }
 
 export async function countCachedSkus(): Promise<number> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ n: number }>(
-    `SELECT COUNT(*) as n FROM skus_cache`,
-  );
+  const row = await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) as n FROM skus_cache`);
   return row?.n ?? 0;
 }
 

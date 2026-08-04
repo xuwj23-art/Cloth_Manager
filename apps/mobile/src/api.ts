@@ -1,6 +1,7 @@
 import type {
   AuthResponse,
   AuthUser,
+  CatalogSyncResponse,
   CreateProductInput,
   CreateSaleOrderInput,
   CreateStaffInput,
@@ -129,9 +130,7 @@ export function findSkuByBarcode(barcode: string): Promise<SkuWithProduct> {
 }
 
 /** 新建商品款（含批量 SKU） */
-export function createProduct(
-  input: CreateProductInput,
-): Promise<ProductWithSkus> {
+export function createProduct(input: CreateProductInput): Promise<ProductWithSkus> {
   return request("/products", {
     method: "POST",
     body: JSON.stringify(input),
@@ -139,17 +138,23 @@ export function createProduct(
 }
 
 /** 商品列表（scope: active 在售 / archived 已售罄 / all 全部） */
-export function listProducts(
-  scope: ProductScope = "active",
-): Promise<ProductWithSkus[]> {
+export function listProducts(scope: ProductScope = "active"): Promise<ProductWithSkus[]> {
   return request(`/products?scope=${scope}`);
 }
 
+/**
+ * 增量同步（D2 + D3）：返回自 since 起 updatedAt 有变更的商品 + 被软删商品
+ * 的 SKU 条码列表 + 本次服务端时间。since 缺省时为首次全量同步。
+ *
+ * 与 {@link listProducts} 的区别：仅传增量、附带 deletedBarcodes 供缓存清理。
+ */
+export function listProductsForSync(since?: string): Promise<CatalogSyncResponse> {
+  const qs = since ? `?since=${encodeURIComponent(since)}` : "";
+  return request(`/products/sync${qs}`);
+}
+
 /** 编辑商品（改名/改价/盘点改库存） */
-export function updateProduct(
-  id: string,
-  input: UpdateProductInput,
-): Promise<ProductWithSkus> {
+export function updateProduct(id: string, input: UpdateProductInput): Promise<ProductWithSkus> {
   return request(`/products/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
@@ -162,14 +167,10 @@ export function deleteProduct(id: string): Promise<{ ok: true }> {
 }
 
 /** 手动下架 / 恢复在售 */
-export function setProductArchived(
-  id: string,
-  archived: boolean,
-): Promise<ProductWithSkus> {
-  return request(
-    `/products/${encodeURIComponent(id)}/${archived ? "archive" : "unarchive"}`,
-    { method: "POST" },
-  );
+export function setProductArchived(id: string, archived: boolean): Promise<ProductWithSkus> {
+  return request(`/products/${encodeURIComponent(id)}/${archived ? "archive" : "unarchive"}`, {
+    method: "POST",
+  });
 }
 
 /** 新手一键体验：为空门店灌入演示商品（仅店主） */
@@ -181,9 +182,7 @@ export function seedDemoData(): Promise<{
 }
 
 /** 提交销售（幂等：相同 opId 不会重复扣库存） */
-export function createSale(
-  input: CreateSaleOrderInput,
-): Promise<SaleOrderWithItems> {
+export function createSale(input: CreateSaleOrderInput): Promise<SaleOrderWithItems> {
   return request("/sales", {
     method: "POST",
     body: JSON.stringify(input),
@@ -227,10 +226,7 @@ export function getSalesReport(range: SalesRange): Promise<SalesReport> {
 }
 
 /** 历史某月销售（按天）：year=2026&month=5（month 1-12） */
-export function getMonthlySales(
-  year: number,
-  month: number,
-): Promise<MonthlySalesReport> {
+export function getMonthlySales(year: number, month: number): Promise<MonthlySalesReport> {
   return request(`/sales/monthly?year=${year}&month=${month}`);
 }
 

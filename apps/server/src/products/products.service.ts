@@ -1,10 +1,7 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type {
+  CatalogSyncResponse,
   CreateProductInput,
   ProductScope,
   UpdateProductInput,
@@ -163,6 +160,56 @@ export class ProductsService {
   }
 
   /**
+   * 增量同步专用查询（D2 + D3）。与 {@link listProducts} 的区别：
+   * - 按 `since`（上次同步的 serverTime）过滤 updatedAt，仅返回变更过的商品（省流量/电量）
+   * - 同时返回「自 since 起被软删」的商品下辖 SKU 条码（deletedBarcodes），
+   *   供客户端清理本地 skus_cache（D3：原先 skus_cache 永不清理已删商品）
+   * - 不再按 archivedAt 过滤：在售/已下架商品都要同步到客户端
+   *
+   * 软删除语义不变：服务端保留 Product/Sku 行与图片（历史账单仍可看图，PRD §7 规则 5），
+   * 仅客户端缓存需要按 deletedBarcodes 删除。
+   *
+   * @param since ISO8601 时间戳；缺省时返回全量在售商品（首次同步）
+   * @returns 满足 {@link CatalogSyncResponse} 形状；products 字段为 Prisma Product&
+   *   {skus}（时间戳为 Date，HTTP JSON 序列化时自动转 ISO 字符串，与 listProducts 一致）
+   */
+  async listProductsForSync(shopId: string, since?: Date): Promise<CatalogSyncResponse> {
+    // 1) 在售/已下架（未软删）商品的增量：updatedAt > since
+    const productsWhere: {
+      shopId: string;
+      deletedAt: null;
+      updatedAt?: { gt: Date };
+    } = { shopId, deletedAt: null };
+    if (since) productsWhere.updatedAt = { gt: since };
+    const products = await this.prisma.product.findMany({
+      where: productsWhere,
+      include: { skus: true },
+    });
+
+    // 2) 软删商品的增量：deletedAt 非空 且 updatedAt > since
+    //    仅取 SKU 条码（客户端缓存按 barcode 删除）
+    const deletedWhere: {
+      shopId: string;
+      deletedAt: { not: null };
+      updatedAt?: { gt: Date };
+    } = { shopId, deletedAt: { not: null } };
+    if (since) deletedWhere.updatedAt = { gt: since };
+    const deleted = await this.prisma.product.findMany({
+      where: deletedWhere,
+      select: { skus: { select: { barcode: true } } },
+    });
+    const deletedBarcodes = deleted.flatMap((p) => p.skus.map((s) => s.barcode));
+
+    // 3) serverTime = 当前时间，作为客户端下次请求的 since
+    //    注意：取查询结束后的当前时间（而非 since+窗口）确保不会漏掉本次查询期间写入的数据
+    return {
+      products: products as unknown as CatalogSyncResponse["products"],
+      deletedBarcodes,
+      serverTime: new Date().toISOString(),
+    };
+  }
+
+  /**
    * 删除商品（仅限已售罄/已下架）：软删除（置 deletedAt），从所有列表隐藏。
    * 保留 Product/Sku 行与图片：维持销售历史外键，历史账单仍能看到图片。
    */
@@ -199,9 +246,7 @@ export class ProductsService {
           where: { id },
           data: {
             ...(input.name !== undefined ? { name: input.name } : {}),
-            ...(input.coverImage !== undefined
-              ? { coverImage: input.coverImage }
-              : {}),
+            ...(input.coverImage !== undefined ? { coverImage: input.coverImage } : {}),
           },
         });
       }
@@ -271,7 +316,8 @@ export class ProductsService {
       select: { archivedAt: true, deletedAt: true },
     });
     // 当前归档态归一化为 ISO 字符串（Prisma 返回 Date | null）
-    const archivedAt = p?.archivedAt instanceof Date ? p.archivedAt.toISOString() : (p?.archivedAt ?? null);
+    const archivedAt =
+      p?.archivedAt instanceof Date ? p.archivedAt.toISOString() : (p?.archivedAt ?? null);
     const deletedAt =
       p?.deletedAt instanceof Date ? p.deletedAt.toISOString() : (p?.deletedAt ?? null);
 
