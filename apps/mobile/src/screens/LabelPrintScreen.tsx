@@ -22,7 +22,7 @@ import {
   isPrinterConnected,
   printJob,
 } from "../printer/ctPrinter";
-import { buildCtPrintJob } from "../printer/labelLayout";
+import { buildCtPrintJob, totalLabelCount } from "../printer/labelLayout";
 import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.types";
 
 /** 常见服装吊牌/不干胶尺寸（mm） */
@@ -247,7 +247,7 @@ export function LabelPrintScreen({
     setBusy(true);
     try {
       await printJob(job);
-      Alert.alert("已发送打印", `共 ${totalLabels} 张标签`);
+      Alert.alert("已发送打印", `共 ${totalLabelCount(job)} 张标签`);
     } catch (e) {
       Alert.alert("打印失败", (e as Error).message);
     } finally {
