@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
@@ -8,6 +8,7 @@ import { useOwnerSaleAlerts } from "./src/notify/saleAlerts";
 import { SyncProvider } from "./src/sync/sync-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 import { LoginScreen } from "./src/screens/LoginScreen";
+import { colors, font, radius, touch } from "./src/theme/tokens";
 
 function AuthedApp() {
   const { user } = useAuth();
@@ -65,6 +66,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
             <Text style={styles.errTitle}>应用启动出错</Text>
             <Text style={styles.errMsg}>{String(err?.message ?? err)}</Text>
             {!!err?.stack && <Text style={styles.errStack}>{err.stack}</Text>}
+            <Pressable
+              style={styles.retryBtn}
+              accessibilityRole="button"
+              accessibilityLabel="重新加载"
+              onPress={() => this.setState({ error: null })}
+            >
+              <Text style={styles.retryText}>重新加载</Text>
+            </Pressable>
           </ScrollView>
         </View>
       );
@@ -96,4 +105,16 @@ const styles = StyleSheet.create({
   errTitle: { fontSize: 18, fontWeight: "700", color: "#c00", marginBottom: 12 },
   errMsg: { fontSize: 15, color: "#222", marginBottom: 16 },
   errStack: { fontSize: 12, color: "#666", fontFamily: "monospace" },
+  // 重新加载按钮（设计语言 §3：墨绿品牌色、≥48dp、字号 16sp）
+  retryBtn: {
+    marginTop: 20,
+    alignSelf: "flex-start",
+    backgroundColor: colors.primary,
+    height: touch.buttonHeight,
+    borderRadius: radius.md,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  retryText: { color: "#fff", fontSize: font.body, fontWeight: "800" },
 });
