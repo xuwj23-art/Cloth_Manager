@@ -11,10 +11,12 @@ import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import type {
   AuthResponse,
+  ChangePasswordInput,
   CreateStaffInput,
   JwtPayload,
   LoginInput,
   RegisterInput,
+  ResetStaffPasswordInput,
   ShopMember,
 } from "@cloth-scan/shared";
 import type { User } from "@prisma/client";
@@ -192,6 +194,51 @@ export class AuthService {
       throw new ForbiddenException("不能删除店主账号");
     }
     await this.prisma.user.delete({ where: { id: targetId } });
+    return { ok: true };
+  }
+
+  /** 修改自己的密码（登录态，店主/店员均可，需验证原密码） */
+  async changePassword(userId: string, input: ChangePasswordInput): Promise<{ ok: true }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) throw new UnauthorizedException();
+    if (!(await bcrypt.compare(input.oldPassword, user.passwordHash))) {
+      throw new UnauthorizedException("原密码不正确");
+    }
+    if (input.oldPassword === input.newPassword) {
+      throw new ConflictException("新密码不能与原密码相同");
+    }
+    const passwordHash = await bcrypt.hash(input.newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+    // 注意：JWT 无撤销机制，已签发 token 在过期前仍有效；
+    // 设备级吊销待 tokenEpoch 方案（安全审查 P1-3）再收口。
+    return { ok: true };
+  }
+
+  /** 店主重置店员密码（无需原密码；目标须为本店店员） */
+  async resetStaffPassword(
+    shopId: string,
+    targetId: string,
+    input: ResetStaffPasswordInput,
+  ): Promise<{ ok: true }> {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetId },
+    });
+    if (!target || target.shopId !== shopId) {
+      throw new NotFoundException("成员不存在");
+    }
+    if (target.role === "owner") {
+      throw new ForbiddenException("不能通过此接口重置店主密码");
+    }
+    const passwordHash = await bcrypt.hash(input.newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: targetId },
+      data: { passwordHash },
+    });
     return { ok: true };
   }
 

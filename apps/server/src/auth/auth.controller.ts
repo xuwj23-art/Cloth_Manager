@@ -1,16 +1,10 @@
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Post,
-  UseGuards,
-} from "@nestjs/common";
-import {
+  ChangePasswordInput,
   CreateStaffInput,
   LoginInput,
   RegisterInput,
+  ResetStaffPasswordInput,
 } from "@cloth-scan/shared";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { AuthService } from "./auth.service";
@@ -25,9 +19,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post("register")
-  register(
-    @Body(new ZodValidationPipe(RegisterInput)) body: RegisterInput,
-  ) {
+  register(@Body(new ZodValidationPipe(RegisterInput)) body: RegisterInput) {
     return this.auth.register(body);
   }
 
@@ -59,6 +51,29 @@ export class AuthController {
     @Body(new ZodValidationPipe(CreateStaffInput)) body: CreateStaffInput,
   ) {
     return this.auth.createStaff(user.shopId, body);
+  }
+
+  /** 修改自己的密码（登录即可，店主/店员均可；需原密码） */
+  @Patch("password")
+  @UseGuards(JwtAuthGuard)
+  changeOwnPassword(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(ChangePasswordInput)) body: ChangePasswordInput,
+  ) {
+    return this.auth.changePassword(user.id, body);
+  }
+
+  /** 仅老板可重置店员密码 */
+  @Patch("staff/:id/password")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("owner")
+  resetStaffPassword(
+    @CurrentUser() user: RequestUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(ResetStaffPasswordInput))
+    body: ResetStaffPasswordInput,
+  ) {
+    return this.auth.resetStaffPassword(user.shopId, id, body);
   }
 
   /** 仅老板可删除店员 */

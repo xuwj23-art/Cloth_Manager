@@ -3,6 +3,7 @@ import { JwtService } from "@nestjs/jwt";
 import {
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
@@ -128,9 +129,9 @@ describe("AuthService", () => {
       },
     });
     const service = new AuthService(prisma, jwt);
-    await expect(
-      service.login({ phone: "13800000000", password: "wrong" }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(service.login({ phone: "13800000000", password: "wrong" })).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
   });
 
   it("createStaff：在本门店下创建 staff 角色账号", async () => {
@@ -173,5 +174,119 @@ describe("AuthService", () => {
     expect(members).toHaveLength(2);
     expect(members[0]).not.toHaveProperty("passwordHash");
     expect(members[1]).toMatchObject({ name: "小王", role: "staff" });
+  });
+
+  describe("changePassword", () => {
+    it("原密码正确：哈希更新为新密码", async () => {
+      const passwordHash = await bcrypt.hash("123456", 10);
+      const prisma = makePrisma({
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: "u1", passwordHash }),
+          update: vi.fn().mockResolvedValue({ id: "u1" }),
+        },
+      });
+      const service = new AuthService(prisma, jwt);
+      const res = await service.changePassword("u1", {
+        oldPassword: "123456",
+        newPassword: "abcdef",
+      });
+      expect(res).toEqual({ ok: true });
+      const updateArg = (prisma.user.update as any).mock.calls[0][0];
+      expect(await bcrypt.compare("abcdef", updateArg.data.passwordHash)).toBe(true);
+    });
+
+    it("原密码错误：抛 UnauthorizedException 且不更新", async () => {
+      const passwordHash = await bcrypt.hash("123456", 10);
+      const update = vi.fn();
+      const prisma = makePrisma({
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: "u1", passwordHash }),
+          update,
+        },
+      });
+      const service = new AuthService(prisma, jwt);
+      await expect(
+        service.changePassword("u1", {
+          oldPassword: "wrong",
+          newPassword: "abcdef",
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it("新密码与原密码相同：抛 ConflictException", async () => {
+      const passwordHash = await bcrypt.hash("123456", 10);
+      const prisma = makePrisma({
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: "u1", passwordHash }),
+          update: vi.fn(),
+        },
+      });
+      const service = new AuthService(prisma, jwt);
+      await expect(
+        service.changePassword("u1", {
+          oldPassword: "123456",
+          newPassword: "123456",
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it("账号不存在（理论上仅被删用户）：抛 UnauthorizedException", async () => {
+      const prisma = makePrisma({
+        user: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
+      });
+      const service = new AuthService(prisma, jwt);
+      await expect(
+        service.changePassword("gone", {
+          oldPassword: "123456",
+          newPassword: "abcdef",
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe("resetStaffPassword", () => {
+    it("店主重置本店店员：哈希更新", async () => {
+      const update = vi.fn().mockResolvedValue({ id: "u2" });
+      const prisma = makePrisma({
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: "u2", shopId: "shop-1", role: "staff" }),
+          update,
+        },
+      });
+      const service = new AuthService(prisma, jwt);
+      const res = await service.resetStaffPassword("shop-1", "u2", {
+        newPassword: "newpass",
+      });
+      expect(res).toEqual({ ok: true });
+      const updateArg = update.mock.calls[0][0];
+      expect(await bcrypt.compare("newpass", updateArg.data.passwordHash)).toBe(true);
+    });
+
+    it("目标是店主：抛 ForbiddenException（防越权重置老板）", async () => {
+      const prisma = makePrisma({
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: "u1", shopId: "shop-1", role: "owner" }),
+          update: vi.fn(),
+        },
+      });
+      const service = new AuthService(prisma, jwt);
+      await expect(
+        service.resetStaffPassword("shop-1", "u1", { newPassword: "newpass" }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it("跨店或不存在：抛 NotFoundException（不泄露存在性）", async () => {
+      const prisma = makePrisma({
+        user: {
+          findUnique: vi.fn().mockResolvedValue({ id: "u9", shopId: "shop-2", role: "staff" }),
+          update: vi.fn(),
+        },
+      });
+      const service = new AuthService(prisma, jwt);
+      await expect(
+        service.resetStaffPassword("shop-1", "u9", { newPassword: "newpass" }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 });

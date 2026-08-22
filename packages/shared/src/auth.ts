@@ -2,9 +2,7 @@ import { z } from "zod";
 import { UserRole } from "./enums";
 
 /** 手机号：中国大陆 11 位 */
-export const Phone = z
-  .string()
-  .regex(/^1[3-9]\d{9}$/, "请输入有效的手机号");
+export const Phone = z.string().regex(/^1[3-9]\d{9}$/, "请输入有效的手机号");
 
 /** 注册：创建门店 + 老板账号（首次开通） */
 export const RegisterInput = z.object({
@@ -31,6 +29,19 @@ export const CreateStaffInput = z.object({
   password: z.string().min(6).max(64),
 });
 export type CreateStaffInput = z.infer<typeof CreateStaffInput>;
+
+/** 修改自己的密码（登录态，店主/店员均可）。需验证原密码。 */
+export const ChangePasswordInput = z.object({
+  oldPassword: z.string().min(1, "请输入原密码").max(64),
+  newPassword: z.string().min(6, "新密码至少 6 位").max(64),
+});
+export type ChangePasswordInput = z.infer<typeof ChangePasswordInput>;
+
+/** 店主重置店员密码（无需原密码） */
+export const ResetStaffPasswordInput = z.object({
+  newPassword: z.string().min(6, "新密码至少 6 位").max(64),
+});
+export type ResetStaffPasswordInput = z.infer<typeof ResetStaffPasswordInput>;
 
 /** 门店成员（店员管理列表项，不含密码） */
 export interface ShopMember {
