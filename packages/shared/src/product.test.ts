@@ -4,7 +4,25 @@ import {
   CreateProductInput,
   shouldArchive,
   ProductSchema,
+  Money,
+  MAX_QTY,
 } from "./product";
+import { SaleItemInput } from "./sale";
+
+describe("Money / 数量上限（防 Int32 溢出与误输）", () => {
+  it("Money 拒绝浮点/负数/超大金额", () => {
+    expect(Money.safeParse(10.5).success).toBe(false);
+    expect(Money.safeParse(-1).success).toBe(false);
+    expect(Money.safeParse(1_000_000_001).success).toBe(false);
+    expect(Money.safeParse(1_000_000_000).success).toBe(true);
+  });
+
+  it("SaleItemInput 拒绝超过上限的数量", () => {
+    const base = { skuId: "00000000-0000-0000-0000-000000000000", price: 1000 };
+    expect(SaleItemInput.safeParse({ ...base, quantity: MAX_QTY }).success).toBe(true);
+    expect(SaleItemInput.safeParse({ ...base, quantity: MAX_QTY + 1 }).success).toBe(false);
+  });
+});
 
 describe("expandSkuMatrix", () => {
   it("展开颜色 × 尺码 的笛卡尔积", () => {

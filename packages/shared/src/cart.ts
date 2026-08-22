@@ -26,19 +26,18 @@ export interface ScannedSku {
 /**
  * 按指定数量加入购物车：已存在则累加（不超过库存），否则新增一行。
  * 返回新数组（不可变更新）。qty 会被夹在 1 以上、库存以下。
+ *
+ * 已存在的行只更新数量与最新库存，**保留行上已议价的成交单价**
+ * （否则收银员改价后再扫一件同款，整行会被静默改回吊牌价）。
  */
-export function addToCartQty(
-  lines: CartLine[],
-  sku: ScannedSku,
-  qty: number,
-): CartLine[] {
+export function addToCartQty(lines: CartLine[], sku: ScannedSku, qty: number): CartLine[] {
   const safeQty = Math.max(1, Math.floor(qty));
   const idx = lines.findIndex((l) => l.skuId === sku.skuId);
   if (idx >= 0) {
     const line = lines[idx]!;
     const nextQty = Math.min(line.quantity + safeQty, Math.max(sku.stock, 0));
     const copy = lines.slice();
-    copy[idx] = { ...line, quantity: nextQty, stock: sku.stock, price: sku.price };
+    copy[idx] = { ...line, quantity: nextQty, stock: sku.stock };
     return copy;
   }
   if (sku.stock <= 0) return lines; // 无库存不加入
@@ -66,16 +65,10 @@ export function addToCart(lines: CartLine[], sku: ScannedSku): CartLine[] {
 }
 
 /** 设置某行数量（夹在 0..stock；为 0 则移除） */
-export function setQuantity(
-  lines: CartLine[],
-  skuId: string,
-  quantity: number,
-): CartLine[] {
+export function setQuantity(lines: CartLine[], skuId: string, quantity: number): CartLine[] {
   return lines
     .map((l) =>
-      l.skuId === skuId
-        ? { ...l, quantity: Math.min(Math.max(quantity, 0), l.stock) }
-        : l,
+      l.skuId === skuId ? { ...l, quantity: Math.min(Math.max(quantity, 0), l.stock) } : l,
     )
     .filter((l) => l.quantity > 0);
 }
@@ -85,11 +78,7 @@ export function removeFromCart(lines: CartLine[], skuId: string): CartLine[] {
 }
 
 /** 修改某行的成交单价（分），用于讨价还价/优惠。负数按 0 处理。 */
-export function setLinePrice(
-  lines: CartLine[],
-  skuId: string,
-  price: number,
-): CartLine[] {
+export function setLinePrice(lines: CartLine[], skuId: string, price: number): CartLine[] {
   const safe = Math.max(0, Math.round(price));
   return lines.map((l) => (l.skuId === skuId ? { ...l, price: safe } : l));
 }
@@ -110,10 +99,7 @@ export function cartTotalCents(lines: CartLine[]): number {
  *   各行 price 保持原价、优惠单独记录，彻底避免多件行整数分摊无精确解的数学死角。
  *   此函数仅保留用于 UI 显示各行参考分摊价，不再用于实际开单入库。
  */
-export function distributeOrderTotal(
-  lines: CartLine[],
-  targetCents: number,
-): CartLine[] {
+export function distributeOrderTotal(lines: CartLine[], targetCents: number): CartLine[] {
   const orig = cartTotalCents(lines);
   const target = Math.max(0, Math.round(targetCents));
   if (orig <= 0 || target >= orig) return lines.map((l) => ({ ...l }));

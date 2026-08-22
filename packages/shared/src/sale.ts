@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { Money } from "./product";
+import { Money, MAX_QTY } from "./product";
 import { SaleOrderStatus } from "./enums";
 
 export const SaleItemSchema = z.object({
   id: z.string().uuid(),
   orderId: z.string().uuid(),
   skuId: z.string().uuid(),
-  quantity: z.number().int().positive(),
+  quantity: z.number().int().positive().max(MAX_QTY),
   price: Money, // 成交单价（分），可因折扣不同于 salePrice
   cost: Money, // 进价快照（分），PRD §7 规则 8
   subtotal: Money,
@@ -35,7 +35,7 @@ export type SaleOrderWithItems = z.infer<typeof SaleOrderWithItemsSchema>;
 
 export const SaleItemInput = z.object({
   skuId: z.string().uuid(),
-  quantity: z.number().int().positive(),
+  quantity: z.number().int().positive().max(MAX_QTY),
   /** 成交单价（分）。留空则用 SKU 当前售价 */
   price: Money.optional(),
 });
@@ -56,7 +56,7 @@ export type CreateSaleOrderInput = z.infer<typeof CreateSaleOrderInput>;
 /** 编辑账单中的一行：按 SaleItem.id 定位；quantity=0 表示删除该行，库存会回滚 */
 export const EditSaleItemInput = z.object({
   id: z.string().uuid(),
-  quantity: z.number().int().nonnegative(),
+  quantity: z.number().int().nonnegative().max(MAX_QTY),
   price: Money,
 });
 export type EditSaleItemInput = z.infer<typeof EditSaleItemInput>;

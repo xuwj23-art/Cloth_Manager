@@ -1,7 +1,14 @@
 import { z } from "zod";
 
-/** 金额：以「分」为单位的整数，避免浮点误差 */
-export const Money = z.number().int().nonnegative();
+/**
+ * 金额：以「分」为单位的整数，避免浮点误差。
+ * 上限 10 亿元（分）＝ 1000 万元：远超真实服装单价，同时防止极端输入
+ * 溢出 Prisma/PG 的 32 位 Int（price×quantity 相乘也不至于超 Int32）。
+ */
+export const Money = z.number().int().nonnegative().max(1_000_000_000);
+
+/** 单行数量上限：防呆（扫码/键盘误输多位数），远超真实单笔购买量 */
+export const MAX_QTY = 9_999;
 
 /** SKU = 款 + 颜色 + 尺码 的唯一组合，是库存与 QR 的核心键 */
 export const SkuSchema = z.object({

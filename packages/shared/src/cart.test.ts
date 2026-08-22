@@ -56,6 +56,15 @@ describe("cart 纯函数", () => {
     expect(c[0]!.quantity).toBe(3);
   });
 
+  it("addToCartQty 已有行保留议价单价（不被吊牌价重置）", () => {
+    let c = addToCart([], skuA);
+    c = setLinePrice(c, skuA.skuId, 4000); // 议价 40 元
+    c = addToCart(c, skuA); // 再扫一件同款
+    expect(c[0]!.quantity).toBe(2);
+    expect(c[0]!.price).toBe(4000); // 仍是议价，未跳回 4900
+    expect(cartTotalCents(c)).toBe(8000);
+  });
+
   it("addToCartQty 非法数量按 1 处理", () => {
     const c = addToCartQty([], skuA, 0);
     expect(c[0]!.quantity).toBe(1);
@@ -70,9 +79,7 @@ describe("cart 纯函数", () => {
   });
 
   it("合计金额与件数", () => {
-    const lines: CartLine[] = [
-      { ...skuA, quantity: 2 } as unknown as CartLine,
-    ];
+    const lines: CartLine[] = [{ ...skuA, quantity: 2 } as unknown as CartLine];
     // 构造完整 CartLine
     const cart: CartLine[] = [
       {
@@ -108,8 +115,26 @@ describe("cart 纯函数", () => {
 
   it("distributeOrderTotal 单件行可精确命中目标总价（8.8折）", () => {
     const cart: CartLine[] = [
-      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 1, stock: 5 },
-      { skuId: "b", barcode: "B", productName: "衫", color: "白", size: "L", price: 4100, quantity: 1, stock: 5 },
+      {
+        skuId: "a",
+        barcode: "A",
+        productName: "裙",
+        color: "红",
+        size: "M",
+        price: 5900,
+        quantity: 1,
+        stock: 5,
+      },
+      {
+        skuId: "b",
+        barcode: "B",
+        productName: "衫",
+        color: "白",
+        size: "L",
+        price: 4100,
+        quantity: 1,
+        stock: 5,
+      },
     ];
     const orig = cartTotalCents(cart); // 10000
     const target = Math.round(orig * 0.88); // 8800
@@ -119,8 +144,26 @@ describe("cart 纯函数", () => {
 
   it("distributeOrderTotal 直接改价命中目标总价", () => {
     const cart: CartLine[] = [
-      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 1, stock: 5 },
-      { skuId: "b", barcode: "B", productName: "衫", color: "白", size: "L", price: 4100, quantity: 1, stock: 5 },
+      {
+        skuId: "a",
+        barcode: "A",
+        productName: "裙",
+        color: "红",
+        size: "M",
+        price: 5900,
+        quantity: 1,
+        stock: 5,
+      },
+      {
+        skuId: "b",
+        barcode: "B",
+        productName: "衫",
+        color: "白",
+        size: "L",
+        price: 4100,
+        quantity: 1,
+        stock: 5,
+      },
     ];
     const out = distributeOrderTotal(cart, 8888);
     expect(cartTotalCents(out)).toBe(8888);
@@ -128,7 +171,16 @@ describe("cart 纯函数", () => {
 
   it("distributeOrderTotal 目标≥原价时原样返回", () => {
     const cart: CartLine[] = [
-      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 2, stock: 5 },
+      {
+        skuId: "a",
+        barcode: "A",
+        productName: "裙",
+        color: "红",
+        size: "M",
+        price: 5900,
+        quantity: 2,
+        stock: 5,
+      },
     ];
     const out = distributeOrderTotal(cart, 999999);
     expect(out[0]!.price).toBe(5900);
@@ -145,8 +197,26 @@ describe("cart 纯函数", () => {
 
   it("cartToSaleInput 带 orderDiscountCents 写入输出且各行保持原价", () => {
     const cart: CartLine[] = [
-      { skuId: "a", barcode: "A", productName: "裙", color: "红", size: "M", price: 5900, quantity: 3, stock: 5 },
-      { skuId: "b", barcode: "B", productName: "衫", color: "白", size: "L", price: 4100, quantity: 3, stock: 5 },
+      {
+        skuId: "a",
+        barcode: "A",
+        productName: "裙",
+        color: "红",
+        size: "M",
+        price: 5900,
+        quantity: 3,
+        stock: 5,
+      },
+      {
+        skuId: "b",
+        barcode: "B",
+        productName: "衫",
+        color: "白",
+        size: "L",
+        price: 4100,
+        quantity: 3,
+        stock: 5,
+      },
     ];
     // 原价合计 = 5900*3 + 4100*3 = 30000；目标实收 25000（A3 数学死角场景：3a+3b=250 无整数解）
     const orig = cartTotalCents(cart);
