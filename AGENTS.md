@@ -8,7 +8,7 @@
 
 ## 1. 这是什么
 
-**服装进销存（cloth_scan）**：面向小型服装零售店的进销存 App。核心场景——**给每件衣服打二维码吊牌，收银时扫码秒匹配商品、自动扣库存、出销售报表**。主要面向"软件零基础"店主，强调稳定、简单、二维码驱动。
+**服装进销存（cloth_scan）**：面向小型服装零售店的进销存 App。App 对外展示名为 **收银台**（JaJaH 吊牌 logo）。核心场景——**给每件衣服打二维码吊牌，收银时扫码秒匹配商品、自动扣库存、出销售报表**。主要面向"软件零基础"店主，强调稳定、简单、二维码驱动。
 
 - **形态**：Android 手机 App（Expo/RN）+ 自建后端（NestJS）+ PostgreSQL。
 - **当前状态**：已在店内**试运行**（未上架应用商店），后端部署在阿里云，通过本地打包 APK + `/download` 页面分发。
@@ -23,7 +23,7 @@
 3. **`opId` 幂等**：销售开单 / 库存流水带客户端生成的 `opId`（unique）。离线重传同一 `opId` 不得重复扣减。改动开单/同步逻辑时必须保留幂等。
 4. **删除是软删除**：商品用 `deletedAt`（且必须先 `archivedAt` 售罄/下架才能删）、订单删除会回滚库存。**删除商品不删除任何图片**（保留历史账单可看图，这是已确认的策略）。永远不要物理删 Product/Sku，会破坏销售外键与报表。
 5. **门店隔离**：几乎所有查询都要带 `shopId`（从 JWT 取，不要信任客户端传入）。新接口默认按当前用户 `shopId` 过滤。
-6. **角色权限**：`owner`（店主）能做一切；`staff`（店员）只能登录/查商品/扫码/开单。后端用 `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles("owner")` 控制，前端按角色隐藏入口。**权限以后端为准**。
+6. **角色权限**：`owner`（店主）能做一切；`staff`（店员）可登录/查商品/扫码/开单/**建档（无进价）**，不能编辑商品、看进价、改自己的密码。后端用 `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles("owner")` 控制，前端按角色隐藏入口。**权限以后端为准**。
 7. **typecheck/test 无需先 build shared；但 server build 仍需**：server 的 `typecheck`（`tsc -p tsconfig.typecheck.json`）通过 `paths` 直读 `packages/shared/src` 源码，不依赖 `dist`；turbo 的 `typecheck`/`test` 任务也已去掉 `^build` 依赖。所以改完 shared 直接跑 typecheck/test 即可看到新类型。**但 server 运行时（`node dist/main.js`）读 shared 的 `dist`**，所以 `nest build`/部署前必须先 `pnpm --filter @cloth-scan/shared build`（turbo `build` 任务的 `^build` 链保留就是这个原因）。（mobile 经 Metro 直读 shared 源码，无需 build。）
 8. **Windows / PowerShell**：本机是 PowerShell，**不能用 `&&` 串联命令**，用 `;` 或分行。仓库里的 bash 脚本（部署文档）才用 `&&`。
 9. **提交规范**：用 Conventional Commits（`feat:` `fix:` `docs:` `chore:`），中文描述正文。仅在用户明确要求时才 commit/push。
@@ -185,18 +185,19 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.6 API 路由速查（除 `/download` 外都带 `/api/v1`）
 
-| 方法 路径                                                   | 角色                      |
-| ----------------------------------------------------------- | ------------------------- |
-| POST `/auth/register`（需 inviteCode）/ `/auth/login`       | 公开                      |
-| GET `/auth/me`                                              | 登录                      |
-| GET/POST/DELETE `/auth/staff`                               | owner                     |
-| POST/GET/PATCH/DELETE `/products*`、POST `/products/demo`   | owner（列表/扫码=登录）   |
-| POST `/products/recognize-garment`                          | owner（识图，无密钥 503） |
-| GET `/skus/by-barcode/:barcode`                             | 登录                      |
-| POST `/sales`（开单=owner+staff）、GET/PATCH/DELETE 其余    | owner                     |
-| POST `/uploads`                                             | owner                     |
-| GET `/health`                                               | 公开                      |
-| GET `/download`、`/download/app.apk`、`/download/apk/:file` | 公开（无前缀）            |
+| 方法 路径                                                             | 角色                       |
+| --------------------------------------------------------------------- | -------------------------- |
+| POST `/auth/register`（需 inviteCode）/ `/auth/login`                 | 公开                       |
+| GET `/auth/me`                                                        | 登录                       |
+| GET/POST/DELETE `/auth/staff`、PATCH `/auth/staff/:id/password`       | owner                      |
+| PATCH `/auth/password`（改自己的密码，需原密码）                      | owner                      |
+| POST `/products`、POST `/uploads`、POST `/products/recognize-garment` | 登录（店员建档进价强制 0） |
+| GET `/products*`、GET `/skus/by-barcode/:barcode`                     | 登录（店员响应进价为 0）   |
+| PATCH/DELETE `/products*`、POST archive/demo                          | owner                      |
+| POST `/sales`（开单）、GET `/sales/summary`（店员仅今日）             | 登录                       |
+| GET/PATCH/DELETE 其余 `/sales*`                                       | owner                      |
+| GET `/health`                                                         | 公开                       |
+| GET `/download`、`/download/app.apk`、`/download/apk/:file`           | 公开（无前缀）             |
 
 ---
 
@@ -206,15 +207,15 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 React Navigation（`@react-navigation/native` + native-stack，`src/navigation/RootNavigator.tsx`）；`AuthProvider` 决定登录态、登录后包 `SyncProvider`；列表屏用 `useFocusEffect` 在返回时刷新。
 
-| 屏幕                                                           | 职责                                                  |
-| -------------------------------------------------------------- | ----------------------------------------------------- |
-| `LoginScreen`                                                  | 登录 / 注册门店                                       |
-| `HomeScreen`                                                   | 入口、今日营业额（新手引导已移除）                    |
-| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗                        |
-| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类 |
-| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                           |
-| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                |
-| `StaffScreen`                                                  | 店员管理（owner）                                     |
+| 屏幕                                                           | 职责                                                     |
+| -------------------------------------------------------------- | -------------------------------------------------------- |
+| `LoginScreen`                                                  | 登录 / 注册门店                                          |
+| `HomeScreen`                                                   | 入口（logo + 收银台）、今日营业额；底栏同步与「名·身份」 |
+| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗                           |
+| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类    |
+| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                              |
+| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                   |
+| `StaffScreen`                                                  | 店员管理（owner）                                        |
 
 ### 7.2 网络 & 后端地址
 
@@ -238,7 +239,7 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 ### 7.5 EAS / app.json 要点
 
-- **当前版本 `1.2.0`**（`app.json` `version`，Android `versionCode=3`）。
+- **当前版本 `1.3.0`**（`app.json` `version`，Android `versionCode=4`）。
 - `runtimeVersion.policy = "appVersion"`；`updates.url` 指向 Expo（owner `wesleysho`，projectId `3b8070f8-...`）。
   - ⚠️ 改 `version` 会同时改 `runtimeVersion`，旧包收不到新 runtime 的 OTA；升版后须 `expo prebuild -p android`（同步 `build.gradle` 版本 + `strings.xml` 的 runtime + 重写渠道头）→ 重打包 → 再按新 runtime `eas update`。
 - channel：`development`(devClient APK) / `preview`(APK) / `production`(AAB)。

@@ -96,9 +96,11 @@ export type CreateProductInput = z.infer<typeof CreateProductInput>;
 
 /* ----------------------------- 编辑商品 DTO ----------------------------- */
 
-/** 编辑单个已存在 SKU 的价格/库存 */
+/** 编辑单个已存在 SKU 的颜色/尺码/价格/库存（不增删 SKU，条码不变） */
 export const UpdateSkuInput = z.object({
   id: z.string().uuid(),
+  color: z.string().min(1).max(40).optional(),
+  size: z.string().min(1).max(20).optional(),
   costPrice: Money.optional(),
   salePrice: Money.optional(),
   /** 目标库存（盘点修正）。与现有库存的差额会写一条 adjust 流水 */
@@ -106,7 +108,7 @@ export const UpdateSkuInput = z.object({
 });
 export type UpdateSkuInput = z.infer<typeof UpdateSkuInput>;
 
-/** 编辑商品款：可改名称、改价、调库存（不在此处增删 SKU） */
+/** 编辑商品款：可改名称、改价、调库存、改颜色尺码（不在此处增删 SKU） */
 export const UpdateProductInput = z.object({
   name: z.string().min(1).max(80).optional(),
   coverImage: z.string().max(512).nullable().optional(),

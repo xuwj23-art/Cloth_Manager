@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -14,7 +13,10 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ShopMember } from "@cloth-scan/shared";
 import { apiCreateStaff, apiDeleteStaff, apiListStaff, apiResetStaffPassword } from "../api";
+import { BackButton } from "../components/BackButton";
+import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { colors, font, radius } from "../theme/tokens";
 
 type StaffNav = NativeStackNavigationProp<RootStackParamList, "Staff">;
 
@@ -28,6 +30,7 @@ export function StaffScreen() {
   const navigation = useNavigation<StaffNav>();
   const [members, setMembers] = useState<ShopMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const { confirm, notice } = useDialog();
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
@@ -38,6 +41,7 @@ export function StaffScreen() {
   // 重置店员密码弹层（Android 无 Alert.prompt，用 Modal + 输入框）
   const [resetTarget, setResetTarget] = useState<ShopMember | null>(null);
   const [resetPwd, setResetPwd] = useState("");
+  const [resetError, setResetError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
 
   const load = useCallback(async () => {
@@ -58,7 +62,7 @@ export function StaffScreen() {
 
   const submit = async () => {
     if (!name.trim() || !phone.trim() || password.length < 6) {
-      Alert.alert("请填写完整", "姓名、手机号必填，密码至少 6 位");
+      await notice("请填写完整");
       return;
     }
     setSubmitting(true);
@@ -71,51 +75,45 @@ export function StaffScreen() {
       setName("");
       setPhone("");
       setPassword("");
-      Alert.alert("已添加", "店员账号创建成功");
+      await notice("已添加");
       await load();
     } catch (e) {
-      Alert.alert("添加失败", (e as Error).message);
+      await notice("添加失败", (e as Error).message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const confirmDelete = (member: ShopMember) => {
-    Alert.alert(
-      "删除店员",
-      `确认删除店员「${member.name}」？\n删除后该账号无法登录，已产生的销售记录会保留（收银员显示为空）。`,
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "删除",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await apiDeleteStaff(member.id);
-              await load();
-            } catch (e) {
-              Alert.alert("删除失败", (e as Error).message);
-            }
-          },
-        },
-      ],
-    );
+  const confirmDelete = async (member: ShopMember) => {
+    const ok = await confirm({
+      title: "删除店员",
+      message: `确定删除「${member.name}」？`,
+      confirmLabel: "删除",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await apiDeleteStaff(member.id);
+      await load();
+    } catch (e) {
+      await notice("删除失败", (e as Error).message);
+    }
   };
 
   const submitReset = async () => {
     if (!resetTarget) return;
     if (resetPwd.length < 6) {
-      Alert.alert("密码太短", "新密码至少 6 位");
+      setResetError("密码至少 6 位");
       return;
     }
     setResetting(true);
     try {
       await apiResetStaffPassword(resetTarget.id, resetPwd);
-      Alert.alert("已重置", `「${resetTarget.name}」的密码已更新，请告知对方新密码`);
       setResetTarget(null);
       setResetPwd("");
+      await notice("密码已修改");
     } catch (e) {
-      Alert.alert("重置失败", (e as Error).message);
+      await notice("修改失败", (e as Error).message);
     } finally {
       setResetting(false);
     }
@@ -124,9 +122,7 @@ export function StaffScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={styles.back}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>店员管理</Text>
         <View style={styles.placeholder} />
       </View>
@@ -148,21 +144,21 @@ export function StaffScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="手机号（登录账号）"
+              placeholder="手机号"
               keyboardType="phone-pad"
               value={phone}
               onChangeText={setPhone}
             />
             <TextInput
               style={styles.input}
-              placeholder="初始密码（至少 6 位）"
+              placeholder="初始密码"
               secureTextEntry
               value={password}
               onChangeText={setPassword}
             />
             <Pressable
               style={[styles.addBtn, submitting && styles.addBtnDisabled]}
-              onPress={submit}
+              onPress={() => void submit()}
               disabled={submitting}
             >
               <Text style={styles.addText}>{submitting ? "添加中…" : "添加店员"}</Text>
@@ -192,23 +188,38 @@ export function StaffScreen() {
                 {item.phone} · 加入 {formatDate(item.createdAt)}
               </Text>
             </View>
-            {item.role !== "owner" ? (
-              <View style={styles.rowBtns}>
+            <View style={styles.rowBtns}>
+              {item.role === "owner" ? (
                 <Pressable
                   style={styles.resetBtn}
-                  onPress={() => {
-                    setResetTarget(item);
-                    setResetPwd("");
-                  }}
+                  onPress={() => navigation.navigate("ChangePassword")}
                   hitSlop={8}
                 >
-                  <Text style={styles.resetText}>重置密码</Text>
+                  <Text style={styles.resetText}>修改密码</Text>
                 </Pressable>
-                <Pressable style={styles.deleteBtn} onPress={() => confirmDelete(item)} hitSlop={8}>
-                  <Text style={styles.deleteText}>删除</Text>
-                </Pressable>
-              </View>
-            ) : null}
+              ) : (
+                <>
+                  <Pressable
+                    style={styles.resetBtn}
+                    onPress={() => {
+                      setResetTarget(item);
+                      setResetPwd("");
+                      setResetError(null);
+                    }}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.resetText}>修改密码</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.deleteBtn}
+                    onPress={() => void confirmDelete(item)}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.deleteText}>删除</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
           </View>
         )}
       />
@@ -222,31 +233,36 @@ export function StaffScreen() {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>重置店员密码</Text>
-            <Text style={styles.modalMeta}>
-              为「{resetTarget?.name}」（{resetTarget?.phone}）设置新密码，无需原密码。
-            </Text>
+            <Text style={styles.modalTitle}>修改密码</Text>
+            <Text style={styles.modalMeta}>{resetTarget?.name}</Text>
             <TextInput
               style={styles.input}
-              placeholder="新密码（至少 6 位）"
+              placeholder="新密码"
               secureTextEntry
               value={resetPwd}
-              onChangeText={setResetPwd}
+              onChangeText={(t) => {
+                setResetError(null);
+                setResetPwd(t);
+              }}
             />
+            {resetError ? <Text style={styles.error}>{resetError}</Text> : null}
             <View style={styles.modalBtns}>
               <Pressable
                 style={styles.modalCancel}
-                onPress={() => setResetTarget(null)}
+                onPress={() => {
+                  setResetTarget(null);
+                  setResetError(null);
+                }}
                 disabled={resetting}
               >
                 <Text style={styles.modalCancelText}>取消</Text>
               </Pressable>
               <Pressable
                 style={[styles.modalOk, resetting && styles.addBtnDisabled]}
-                onPress={submitReset}
+                onPress={() => void submitReset()}
                 disabled={resetting}
               >
-                <Text style={styles.addText}>{resetting ? "重置中…" : "确认重置"}</Text>
+                <Text style={styles.addText}>{resetting ? "保存中…" : "确定"}</Text>
               </Pressable>
             </View>
           </View>
@@ -267,7 +283,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
   },
-  back: { color: "#2563eb", fontSize: 16 },
   title: { fontSize: 18, fontWeight: "800", color: "#111" },
   placeholder: { width: 32 },
   list: { padding: 16, gap: 10 },
@@ -333,20 +348,20 @@ const styles = StyleSheet.create({
   staffTag: { fontSize: 12, color: "#2563eb", fontWeight: "700" },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.backdrop,
     alignItems: "center",
     justifyContent: "center",
-    padding: 24,
+    padding: 28,
   },
   modalCard: {
     width: "100%",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 20,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 22,
     gap: 12,
   },
-  modalTitle: { fontSize: 17, fontWeight: "800", color: "#111" },
-  modalMeta: { fontSize: 13, color: "#6b7280" },
+  modalTitle: { fontSize: font.title, fontWeight: "800", color: colors.text, textAlign: "center" },
+  modalMeta: { fontSize: font.body, color: colors.textMuted, textAlign: "center" },
   modalBtns: { flexDirection: "row", gap: 10, marginTop: 2 },
   modalCancel: {
     flex: 1,

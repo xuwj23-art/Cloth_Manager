@@ -33,6 +33,8 @@ export const colors = {
   online: "#16A34A",
   /** 遮罩 */
   backdrop: "rgba(0,0,0,0.45)",
+  /** 品牌金（吊牌 logo） */
+  gold: "#C0A065",
 } as const;
 
 /** 字号 sp（§3.2：正文不低于 16sp） */
@@ -45,6 +47,11 @@ export const font = {
   body: 16,
   /** 辅助信息（时间/库存） */
   caption: 14,
+} as const;
+
+/** 品牌衬线（Noto Serif SC 子集，仅用于「收银台」等已收录字） */
+export const fontFamily = {
+  brand: "NotoSerifSC",
 } as const;
 
 /** 点击区 dp（§3.3：最小 48dp，步进器/按钮建议 56dp） */

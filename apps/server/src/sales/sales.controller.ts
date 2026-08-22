@@ -58,10 +58,12 @@ export class SalesController {
     return this.reports.listOrders(user.shopId, cursor, safeTake);
   }
 
-  /** 报表汇总：店主专属 */
+  /** 报表汇总：店主返回完整汇总；店员仅今日营业额与单数（首页展示，不可下钻） */
   @Get("summary")
-  @Roles("owner")
   summary(@CurrentUser() user: RequestUser) {
+    if (user.role === "staff") {
+      return this.reports.getTodayHeadline(user.shopId).then((today) => ({ today }));
+    }
     return this.reports.getSummary(user.shopId);
   }
 

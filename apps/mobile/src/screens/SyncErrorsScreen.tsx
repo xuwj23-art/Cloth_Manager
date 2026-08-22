@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { BackButton } from "../components/BackButton";
+import { useDialog } from "../dialog-context";
 import { abandonOp, listFailedOps, retryOp, type OutboxItem } from "../db/outbox";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { formatTime, yuan } from "../utils/format";
@@ -27,6 +29,7 @@ function summarizeSalePayload(raw: string): { itemCount: number; total: number }
 
 export function SyncErrorsScreen() {
   const navigation = useNavigation<SyncErrorsNav>();
+  const { confirm } = useDialog();
   const [items, setItems] = useState<OutboxItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -51,30 +54,22 @@ export function SyncErrorsScreen() {
     await load();
   };
 
-  const confirmAbandon = (op: OutboxItem) => {
-    Alert.alert(
-      "放弃同步",
-      "确认放弃这笔销售？放弃后该笔不会再上传服务端，本地记录将永久删除，此操作不可撤销。",
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "放弃",
-          style: "destructive",
-          onPress: async () => {
-            await abandonOp(op.opId);
-            await load();
-          },
-        },
-      ],
-    );
+  const confirmAbandon = async (op: OutboxItem) => {
+    const ok = await confirm({
+      title: "放弃同步",
+      message: "确定放弃这笔销售？",
+      confirmLabel: "放弃",
+      destructive: true,
+    });
+    if (!ok) return;
+    await abandonOp(op.opId);
+    await load();
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={styles.back}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>同步失败</Text>
         <View style={styles.placeholder} />
       </View>
@@ -112,7 +107,7 @@ export function SyncErrorsScreen() {
                   </Pressable>
                   <Pressable
                     style={[styles.btn, styles.abandonBtn]}
-                    onPress={() => confirmAbandon(op)}
+                    onPress={() => void confirmAbandon(op)}
                   >
                     <Text style={styles.abandonText}>放弃</Text>
                   </Pressable>

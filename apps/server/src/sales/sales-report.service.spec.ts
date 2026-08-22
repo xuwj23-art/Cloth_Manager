@@ -72,6 +72,28 @@ describe("SalesReportService.getSummary", () => {
   });
 });
 
+describe("SalesReportService.getTodayHeadline", () => {
+  it("只返回今日营业额与单数，不查热销", async () => {
+    const prisma = {
+      saleOrder: {
+        aggregate: vi.fn().mockResolvedValue({ _sum: { totalAmount: 5900 }, _count: 1 }),
+      },
+      saleItem: {
+        aggregate: vi.fn().mockResolvedValue({ _sum: { quantity: 2 } }),
+        groupBy: vi.fn(),
+      },
+      sku: { findMany: vi.fn() },
+    } as any;
+    const service = new SalesReportService(prisma);
+
+    const today = await service.getTodayHeadline(SHOP);
+
+    expect(today).toEqual({ revenue: 5900, orders: 1 });
+    expect(prisma.saleItem.groupBy).not.toHaveBeenCalled();
+    expect(prisma.sku.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("SalesReportService.report", () => {
   it("利润 = 营业额 - 进价快照×数量（今日档，无下钻桶；合计下推 DB aggregate）", async () => {
     // 今日档 report 调用序列：

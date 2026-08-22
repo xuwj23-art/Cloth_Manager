@@ -197,7 +197,7 @@ export class AuthService {
     return { ok: true };
   }
 
-  /** 修改自己的密码（登录态，店主/店员均可，需验证原密码） */
+  /** 修改自己的密码（仅店主走此接口，需验证原密码） */
   async changePassword(userId: string, input: ChangePasswordInput): Promise<{ ok: true }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

@@ -88,7 +88,7 @@ export function renderDownloadPage(d: DownloadPageData): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-<title>服装进销存 · 下载安装</title>
+<title>收银台 · 下载安装</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -143,8 +143,8 @@ export function renderDownloadPage(d: DownloadPageData): string {
 <body>
   <div class="card">
     <div class="logo">📦</div>
-    <h1>服装进销存</h1>
-    <p class="sub">Android 安装包下载</p>
+    <h1>收银台</h1>
+    <p class="sub">Android 安装包</p>
     ${body}
   </div>
 </body>

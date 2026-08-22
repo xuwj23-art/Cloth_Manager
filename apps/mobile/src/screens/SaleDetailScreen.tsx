@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -14,7 +13,9 @@ import { useNavigation, useRoute, type RouteProp } from "@react-navigation/nativ
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { SaleOrderDetail } from "@cloth-scan/shared";
 import { deleteSaleOrder, editSaleOrder, getSale, imageUrl, thumbUrl } from "../api";
+import { BackButton } from "../components/BackButton";
 import { ImageViewer } from "../components/ImageViewer";
+import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { formatTime, yuan } from "../utils/format";
 
@@ -37,6 +38,7 @@ export function SaleDetailScreen() {
   const navigation = useNavigation<SaleDetailNav>();
   const route = useRoute<SaleDetailRoute>();
   const { orderId } = route.params;
+  const { confirm, notice } = useDialog();
   const [order, setOrder] = useState<SaleOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +97,7 @@ export function SaleDetailScreen() {
   async function save() {
     // 空串/纯空白的输入按无效处理（Number("")===0 会把清空误判为 ¥0 改价）
     if (draft.some((l) => l.quantity > 0 && l.priceStr.trim() === "")) {
-      Alert.alert("价格有误", "请检查每件商品的成交价");
+      await notice("价格有误");
       return;
     }
     const items = draft.map((l) => ({
@@ -104,11 +106,11 @@ export function SaleDetailScreen() {
       price: Math.round(Number(l.priceStr) * 100),
     }));
     if (items.some((i) => !Number.isFinite(i.price) || i.price < 0)) {
-      Alert.alert("价格有误", "请检查每件商品的成交价");
+      await notice("价格有误");
       return;
     }
     if (keptCount === 0) {
-      Alert.alert("不能清空账单", "请保留至少一件商品，或使用「删除整单」");
+      await notice("请保留至少一件商品");
       return;
     }
     setSaving(true);
@@ -118,40 +120,38 @@ export function SaleDetailScreen() {
       setEditing(false);
       // 销售列表通过 useFocusEffect 在返回时自动刷新，无需显式回调
     } catch (e) {
-      Alert.alert("保存失败", (e as Error).message);
+      await notice("保存失败", (e as Error).message);
     } finally {
       setSaving(false);
     }
   }
 
-  function confirmDeleteOrder() {
-    Alert.alert("删除整单", "确认删除这笔销售？已售出的库存会自动加回，此操作不可撤销。", [
-      { text: "取消", style: "cancel" },
-      {
-        text: "删除",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteSaleOrder(orderId);
-            // 返回销售列表，focus 监听会自动刷新
-            navigation.goBack();
-          } catch (e) {
-            Alert.alert("删除失败", (e as Error).message);
-          }
-        },
-      },
-    ]);
+  async function confirmDeleteOrder() {
+    const ok = await confirm({
+      title: "删除账单",
+      message: "确定删除？库存将退回。",
+      confirmLabel: "删除",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteSaleOrder(orderId);
+      navigation.goBack();
+    } catch (e) {
+      await notice("删除失败", (e as Error).message);
+    }
   }
 
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable
-          onPress={editing ? () => setEditing(false) : () => navigation.goBack()}
-          hitSlop={8}
-        >
-          <Text style={styles.back}>{editing ? "取消" : "返回"}</Text>
-        </Pressable>
+        {editing ? (
+          <Pressable onPress={() => setEditing(false)} hitSlop={8}>
+            <Text style={styles.back}>取消</Text>
+          </Pressable>
+        ) : (
+          <BackButton onPress={() => navigation.goBack()} />
+        )}
         <Text style={styles.title}>{editing ? "编辑账单" : "单据详情"}</Text>
         {order && !editing ? (
           <Pressable onPress={startEdit} hitSlop={8}>
@@ -271,7 +271,7 @@ export function SaleDetailScreen() {
                 })}
 
             {!editing ? (
-              <Pressable style={styles.deleteOrderBtn} onPress={confirmDeleteOrder}>
+              <Pressable style={styles.deleteOrderBtn} onPress={() => void confirmDeleteOrder()}>
                 <Text style={styles.deleteOrderText}>删除整单</Text>
               </Pressable>
             ) : null}

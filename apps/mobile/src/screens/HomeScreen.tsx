@@ -1,18 +1,59 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth-context";
+import { BrandLockup } from "../components/BrandLockup";
+import { SyncAction } from "../components/SyncAction";
 import { useSync } from "../sync/sync-context";
 import { getSalesSummary } from "../api";
 import { countFailedOps } from "../db/outbox";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { colors, font, radius, space, touch } from "../theme/tokens";
 import { yuan } from "../utils/format";
 
 type HomeNav = NativeStackNavigationProp<RootStackParamList, "Home">;
 
+function Tile({
+  icon,
+  label,
+  onPress,
+  width,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  width: number;
+}) {
+  return (
+    <Pressable
+      style={[styles.tile, { width }]}
+      onPress={onPress}
+      android_ripple={{ color: colors.primarySoft }}
+    >
+      <View style={styles.tileIcon}>
+        <Ionicons name={icon} size={22} color={colors.primary} />
+      </View>
+      <Text style={styles.tileLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function HomeScreen() {
   const navigation = useNavigation<HomeNav>();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const tileWidth = (windowWidth - space.xl * 2 - 12) / 2;
   const { user, logout } = useAuth();
   const { online, syncing, pendingCount, syncNow } = useSync();
   const isOwner = user?.role === "owner";
@@ -23,196 +64,210 @@ export function HomeScreen() {
   const [failedCount, setFailedCount] = useState(0);
 
   const loadToday = useCallback(async () => {
-    if (!isOwner) return; // 报表为店主专属，店员不请求
     try {
       const s = await getSalesSummary();
       setToday({ revenue: s.today.revenue, orders: s.today.orders });
     } catch {
-      // 离线或未登录态忽略，不影响主流程
+      // 离线忽略
     }
-  }, [isOwner]);
+  }, []);
 
-  // 进入首页时刷新今日数据；结算后 pendingCount 变化也会触发刷新
   useEffect(() => {
     void loadToday();
   }, [loadToday, pendingCount]);
 
-  // 进入/返回首页时刷新失败同步计数：从同步异常列表重试/放弃返回后需要更新徽标
   useFocusEffect(
     useCallback(() => {
       void countFailedOps()
         .then(setFailedCount)
         .catch(() => {
-          /* 读取失败忽略，不影响主流程 */
+          /* ignore */
         });
     }, []),
   );
 
+  const roleLabel = isOwner ? "老板" : "店员";
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.welcome}>
-          {user?.name}（{user?.role === "owner" ? "老板" : "店员"}）
-        </Text>
-        <Pressable onPress={logout}>
-          <Text style={styles.logout}>退出</Text>
+        <BrandLockup variant="header" />
+        <Pressable
+          onPress={logout}
+          hitSlop={8}
+          style={styles.logoutBtn}
+          accessibilityRole="button"
+          accessibilityLabel="退出"
+        >
+          <Ionicons name="log-out-outline" size={24} color={colors.text} />
         </Pressable>
       </View>
 
       {failedCount > 0 ? (
         <Pressable style={styles.failedBanner} onPress={() => navigation.navigate("SyncErrors")}>
-          <Text style={styles.failedBannerText}>⚠️ 有 {failedCount} 笔同步失败，点查看</Text>
+          <Text style={styles.failedBannerText}>{failedCount} 笔同步失败</Text>
         </Pressable>
       ) : null}
 
-      <View style={styles.body}>
-        <Text style={styles.title}>服装进销存</Text>
-        <Text style={styles.subtitle}>扫吊牌二维码，秒匹配商品</Text>
-
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.body}
+        showsVerticalScrollIndicator={false}
+      >
         {isOwner ? (
           <Pressable style={styles.todayCard} onPress={() => navigation.navigate("Sales")}>
             <Text style={styles.todayLabel}>今日营业额</Text>
             <Text style={styles.todayRevenue}>{today ? yuan(today.revenue) : "—"}</Text>
-            <Text style={styles.todayMeta}>
-              {today ? `${today.orders} 单 · 点击查看销售记录` : "点击查看销售记录"}
-            </Text>
+            <Text style={styles.todayMeta}>{today ? `${today.orders} 笔` : "—"}</Text>
           </Pressable>
-        ) : null}
+        ) : (
+          <View style={styles.todayCard}>
+            <Text style={styles.todayLabel}>今日营业额</Text>
+            <Text style={styles.todayRevenue}>{today ? yuan(today.revenue) : "—"}</Text>
+            <Text style={styles.todayMeta}>{today ? `${today.orders} 笔` : "—"}</Text>
+          </View>
+        )}
 
         <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("Cashier")}>
+          <Ionicons name="qr-code-outline" size={22} color="#fff" />
           <Text style={styles.primaryText}>扫码收银</Text>
         </Pressable>
 
-        <View style={styles.row}>
-          {isOwner ? (
-            <Pressable
-              style={[styles.secondaryBtn, styles.flex1]}
-              onPress={() => navigation.navigate("CreateProduct")}
-            >
-              <Text style={styles.secondaryText}>商品建档</Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            style={[styles.secondaryBtn, styles.flex1]}
+        <View style={styles.grid}>
+          <Tile
+            icon="add-circle-outline"
+            label="商品建档"
+            width={tileWidth}
+            onPress={() => navigation.navigate("CreateProduct")}
+          />
+          <Tile
+            icon="shirt-outline"
+            label="商品列表"
+            width={tileWidth}
             onPress={() => navigation.navigate("Products")}
-          >
-            <Text style={styles.secondaryText}>商品列表</Text>
-          </Pressable>
-        </View>
-
-        {isOwner ? (
-          <>
-            <Pressable
-              style={[styles.secondaryBtn, styles.fullWidth]}
+          />
+          {isOwner ? (
+            <Tile
+              icon="bar-chart-outline"
+              label="销售报表"
+              width={tileWidth}
               onPress={() => navigation.navigate("Sales")}
-            >
-              <Text style={styles.secondaryText}>销售记录 / 报表</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.secondaryBtn, styles.fullWidth]}
+            />
+          ) : null}
+          {isOwner ? (
+            <Tile
+              icon="people-outline"
+              label="店员管理"
+              width={tileWidth}
               onPress={() => navigation.navigate("Staff")}
-            >
-              <Text style={styles.secondaryText}>店员管理</Text>
-            </Pressable>
-          </>
-        ) : null}
-
-        <Pressable style={styles.linkBtn} onPress={() => void syncNow()}>
-          <Text style={styles.linkText}>{syncing ? "同步中…" : "立即同步"}</Text>
-        </Pressable>
-
-        <View style={styles.syncRow}>
-          <Text style={[styles.dot, online ? styles.online : styles.offline]}>●</Text>
-          <Text style={styles.syncText}>
-            {online ? "在线" : "离线"}
-            {pendingCount > 0 ? ` · ${pendingCount} 笔待同步` : " · 已全部同步"}
-          </Text>
+            />
+          ) : null}
         </View>
 
-        <Pressable style={styles.linkBtn} onPress={() => navigation.navigate("ChangePassword")}>
-          <Text style={styles.linkText}>修改密码</Text>
-        </Pressable>
+        <SyncAction
+          syncing={syncing}
+          online={online}
+          pendingCount={pendingCount}
+          onPress={() => void syncNow()}
+        />
+      </ScrollView>
+
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+        <Text style={styles.identity}>
+          {user?.name}·{roleLabel}
+        </Text>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    paddingHorizontal: space.xl,
+    paddingTop: 6,
+    paddingBottom: 12,
+    backgroundColor: colors.card,
   },
-  welcome: { fontSize: 16, fontWeight: "600", color: "#111" },
-  logout: { fontSize: 15, color: "#dc2626" },
+  logoutBtn: {
+    width: touch.minSize,
+    height: touch.minSize,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   failedBanner: {
-    backgroundColor: "#fef3c7",
-    borderBottomWidth: 1,
-    borderBottomColor: "#fde68a",
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    minHeight: 48,
-    justifyContent: "center",
+    backgroundColor: "#FFF7ED",
+    paddingVertical: 12,
+    paddingHorizontal: space.xl,
   },
-  failedBannerText: { fontSize: 16, fontWeight: "700", color: "#b45309" },
+  failedBannerText: { fontSize: font.body, fontWeight: "600", color: "#C2410C" },
+  scroll: { flex: 1 },
   body: {
-    flex: 1,
+    paddingHorizontal: space.xl,
+    paddingTop: space.lg,
+    paddingBottom: space.md,
+    gap: space.md,
+  },
+  todayCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+  },
+  todayLabel: { fontSize: font.caption, color: colors.textMuted, fontWeight: "500" },
+  todayRevenue: {
+    fontSize: font.display,
+    fontWeight: "700",
+    color: colors.primary,
+    marginTop: 2,
+    letterSpacing: -0.4,
+  },
+  todayMeta: { fontSize: font.caption, color: colors.textMuted, marginTop: 4, fontWeight: "500" },
+  primaryBtn: {
+    backgroundColor: colors.primary,
+    height: 60,
+    borderRadius: radius.lg,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    padding: 24,
-    gap: 16,
+    flexDirection: "row",
+    gap: 8,
   },
-  title: { fontSize: 32, fontWeight: "800", color: "#111" },
-  subtitle: { fontSize: 16, color: "#666", marginBottom: 24 },
-  primaryBtn: {
-    backgroundColor: "#2563eb",
-    paddingVertical: 20,
-    paddingHorizontal: 48,
-    borderRadius: 16,
-    width: "100%",
+  primaryText: { color: "#fff", fontSize: 20, fontWeight: "700" },
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  tile: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    paddingVertical: 18,
+    paddingHorizontal: 14,
+    minHeight: 88,
+    justifyContent: "center",
+    gap: 10,
+  },
+  tileIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
+    justifyContent: "center",
   },
-  primaryText: { color: "#fff", fontSize: 22, fontWeight: "800" },
-  secondaryBtn: {
-    borderWidth: 1.5,
-    borderColor: "#2563eb",
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    width: "100%",
+  tileLabel: { fontSize: font.body, fontWeight: "600", color: colors.text },
+  footer: {
     alignItems: "center",
+    paddingTop: 4,
   },
-  secondaryText: { color: "#2563eb", fontSize: 16, fontWeight: "600" },
-  row: { flexDirection: "row", gap: 12, width: "100%" },
-  flex1: { flex: 1 },
-  fullWidth: { width: "100%" },
-  todayCard: {
-    width: "100%",
-    backgroundColor: "#eff6ff",
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: "#dbeafe",
-    marginBottom: 4,
+  identity: {
+    fontFamily: Platform.OS === "ios" ? "Songti SC" : "serif",
+    fontSize: 15,
+    color: colors.textMuted,
+    letterSpacing: 1.2,
   },
-  todayLabel: { fontSize: 14, color: "#2563eb" },
-  todayRevenue: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: "#1d4ed8",
-    marginTop: 4,
-  },
-  todayMeta: { fontSize: 13, color: "#60a5fa", marginTop: 2 },
-  linkBtn: { paddingVertical: 8 },
-  linkText: { color: "#2563eb", fontSize: 15, fontWeight: "600" },
-  syncRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  dot: { fontSize: 12 },
-  online: { color: "#16a34a" },
-  offline: { color: "#f59e0b" },
-  syncText: { fontSize: 13, color: "#6b7280" },
 });

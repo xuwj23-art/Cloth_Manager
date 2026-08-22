@@ -18,7 +18,7 @@ import { RolesGuard } from "../auth/roles.guard";
 import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import type { RequestUser } from "../auth/auth.types";
-import { ProductsService } from "./products.service";
+import { ProductsService, redactProductCost, redactSkuCost } from "./products.service";
 import { GarmentVisionService } from "./garment-vision.service";
 
 @Controller()
@@ -29,25 +29,30 @@ export class ProductsController {
     private readonly vision: GarmentVisionService,
   ) {}
 
-  /** 建档为店主专属（店员仅收银/查看） */
+  /** 建档：店主/店员均可。店员提交的进价一律按 0 入库，响应也不回真实进价。 */
   @Post("products")
-  @Roles("owner")
-  create(
+  async create(
     @CurrentUser() user: RequestUser,
     @Body(new ZodValidationPipe(CreateProductInput)) body: CreateProductInput,
   ) {
-    return this.products.createProduct(user.shopId, body);
+    const input =
+      user.role === "staff"
+        ? { ...body, skus: body.skus.map((s) => ({ ...s, costPrice: 0 })) }
+        : body;
+    const created = await this.products.createProduct(user.shopId, input);
+    return user.role === "staff" && created ? redactProductCost(created) : created;
   }
 
   @Get("products")
-  list(@CurrentUser() user: RequestUser, @Query("scope") scope?: ProductScope) {
+  async list(@CurrentUser() user: RequestUser, @Query("scope") scope?: ProductScope) {
     // 显式白名单：乱值直接 400，不落入 else 当 all 处理
     const SCOPES: ProductScope[] = ["active", "archived", "all"];
     const s = (scope ?? "active") as ProductScope;
     if (!SCOPES.includes(s)) {
       throw new BadRequestException(`无效的 scope：${String(scope)}`);
     }
-    return this.products.listProducts(user.shopId, s);
+    const list = await this.products.listProducts(user.shopId, s);
+    return user.role === "staff" ? list.map((p) => redactProductCost(p)) : list;
   }
 
   /**
@@ -58,7 +63,7 @@ export class ProductsController {
    * 但保留顺序以防后续新增时 `sync` 被 :id 参数捕获）。
    */
   @Get("products/sync")
-  sync(
+  async sync(
     @CurrentUser() user: RequestUser,
     @Query("since") since?: string,
   ): Promise<CatalogSyncResponse> {
@@ -68,7 +73,11 @@ export class ProductsController {
       const d = new Date(since);
       sinceDate = Number.isNaN(d.getTime()) ? undefined : d;
     }
-    return this.products.listProductsForSync(user.shopId, sinceDate);
+    const res = await this.products.listProductsForSync(user.shopId, sinceDate);
+    if (user.role === "staff") {
+      return { ...res, products: res.products.map((p) => redactProductCost(p)) };
+    }
+    return res;
   }
 
   /** 新手一键体验：为空门店灌入演示商品（仅店主） */
@@ -83,14 +92,13 @@ export class ProductsController {
    * 必须写在 products/:id 之前，避免被参数路由吞掉。
    */
   @Post("products/recognize-garment")
-  @Roles("owner")
   recognizeGarment(
     @Body(new ZodValidationPipe(RecognizeGarmentInput)) body: RecognizeGarmentInput,
   ) {
     return this.vision.recognize(body.imagePath);
   }
 
-  /** 编辑商品（仅店主）：改名/改价/盘点改库存 */
+  /** 编辑商品（仅店主）：改名/改价/盘点改库存/改颜色尺码 */
   @Patch("products/:id")
   @Roles("owner")
   update(
@@ -123,7 +131,8 @@ export class ProductsController {
   }
 
   @Get("skus/by-barcode/:barcode")
-  findByBarcode(@CurrentUser() user: RequestUser, @Param("barcode") barcode: string) {
-    return this.products.findByBarcode(user.shopId, barcode);
+  async findByBarcode(@CurrentUser() user: RequestUser, @Param("barcode") barcode: string) {
+    const sku = await this.products.findByBarcode(user.shopId, barcode);
+    return user.role === "staff" ? redactSkuCost(sku) : sku;
   }
 }

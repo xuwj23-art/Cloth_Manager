@@ -15,6 +15,15 @@ import type {
 import { expandSkuMatrix, shouldArchive } from "@cloth-scan/shared";
 import { PrismaService } from "../prisma/prisma.service";
 
+/** 店员响应里进价一律置 0，避免进价从接口泄露 */
+export function redactProductCost<T extends { skus: { costPrice: number }[] }>(product: T): T {
+  return { ...product, skus: product.skus.map((s) => ({ ...s, costPrice: 0 })) };
+}
+
+export function redactSkuCost<T extends { costPrice: number }>(sku: T): T {
+  return { ...sku, costPrice: 0 };
+}
+
 /** 新手「一键体验」的演示商品模板 */
 const DEMO_PRODUCTS = [
   {
@@ -280,6 +289,32 @@ export class ProductsService {
         });
       }
 
+      const planned = new Map(freshSkus.map((k) => [k.id, { color: k.color, size: k.size }]));
+      for (const s of input.skus ?? []) {
+        if (!freshById.has(s.id)) {
+          throw new NotFoundException(`SKU 不存在：${s.id}`);
+        }
+        const next = planned.get(s.id)!;
+        if (s.color !== undefined) {
+          const color = s.color.trim();
+          if (!color) throw new BadRequestException("颜色不能为空");
+          next.color = color;
+        }
+        if (s.size !== undefined) {
+          const size = s.size.trim();
+          if (!size) throw new BadRequestException("尺码不能为空");
+          next.size = size;
+        }
+      }
+      const seenSpec = new Set<string>();
+      for (const spec of planned.values()) {
+        const key = `${spec.color}\u0000${spec.size}`;
+        if (seenSpec.has(key)) {
+          throw new BadRequestException("同一商品下颜色和尺码不能重复");
+        }
+        seenSpec.add(key);
+      }
+
       let stockChanged = false;
       for (const s of input.skus ?? []) {
         const existing = freshById.get(s.id);
@@ -287,6 +322,9 @@ export class ProductsService {
           throw new NotFoundException(`SKU 不存在：${s.id}`);
         }
         const data: Record<string, unknown> = {};
+        const spec = planned.get(s.id)!;
+        if (s.color !== undefined) data.color = spec.color;
+        if (s.size !== undefined) data.size = spec.size;
         if (s.costPrice !== undefined) data.costPrice = s.costPrice;
         if (s.salePrice !== undefined) data.salePrice = s.salePrice;
         if (s.stock !== undefined && s.stock !== existing.stock) {

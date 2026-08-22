@@ -1,57 +1,53 @@
-import { useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { apiChangePassword } from "../api";
+import { useAuth } from "../auth-context";
+import { BackButton } from "../components/BackButton";
+import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { colors, font, radius, space, touch } from "../theme/tokens";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "ChangePassword">;
 
-/**
- * 修改自己的密码（店主/店员均可）。
- * 需原密码——防手机被拿到后直接改密。改密后当前登录态保持（JWT 无撤销），
- * 但新设备无法再用旧密码登录。
- */
 export function ChangePasswordScreen() {
   const navigation = useNavigation<Nav>();
+  const { user } = useAuth();
+  const { notice } = useDialog();
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (user?.role !== "owner") navigation.goBack();
+  }, [user, navigation]);
+
   const submit = async () => {
     if (!oldPassword || !newPassword) {
-      Alert.alert("请填写完整", "原密码与新密码均不能为空");
+      await notice("请填写完整");
       return;
     }
     if (newPassword.length < 6) {
-      Alert.alert("密码太短", "新密码至少 6 位");
+      await notice("新密码至少 6 位");
       return;
     }
     if (newPassword !== confirm) {
-      Alert.alert("两次输入不一致", "请重新输入确认新密码");
+      await notice("两次密码不一致");
       return;
     }
     if (newPassword === oldPassword) {
-      Alert.alert("密码未变化", "新密码不能与原密码相同");
+      await notice("新密码不能与原密码相同");
       return;
     }
     setSubmitting(true);
     try {
       await apiChangePassword({ oldPassword, newPassword });
-      Alert.alert("修改成功", "请牢记新密码，下次登录使用新密码", [
-        { text: "好的", onPress: () => navigation.goBack() },
-      ]);
+      await notice("修改成功");
+      navigation.goBack();
     } catch (e) {
-      Alert.alert("修改失败", (e as Error).message);
+      await notice("修改失败", (e as Error).message);
     } finally {
       setSubmitting(false);
     }
@@ -60,9 +56,7 @@ export function ChangePasswordScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={styles.back}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>修改密码</Text>
         <View style={styles.placeholder} />
       </View>
@@ -71,13 +65,15 @@ export function ChangePasswordScreen() {
         <TextInput
           style={styles.input}
           placeholder="原密码"
+          placeholderTextColor={colors.textMuted}
           secureTextEntry
           value={oldPassword}
           onChangeText={setOldPassword}
         />
         <TextInput
           style={styles.input}
-          placeholder="新密码（至少 6 位）"
+          placeholder="新密码"
+          placeholderTextColor={colors.textMuted}
           secureTextEntry
           value={newPassword}
           onChangeText={setNewPassword}
@@ -85,13 +81,14 @@ export function ChangePasswordScreen() {
         <TextInput
           style={styles.input}
           placeholder="确认新密码"
+          placeholderTextColor={colors.textMuted}
           secureTextEntry
           value={confirm}
           onChangeText={setConfirm}
         />
         <Pressable
           style={[styles.btn, submitting && styles.btnDisabled]}
-          onPress={submit}
+          onPress={() => void submit()}
           disabled={submitting}
         >
           {submitting ? (
@@ -100,45 +97,43 @@ export function ChangePasswordScreen() {
             <Text style={styles.btnText}>确认修改</Text>
           )}
         </Pressable>
-        <Text style={styles.hint}>
-          修改后当前手机保持登录；其他设备需用新密码登录。忘记密码请联系店主（店主忘记需在服务器重置）。
-        </Text>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: colors.bg },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
+    paddingHorizontal: space.lg,
     paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    backgroundColor: colors.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  back: { color: "#2563eb", fontSize: 16 },
-  title: { fontSize: 18, fontWeight: "800", color: "#111" },
+  back: { color: colors.primary, fontSize: font.body, fontWeight: "600" },
+  title: { fontSize: font.title, fontWeight: "800", color: colors.text },
   placeholder: { width: 32 },
   form: { padding: 20, gap: 12 },
   input: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 16,
+    fontSize: font.body,
+    color: colors.text,
   },
   btn: {
-    backgroundColor: "#2563eb",
-    borderRadius: 10,
-    paddingVertical: 14,
+    backgroundColor: colors.primary,
+    height: touch.buttonHeight,
+    borderRadius: radius.md,
     alignItems: "center",
+    justifyContent: "center",
     marginTop: 4,
   },
   btnDisabled: { opacity: 0.6 },
-  btnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  hint: { fontSize: 13, color: "#9ca3af", lineHeight: 18, marginTop: 2 },
+  btnText: { color: "#fff", fontSize: font.body, fontWeight: "700" },
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { colors, font, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
@@ -18,6 +18,7 @@ export function PriceEditSheet() {
   const editPrice = useCashierStore((s) => s.editPrice);
   const setSheet = useCashierStore((s) => s.setSheet);
   const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const line = editingSkuId ? (cart.find((l) => l.skuId === editingSkuId) ?? null) : null;
 
@@ -25,6 +26,7 @@ export function PriceEditSheet() {
   useEffect(() => {
     if (open && line) {
       setValue((line.price / 100).toFixed(2));
+      setError(null);
     }
   }, [open, line?.skuId]);
 
@@ -36,7 +38,7 @@ export function PriceEditSheet() {
     if (!line) return;
     const n = Number(value);
     if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
-      Alert.alert("价格有误", "请输入有效的金额");
+      setError("价格有误");
       return;
     }
     editPrice(line.skuId, Math.round(n * 100));
@@ -61,13 +63,15 @@ export function PriceEditSheet() {
               keyboardType="decimal-pad"
               autoFocus
               value={value}
-              onChangeText={setValue}
+              onChangeText={(t) => {
+                setError(null);
+                setValue(t);
+              }}
               onSubmitEditing={confirm}
             />
           </View>
-          <Text style={cashierStyles.hint}>
-            每件成交单价，用于讨价还价/优惠。当前 {yuan(line.price)} / 件
-          </Text>
+          <Text style={cashierStyles.hint}>当前 {yuan(line.price)} / 件</Text>
+          {error ? <Text style={styles.err}>{error}</Text> : null}
 
           <View style={styles.actions}>
             <Pressable style={cashierStyles.secondaryBtn} onPress={close}>
@@ -104,4 +108,5 @@ const styles = StyleSheet.create({
   },
   actions: { flexDirection: "row", gap: space.md },
   confirmBtn: { flex: 2 },
+  err: { fontSize: font.caption, color: colors.danger, fontWeight: "700", textAlign: "center" },
 });

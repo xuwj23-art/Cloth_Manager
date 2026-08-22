@@ -2,8 +2,10 @@ import { Component, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import { useFonts } from "expo-font";
 import { NavigationContainer } from "@react-navigation/native";
 import { AuthProvider, useAuth } from "./src/auth-context";
+import { DialogProvider } from "./src/dialog-context";
 import { useOwnerSaleAlerts } from "./src/notify/saleAlerts";
 import { SyncProvider } from "./src/sync/sync-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
@@ -83,14 +85,28 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export default function App() {
+  const [fontsLoaded, fontError] = useFonts({
+    NotoSerifSC: require("./assets/fonts/NotoSerifSC-Brand.ttf"),
+  });
+
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.gold} />
+      </View>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
         <AuthProvider>
-          <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
-            <StatusBar style="auto" />
-            <Root />
-          </SafeAreaView>
+          <DialogProvider>
+            <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
+              <StatusBar style="auto" />
+              <Root />
+            </SafeAreaView>
+          </DialogProvider>
         </AuthProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
@@ -98,7 +114,7 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#fff" },
+  root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   errRoot: { flex: 1, backgroundColor: "#fff", paddingTop: 60 },
   errScroll: { padding: 20 },

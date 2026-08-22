@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ProductsService } from "./products.service";
+import { ProductsService, redactProductCost, redactSkuCost } from "./products.service";
 import type { PrismaService } from "../prisma/prisma.service";
 
 const SHOP = "shop-1";
@@ -32,7 +32,7 @@ function makeUpdatePrisma(product: any, aggStock: number) {
 const baseProduct = {
   id: "p1",
   shopId: SHOP,
-  skus: [{ id: "s1", stock: 5, salePrice: 5900, costPrice: 2000 }],
+  skus: [{ id: "s1", stock: 5, salePrice: 5900, costPrice: 2000, color: "黑", size: "均码" }],
 };
 
 describe("ProductsService.seedDemo", () => {
@@ -175,6 +175,57 @@ describe("ProductsService.updateProduct", () => {
     const prisma = makeUpdatePrisma({ ...baseProduct, shopId: "other" }, 5) as any;
     const service = new ProductsService(prisma);
     await expect(service.updateProduct(SHOP, "p1", { name: "x" })).rejects.toThrow();
+  });
+
+  it("可改 SKU 颜色和尺码", async () => {
+    const prisma = makeUpdatePrisma({ ...baseProduct }, 5) as any;
+    const service = new ProductsService(prisma);
+
+    await service.updateProduct(SHOP, "p1", {
+      skus: [{ id: "s1", color: "酒红", size: "M" }],
+    });
+
+    expect(prisma.__tx.sku.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "s1" },
+        data: expect.objectContaining({ color: "酒红", size: "M" }),
+      }),
+    );
+  });
+
+  it("同一商品下颜色+尺码重复则拒绝", async () => {
+    const prisma = makeUpdatePrisma(
+      {
+        ...baseProduct,
+        skus: [
+          { id: "s1", stock: 5, salePrice: 5900, costPrice: 2000, color: "黑", size: "均码" },
+          { id: "s2", stock: 3, salePrice: 5900, costPrice: 2000, color: "白", size: "均码" },
+        ],
+      },
+      8,
+    ) as any;
+    const service = new ProductsService(prisma);
+
+    await expect(
+      service.updateProduct(SHOP, "p1", {
+        skus: [{ id: "s2", color: "黑", size: "均码" }],
+      }),
+    ).rejects.toThrow("同一商品下颜色和尺码不能重复");
+  });
+});
+
+describe("进价脱敏", () => {
+  it("redactProductCost 将 SKU 进价置 0", () => {
+    const p = redactProductCost({
+      id: "p1",
+      skus: [{ id: "s1", costPrice: 5900, salePrice: 9900 }],
+    });
+    expect(p.skus[0]?.costPrice).toBe(0);
+    expect(p.skus[0]?.salePrice).toBe(9900);
+  });
+
+  it("redactSkuCost 将单条 SKU 进价置 0", () => {
+    expect(redactSkuCost({ id: "s1", costPrice: 1200 }).costPrice).toBe(0);
   });
 });
 

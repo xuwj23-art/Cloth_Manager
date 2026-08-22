@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -11,6 +11,8 @@ import { enqueueSale } from "../db/outbox";
 import { getDb } from "../db/database";
 import { useSync } from "../sync/sync-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { BackButton } from "../components/BackButton";
+import { useDialog } from "../dialog-context";
 import { colors, font, radius, space } from "../theme/tokens";
 import { yuan } from "../utils/format";
 import { useCashierStore } from "./cashier/store";
@@ -57,6 +59,7 @@ function haptic(kind: "success" | "error" | "light") {
  */
 export function CashierScreen() {
   const navigation = useNavigation<CashierNav>();
+  const { confirm, notice } = useDialog();
   const [permission, requestPermission] = useCameraPermissions();
   const { online, pendingCount, syncNow, refreshPending } = useSync();
   const [torch, setTorch] = useState(false);
@@ -132,9 +135,7 @@ export function CashierScreen() {
         <Pressable style={styles.btn} onPress={requestPermission}>
           <Text style={styles.btnText}>授予相机权限</Text>
         </Pressable>
-        <Pressable onPress={() => navigation.goBack()}>
-          <Text style={styles.link}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
       </View>
     );
   }
@@ -150,10 +151,14 @@ export function CashierScreen() {
       fin < orig
         ? `合计 ${yuan(fin)}（原价 ${yuan(orig)} · 整单优惠 ${yuan(orig - fin)}）`
         : `合计 ${yuan(orig)}`;
-    Alert.alert("确认结算", `共 ${cnt} 件商品，${priceLine}\n确认收款并记录这笔销售？`, [
-      { text: "再看看", style: "cancel" },
-      { text: "确认结算", onPress: () => void doCheckout() },
-    ]);
+    void confirm({
+      title: "确认收款",
+      message: `${cnt} 件 · ${priceLine}`,
+      confirmLabel: "收款",
+      cancelLabel: "取消",
+    }).then((ok) => {
+      if (ok) void doCheckout();
+    });
   }
 
   async function doCheckout() {
@@ -175,12 +180,9 @@ export function CashierScreen() {
       resetAfterCheckout();
       await refreshPending();
       void syncNow();
-      Alert.alert(
-        "已结算",
-        online ? "销售已记录并正在同步到云端" : "当前离线，已记录在本地，联网后自动同步",
-      );
+      haptic("success");
     } catch (e) {
-      Alert.alert("结算失败", (e as Error).message);
+      await notice("收款失败", (e as Error).message);
     } finally {
       setSubmitting(false);
     }
@@ -194,9 +196,7 @@ export function CashierScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={styles.link}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>扫码收银</Text>
         <Text style={[styles.netDot, online ? styles.online : styles.offline]}>
           {online ? "在线" : "离线"}

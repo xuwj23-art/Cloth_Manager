@@ -53,9 +53,10 @@ export class AuthController {
     return this.auth.createStaff(user.shopId, body);
   }
 
-  /** 修改自己的密码（登录即可，店主/店员均可；需原密码） */
+  /** 仅店主可改自己的密码（需原密码）。店员密码只能由店主在店员管理里改。 */
   @Patch("password")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("owner")
   changeOwnPassword(
     @CurrentUser() user: RequestUser,
     @Body(new ZodValidationPipe(ChangePasswordInput)) body: ChangePasswordInput,

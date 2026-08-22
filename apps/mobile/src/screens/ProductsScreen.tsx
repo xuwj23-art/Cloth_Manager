@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Pressable,
@@ -13,6 +12,9 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ProductScope, ProductWithSkus } from "@cloth-scan/shared";
 import { deleteProduct, listProducts, thumbUrl } from "../api";
+import { useAuth } from "../auth-context";
+import { BackButton } from "../components/BackButton";
+import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { yuan } from "../utils/format";
 
@@ -20,9 +22,12 @@ type ProductsNav = NativeStackNavigationProp<RootStackParamList, "Products">;
 
 export function ProductsScreen() {
   const navigation = useNavigation<ProductsNav>();
+  const { user } = useAuth();
+  const isOwner = user?.role === "owner";
   const [products, setProducts] = useState<ProductWithSkus[]>([]);
   const [scope, setScope] = useState<ProductScope>("active");
   const [loading, setLoading] = useState(true);
+  const { confirm, notice } = useDialog();
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -44,36 +49,28 @@ export function ProductsScreen() {
   );
 
   const confirmDelete = useCallback(
-    (product: ProductWithSkus) => {
-      Alert.alert(
-        "删除商品",
-        `确认删除「${product.name}」？\n删除后将从列表移除（图片与历史账单均保留）。已售出的历史记录不受影响。`,
-        [
-          { text: "取消", style: "cancel" },
-          {
-            text: "删除",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                await deleteProduct(product.id);
-                await load();
-              } catch (e) {
-                Alert.alert("删除失败", (e as Error).message);
-              }
-            },
-          },
-        ],
-      );
+    async (product: ProductWithSkus) => {
+      const ok = await confirm({
+        title: "删除商品",
+        message: `确定删除「${product.name}」？`,
+        confirmLabel: "删除",
+        destructive: true,
+      });
+      if (!ok) return;
+      try {
+        await deleteProduct(product.id);
+        await load();
+      } catch (e) {
+        await notice("删除失败", (e as Error).message);
+      }
     },
-    [load],
+    [confirm, load, notice],
   );
 
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()}>
-          <Text style={styles.back}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>商品列表</Text>
         <Pressable onPress={() => navigation.navigate("CreateProduct")}>
           <Text style={styles.add}>+ 建档</Text>
@@ -114,9 +111,7 @@ export function ProductsScreen() {
           refreshing={loading}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              {scope === "active" ? "还没有在售商品，点右上角「+ 建档」开始" : "没有已售罄的商品"}
-            </Text>
+            <Text style={styles.empty}>{scope === "active" ? "暂无商品" : "暂无售罄商品"}</Text>
           }
           renderItem={({ item }) => {
             const totalStock = item.skus.reduce((s, k) => s + k.stock, 0);
@@ -140,10 +135,10 @@ export function ProductsScreen() {
                   </Text>
                   <Text style={styles.price}>{yuan(minPrice)} 起</Text>
                 </View>
-                {scope === "archived" ? (
+                {scope === "archived" && isOwner ? (
                   <Pressable
                     style={styles.deleteBtn}
-                    onPress={() => confirmDelete(item)}
+                    onPress={() => void confirmDelete(item)}
                     hitSlop={8}
                   >
                     <Text style={styles.deleteText}>删除</Text>

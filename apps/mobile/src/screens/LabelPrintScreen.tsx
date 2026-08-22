@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -26,6 +25,8 @@ import {
 import { buildCtPrintJob, totalLabelCount } from "../printer/labelLayout";
 import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.types";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { BackButton } from "../components/BackButton";
+import { useDialog } from "../dialog-context";
 import { yuan } from "../utils/format";
 
 type LabelPrintNav = NativeStackNavigationProp<RootStackParamList, "LabelPrint">;
@@ -106,6 +107,7 @@ function buildLabelsHtml(labels: LabelItem[], size: LabelSize, orientation: Orie
 export function LabelPrintScreen() {
   const navigation = useNavigation<LabelPrintNav>();
   const route = useRoute<LabelPrintRoute>();
+  const { notice } = useDialog();
   const { product } = route.params;
   const [size, setSize] = useState<LabelSize>(LABEL_SIZES[0]);
   const [orientation, setOrientation] = useState<Orientation>("portrait");
@@ -148,12 +150,12 @@ export function LabelPrintScreen() {
     try {
       const labels = await collectLabels();
       if (labels.length === 0) {
-        Alert.alert("请至少选择 1 个规格的份数");
+        await notice("请选择打印份数");
         return;
       }
       await Print.printAsync({ html: buildLabelsHtml(labels, size, orientation) });
     } catch (e) {
-      Alert.alert("打印失败", (e as Error).message);
+      await notice("打印失败", (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -164,7 +166,7 @@ export function LabelPrintScreen() {
     try {
       const labels = await collectLabels();
       if (labels.length === 0) {
-        Alert.alert("请至少选择 1 个规格的份数");
+        await notice("请选择打印份数");
         return;
       }
       const { uri } = await Print.printToFileAsync({
@@ -173,10 +175,10 @@ export function LabelPrintScreen() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: "application/pdf" });
       } else {
-        Alert.alert("已生成 PDF", uri);
+        await notice("已生成 PDF");
       }
     } catch (e) {
-      Alert.alert("生成 PDF 失败", (e as Error).message);
+      await notice("生成失败", (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -189,7 +191,7 @@ export function LabelPrintScreen() {
       const list = await getBondedDevices();
       setDevices(list);
     } catch (e) {
-      Alert.alert("读取蓝牙设备失败", (e as Error).message);
+      await notice("无法读取蓝牙设备", (e as Error).message);
     } finally {
       setScanning(false);
     }
@@ -199,20 +201,17 @@ export function LabelPrintScreen() {
     if (busy) return;
     setBusy(true);
     try {
-      const { port } = await connectPrinterAuto(dev.mac);
+      await connectPrinterAuto(dev.mac);
       setConnected(true);
       setBtOpen(false);
-      Alert.alert("已连接", `打印机：${dev.name}（${port}）`);
+      await notice("已连接", dev.name);
     } catch (e) {
       const msg = (e as Error).message;
       // 若是权限/位置类失败，且系统定位没开，给出更明确指引
       if (/权限|516|位置/.test(msg) && !isLocationEnabled()) {
-        Alert.alert(
-          "连接失败",
-          `${msg}\n\n检测到手机「位置/GPS」未打开——经典蓝牙(SPP)连接需要它。请下拉通知栏打开「位置」后重试。`,
-        );
+        await notice("连接失败", "请打开手机定位后重试");
       } else {
-        Alert.alert("连接失败", msg);
+        await notice("连接失败", msg);
       }
     } finally {
       setBusy(false);
@@ -229,15 +228,15 @@ export function LabelPrintScreen() {
       orientation,
     });
     if (job.labels.length === 0) {
-      Alert.alert("请至少选择 1 个规格的份数");
+      await notice("请选择打印份数");
       return;
     }
     setBusy(true);
     try {
       await printJob(job);
-      Alert.alert("已发送打印", `共 ${totalLabelCount(job)} 张标签`);
+      await notice("已发送打印", `${totalLabelCount(job)} 张`);
     } catch (e) {
-      Alert.alert("打印失败", (e as Error).message);
+      await notice("打印失败", (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -248,9 +247,7 @@ export function LabelPrintScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={styles.back}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>打印吊牌</Text>
         <Pressable onPress={fillByStock} hitSlop={8}>
           <Text style={styles.fillLink}>按库存</Text>

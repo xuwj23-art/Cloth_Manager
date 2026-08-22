@@ -20,6 +20,7 @@ import type {
   SalesStat,
 } from "@cloth-scan/shared";
 import { getMonthlySales, getSalesByDay, getSalesReport, listSales } from "../api";
+import { BackButton } from "../components/BackButton";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { yuan } from "../utils/format";
 
@@ -227,9 +228,7 @@ export function SalesScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={styles.back}>返回</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>销售记录</Text>
         <View style={styles.placeholder} />
       </View>

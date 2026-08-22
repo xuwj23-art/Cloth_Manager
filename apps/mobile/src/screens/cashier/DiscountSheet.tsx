@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { cartTotalCents } from "@cloth-scan/shared";
 import { colors, font, radius, space } from "../../theme/tokens";
@@ -31,6 +31,7 @@ export function DiscountSheet() {
 
   const [tab, setTab] = useState<Tab>("zhe");
   const [input, setInput] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const orig = totalCents || cartTotalCents(cart);
 
@@ -51,6 +52,7 @@ export function DiscountSheet() {
   function close() {
     setSheet("none");
     setInput("");
+    setError(null);
   }
 
   function clearDiscount() {
@@ -62,19 +64,19 @@ export function DiscountSheet() {
     const n = Number(input);
     if (tab === "zhe") {
       if (!Number.isFinite(n) || n <= 0 || n >= 10) {
-        Alert.alert("折扣有误", "请输入 0~10 之间的折扣，如 8.8（即 8.8 折）");
+        setError("折扣需在 0～10 之间");
         return;
       }
       const target = Math.min(orig, Math.round((orig * n) / 10));
       setOrderDiscount(Math.max(0, orig - target));
     } else {
       if (!Number.isFinite(n) || n < 0) {
-        Alert.alert("金额有误", "请输入有效的优惠后总价");
+        setError("金额有误");
         return;
       }
       const cents = Math.round(n * 100);
       if (cents >= orig) {
-        Alert.alert("无需改价", "优惠后总价需小于原价才会生效");
+        setError("需低于原价");
         return;
       }
       setOrderDiscount(Math.max(0, orig - cents));
@@ -96,6 +98,7 @@ export function DiscountSheet() {
               onPress={() => {
                 setTab("zhe");
                 setInput("");
+                setError(null);
               }}
             >
               <Text style={[styles.tabText, tab === "zhe" && styles.tabTextActive]}>打折</Text>
@@ -105,6 +108,7 @@ export function DiscountSheet() {
               onPress={() => {
                 setTab("total");
                 setInput("");
+                setError(null);
               }}
             >
               <Text style={[styles.tabText, tab === "total" && styles.tabTextActive]}>改价</Text>
@@ -119,16 +123,16 @@ export function DiscountSheet() {
               keyboardType="decimal-pad"
               autoFocus
               value={input}
-              onChangeText={setInput}
+              onChangeText={(t) => {
+                setError(null);
+                setInput(t);
+              }}
               onSubmitEditing={confirm}
             />
             <Text style={styles.unit}>{tab === "zhe" ? "折" : "元"}</Text>
           </View>
-          <Text style={cashierStyles.hint}>
-            {tab === "zhe"
-              ? `输入几折，如 8.8 = 打 8.8 折（原价 ${yuan(orig)}）`
-              : `输入优惠后的总价，需小于原价 ${yuan(orig)}`}
-          </Text>
+          <Text style={cashierStyles.hint}>原价 {yuan(orig)}</Text>
+          {error ? <Text style={styles.err}>{error}</Text> : null}
 
           <View style={styles.actions}>
             {hasDiscount ? (
@@ -180,6 +184,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   unit: { fontSize: font.display - 8, fontWeight: "800", color: colors.text },
+  err: { fontSize: font.caption, color: colors.danger, fontWeight: "700", textAlign: "center" },
   actions: { flexDirection: "row", gap: space.md },
   clearBtn: {
     flex: 1,

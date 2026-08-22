@@ -78,6 +78,20 @@ describe("UpdateProductInput", () => {
     });
     expect(parsed.success).toBe(true);
   });
+
+  it("SKU 可改颜色和尺码", () => {
+    const parsed = UpdateProductInput.safeParse({
+      skus: [
+        {
+          id: "00000000-0000-0000-0000-000000000000",
+          color: "酒红",
+          size: "M",
+          salePrice: 5900,
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
 });
 
 describe("ProductSchema", () => {

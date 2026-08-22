@@ -114,6 +114,12 @@ export class SalesReportService {
     return this.toDetail(order);
   }
 
+  /** 今日营业额与单数（店员首页展示，不含周/月/热销） */
+  async getTodayHeadline(shopId: string): Promise<{ revenue: number; orders: number }> {
+    const today = await this.windowStats(shopId, startOfToday());
+    return { revenue: today.revenue, orders: today.orders };
+  }
+
   /** 报表汇总：今日/本周/本月营业额、单数、销量 + 近 7 天热销榜 */
   async getSummary(shopId: string): Promise<SalesSummary> {
     const [today, week, month, topSkus] = await Promise.all([

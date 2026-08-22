@@ -15,7 +15,6 @@ import { unlink, writeFile } from "node:fs/promises";
 import sharp from "sharp";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
-import { Roles } from "../auth/roles.decorator";
 import { UPLOADS_DIR } from "./uploads.constants";
 
 /** 主图最长边（px）。手机直拍约 3000~4000px，压到 1280 足够清晰且体积小 */
@@ -35,9 +34,8 @@ const ALLOWED = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
 @Controller("uploads")
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UploadsController {
-  /** 图片上传仅店主使用（用于建档） */
+  /** 图片上传：建档用，店主/店员均可 */
   @Post()
-  @Roles("owner")
   @UseInterceptors(
     FileInterceptor("file", {
       storage: diskStorage({

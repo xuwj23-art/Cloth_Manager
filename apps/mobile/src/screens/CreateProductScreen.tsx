@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -32,6 +31,9 @@ import {
   type RecognizeGarmentResult,
 } from "@cloth-scan/shared";
 import { ApiError, createProduct, recognizeGarment, uploadImage } from "../api";
+import { useAuth } from "../auth-context";
+import { BackButton } from "../components/BackButton";
+import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space, touch } from "../theme/tokens";
 import { Chip } from "./create-product/Chip";
@@ -54,6 +56,9 @@ function sleep(ms: number) {
 
 export function CreateProductScreen() {
   const navigation = useNavigation<CreateProductNav>();
+  const { user } = useAuth();
+  const isOwner = user?.role === "owner";
+  const { notice } = useDialog();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<Mode>("entry");
   const [fromVision, setFromVision] = useState(false);
@@ -250,7 +255,7 @@ export function CreateProductScreen() {
     if (!photos.front || !photos.back || !photos.detail) {
       return setError("请拍完三张图");
     }
-    const cost = costPrice.trim() === "" ? 0 : toCents(costPrice);
+    const cost = !isOwner ? 0 : costPrice.trim() === "" ? 0 : toCents(costPrice);
     const sale = toCents(salePrice);
     const stock = initialStock.trim() === "" ? 0 : Number(initialStock);
 
@@ -292,16 +297,11 @@ export function CreateProductScreen() {
     setSubmitting(true);
     try {
       const product = await createProduct(parsed.data);
-      Alert.alert("建档成功", `已创建「${product.name}」，生成 ${product.skus.length} 个 SKU`, [
-        {
-          text: "好",
-          onPress: () =>
-            navigation.reset({
-              index: 1,
-              routes: [{ name: "Home" }, { name: "Products" }],
-            }),
-        },
-      ]);
+      await notice("已建档", product.name);
+      navigation.reset({
+        index: 1,
+        routes: [{ name: "Home" }, { name: "Products" }],
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -338,9 +338,7 @@ export function CreateProductScreen() {
     >
       <View style={styles.bodyWrap}>
         <View style={styles.topbar}>
-          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-            <Text style={styles.back}>返回</Text>
-          </Pressable>
+          <BackButton onPress={() => navigation.goBack()} />
           <Text style={styles.title}>商品建档</Text>
           <View style={{ width: 40 }} />
         </View>
@@ -358,17 +356,19 @@ export function CreateProductScreen() {
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>价格与库存</Text>
             <View style={styles.row}>
-              <View style={styles.flex1}>
-                <Text style={styles.fieldLabel}>进价（元）</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="decimal-pad"
-                  placeholder="选填"
-                  placeholderTextColor={colors.textMuted}
-                  value={costPrice}
-                  onChangeText={setCostPrice}
-                />
-              </View>
+              {isOwner ? (
+                <View style={styles.flex1}>
+                  <Text style={styles.fieldLabel}>进价（元）</Text>
+                  <TextInput
+                    style={styles.input}
+                    keyboardType="decimal-pad"
+                    placeholder="选填"
+                    placeholderTextColor={colors.textMuted}
+                    value={costPrice}
+                    onChangeText={setCostPrice}
+                  />
+                </View>
+              ) : null}
               <View style={styles.flex1}>
                 <Text style={styles.fieldLabel}>售价（元）</Text>
                 <TextInput

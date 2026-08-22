@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
-import { Alert, AppState, Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import type { SaleOrderDetail } from "@cloth-scan/shared";
 import { listSales } from "../api";
+import { useDialog } from "../dialog-context";
 import { yuan } from "../utils/format";
 
 /** 轮询间隔（App 在前台/后台存活时生效） */
@@ -22,21 +23,22 @@ function ensureHandler() {
   });
 }
 
-async function notifySale(o: SaleOrderDetail) {
-  const who = o.operatorName ? `（收银：${o.operatorName}）` : "";
+async function notifySale(
+  o: SaleOrderDetail,
+  notice: (title: string, message?: string) => Promise<void>,
+) {
+  const who = o.operatorName ? ` · ${o.operatorName}` : "";
   const body = `${yuan(o.totalAmount)} · ${o.itemCount} 件${who}`;
-  // 系统通知（带铃声）——前台/后台存活时都会在通知栏出现
   try {
     await Notifications.scheduleNotificationAsync({
-      content: { title: "💰 新的结账", body, sound: "default" },
+      content: { title: "新结账", body, sound: "default" },
       trigger: null,
     });
   } catch {
-    // 忽略：通知失败不影响其他逻辑
+    // 忽略
   }
-  // 前台时再弹一个应用内弹窗，确保老板第一时间看到
   if (AppState.currentState === "active") {
-    Alert.alert("💰 新的结账", body);
+    void notice("新结账", body);
   }
 }
 
@@ -47,8 +49,11 @@ async function notifySale(o: SaleOrderDetail) {
  * 局限：被系统彻底杀掉进程后无法收到（国内无可靠免费远程推送，按约定暂不做）。
  */
 export function useOwnerSaleAlerts(enabled: boolean, selfUserId: string | null) {
+  const { notice } = useDialog();
   const seen = useRef<Set<string>>(new Set());
   const inited = useRef(false);
+  const noticeRef = useRef(notice);
+  noticeRef.current = notice;
 
   useEffect(() => {
     if (!enabled) return;
@@ -92,7 +97,7 @@ export function useOwnerSaleAlerts(enabled: boolean, selfUserId: string | null) 
         // 按时间正序提醒；跳过老板本人开的单
         for (const o of fresh.reverse()) {
           if (selfUserId && o.operatorId === selfUserId) continue;
-          await notifySale(o);
+          await notifySale(o, noticeRef.current);
         }
       } catch {
         // 离线/请求失败：静默，下个周期再试
