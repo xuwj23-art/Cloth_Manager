@@ -4,17 +4,13 @@ import { barcodesForSkuIds, deleteSkusByBarcodes, upsertCatalog } from "../db/ca
 import { LAST_SYNCED_AT_KEY, getSyncMeta, setSyncMeta } from "../db/database";
 import { listPendingOps, listPendingSkuIds, markOpFailed, markOpSynced } from "../db/outbox";
 
-/** 简单联网检测：尝试访问健康接口（带超时），失败即视为离线 */
+/** 简单联网检测：健康接口带超时探活，失败/超时即视为离线 */
 export async function isOnline(timeoutMs = 3000): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await getHealth();
+    await getHealth(timeoutMs);
     return true;
   } catch {
     return false;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -62,18 +58,19 @@ export interface PushResult {
 
 /**
  * 根据错误类型决定 outbox op 的下一状态：
- * - 400/409 业务拒绝（如库存不足、幂等冲突）→ failed（不再重试）
- * - 其它 HTTP 状态（含 5xx、401/403/422 等）或网络错 → pending（下次重试）
+ * - 400/404/409/422 业务性拒绝（库存不足、SKU 已删/不存在、幂等冲突、参数错）→ failed（不再重试）
+ * - 其它 HTTP 状态（401/403/5xx 等）或网络错/超时 → pending（下次重试）
  *
- * 注意：仅 400/409 视为「确定不可重试」的业务错；其余即便属 4xx 也保留 pending，
- * 因为鉴权失败（401）、权限不足（403）等多为可恢复（重新登录/重试）场景。
+ * 注意：404 必须归 failed——离线单引用的 SKU 已被删除时，服务端返回 404，
+ * 若保留 pending 会变成每 15s 空推一次、且不出现在同步异常列表的「僵尸单」。
+ * 401/403 多为可恢复（重新登录）场景，保留 pending。
  *
- * @param status ApiError.status（数字）或 "network"（非 ApiError，视为网络故障）
+ * @param status ApiError.status（数字，0=超时）或 "network"（非 ApiError，视为网络故障）
  */
 export function classifySyncError(status: number | "network"): "failed" | "pending" {
   if (status === "network") return "pending";
-  if (status === 400 || status === 409) return "failed";
-  return "pending"; // 5xx 或其它 4xx → 重试
+  if (status === 400 || status === 404 || status === 409 || status === 422) return "failed";
+  return "pending"; // 401/403/5xx/超时(0) → 重试
 }
 
 /**

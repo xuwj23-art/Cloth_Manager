@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { AuthUser, LoginInput, RegisterInput } from "@cloth-scan/shared";
-import { apiLogin, apiMe, apiRegister, setAuthToken } from "./api";
+import { apiLogin, apiMe, apiRegister, ApiError, setAuthToken } from "./api";
 import { clearToken, loadToken, saveToken } from "./storage";
 
 interface AuthState {
@@ -33,9 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const me = await apiMe();
           setUser(me);
-        } catch {
-          setAuthToken(null);
-          await clearToken();
+        } catch (e) {
+          // 仅在服务端明确拒绝（401 token 失效/用户被删）时才登出；
+          // 断网/超时/5xx 保留本地会话，保证离线打开 App 仍可开单（离线优先）。
+          if (e instanceof ApiError && e.status === 401) {
+            setAuthToken(null);
+            await clearToken();
+          }
         }
       }
       setLoading(false);

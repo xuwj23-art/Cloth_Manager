@@ -8,6 +8,7 @@ import { useAudioPlayer } from "expo-audio";
 import { cartItemCount, cartToSaleInput, cartTotalCents } from "@cloth-scan/shared";
 import { applyLocalStockDelta, getCachedSkuByBarcode } from "../db/catalog";
 import { enqueueSale } from "../db/outbox";
+import { getDb } from "../db/database";
 import { useSync } from "../sync/sync-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space } from "../theme/tokens";
@@ -69,8 +70,8 @@ export function CashierScreen() {
   const setSheet = useCashierStore((s) => s.setSheet);
   const resetAfterCheckout = useCashierStore((s) => s.resetAfterCheckout);
 
-  // 扫码抑制：任一 Sheet 打开时不再识别（高频事件去重）
-  const sheetOpenRef = useRef(false);
+  // 同码短窗去重：摄像头对同一吊牌会连续触发多次识别
+  const lastScanRef = useRef({ code: "", at: 0 });
 
   // 扫码成功提示音
   const beep = useAudioPlayer(require("../../assets/beep.wav"));
@@ -97,21 +98,22 @@ export function CashierScreen() {
   }
 
   async function handleScanned(e: ScanResult) {
-    if (sheetOpenRef.current) return; // 已有弹卡，暂停识别
-    sheetOpenRef.current = true; // 立即上锁，避免同一画面重复触发
+    const st = useCashierStore.getState();
+    if (st.activeSheet !== "none") return; // 已有弹卡，暂停识别
+    const now = Date.now();
+    if (lastScanRef.current.code === e.data && now - lastScanRef.current.at < 1500) return;
+    lastScanRef.current = { code: e.data, at: now };
     await lookupAndPrompt(e.data);
   }
 
-  /** 手动输入提交（关闭本 Sheet 后走同一查找流程；上锁防扫码抢占） */
+  /** 手动输入提交（关闭本 Sheet 后走同一查找流程） */
   function submitManualBarcode(barcode: string) {
-    sheetOpenRef.current = true;
     void lookupAndPrompt(barcode);
   }
 
   function openDiscount() {
     const cart = useCashierStore.getState().cart;
     if (cart.length === 0) return;
-    sheetOpenRef.current = true;
     setSheet("discount");
   }
 
@@ -161,10 +163,15 @@ export function CashierScreen() {
     try {
       // 各行按原价入库；整单优惠作为订单级字段单独提交（第 2 波 Task 4）。
       const input = cartToSaleInput(cart, genOpId(), orderDiscountCents);
-      await enqueueSale(input);
-      for (const line of cart) {
-        await applyLocalStockDelta(line.skuId, -line.quantity);
-      }
+      // 入队与乐观扣库存放进同一 SQLite 事务：任一步失败整体回滚。
+      // 否则「单已入队但扣库存抛错」会弹出失败提示，用户重试生成新 opId → 双单错账。
+      const db = await getDb();
+      await db.withTransactionAsync(async () => {
+        await enqueueSale(input);
+        for (const line of cart) {
+          await applyLocalStockDelta(line.skuId, -line.quantity);
+        }
+      });
       resetAfterCheckout();
       await refreshPending();
       void syncNow();

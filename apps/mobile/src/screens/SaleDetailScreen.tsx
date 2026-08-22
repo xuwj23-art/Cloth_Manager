@@ -93,6 +93,11 @@ export function SaleDetailScreen() {
   const keptCount = draft.filter((l) => l.quantity > 0).length;
 
   async function save() {
+    // 空串/纯空白的输入按无效处理（Number("")===0 会把清空误判为 ¥0 改价）
+    if (draft.some((l) => l.quantity > 0 && l.priceStr.trim() === "")) {
+      Alert.alert("价格有误", "请检查每件商品的成交价");
+      return;
+    }
     const items = draft.map((l) => ({
       id: l.id,
       quantity: l.quantity,

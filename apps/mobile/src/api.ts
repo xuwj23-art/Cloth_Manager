@@ -61,14 +61,41 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** 默认请求超时（毫秒）：弱网下避免 fetch 长时间挂起拖死同步引擎 */
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+/** 带超时的 fetch：超时抛 ApiError(status=0)，同步引擎会归入「网络故障」重试 */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new ApiError(0, `请求超时（${Math.round(timeoutMs / 1000)}秒）`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> | undefined),
   };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, { ...init, headers }, timeoutMs);
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try {
@@ -120,8 +147,11 @@ export function apiDeleteStaff(id: string): Promise<{ ok: true }> {
 
 /* ------------------------------- 业务 ------------------------------- */
 
-export function getHealth(): Promise<{ status: string; db: string; time: string }> {
-  return request("/health");
+/** 健康检查（isOnline 探活用，可用更短超时） */
+export function getHealth(
+  timeoutMs = 5_000,
+): Promise<{ status: string; db: string; time: string }> {
+  return request("/health", undefined, timeoutMs);
 }
 
 /** 扫码匹配：根据 QR/条码获取 SKU 及所属商品 */
@@ -257,11 +287,16 @@ export async function uploadImage(localUri: string): Promise<string> {
   const headers: Record<string, string> = {};
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
-  const res = await fetch(`${API_BASE}/uploads`, {
-    method: "POST",
-    headers, // 不要手动设 Content-Type，让 fetch 自动带 multipart boundary
-    body: form,
-  });
+  // 图片上传可能较慢（弱网 + 8MB 上限），给更长超时
+  const res = await fetchWithTimeout(
+    `${API_BASE}/uploads`,
+    {
+      method: "POST",
+      headers, // 不要手动设 Content-Type，让 fetch 自动带 multipart boundary
+      body: form,
+    },
+    60_000,
+  );
   if (!res.ok) throw new Error(`上传失败 HTTP ${res.status}`);
   const data = (await res.json()) as { url: string };
   return data.url;

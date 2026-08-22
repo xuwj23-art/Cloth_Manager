@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -188,8 +188,14 @@ export function SalesScreen() {
 
   // 返回本屏时自动刷新（替代原 salesRefreshKey 机制）：
   // 从单据详情编辑/删除后返回，列表与报表会重新拉取最新数据。
+  // 首次挂载已由上面的 useEffect 触发，跳过避免双请求竞态。
+  const firstFocusRef = useRef(true);
   useFocusEffect(
     useCallback(() => {
+      if (firstFocusRef.current) {
+        firstFocusRef.current = false;
+        return;
+      }
       void load(tab, sel);
     }, [load, tab, sel]),
   );
@@ -346,7 +352,7 @@ export function SalesScreen() {
                   <BucketChart report={report} />
                 </>
               ) : null}
-              <Text style={styles.sectionTitle}>流水（最近 500 笔）</Text>
+              <Text style={styles.sectionTitle}>流水（最近 50 笔）</Text>
             </View>
           }
           ListEmptyComponent={

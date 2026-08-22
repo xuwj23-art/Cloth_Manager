@@ -11,11 +11,13 @@ export interface OutboxItem {
   syncedAt: string | null;
 }
 
-/** 把一笔销售写入待同步队列（离线也能下单） */
+/** 把一笔销售写入待同步队列（离线也能下单）。
+ *  普通INSERT而非 INSERT OR IGNORE：真发生 opId 碰撞时宁可显式报错，
+ *  也不能静默丢单（库存已扣、购物车已清、单却没了）。 */
 export async function enqueueSale(input: CreateSaleOrderInput): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `INSERT OR IGNORE INTO outbox (opId, kind, payload, status, createdAt)
+    `INSERT INTO outbox (opId, kind, payload, status, createdAt)
      VALUES (?, 'sale', ?, 'pending', ?)`,
     [input.opId, JSON.stringify(input), new Date().toISOString()],
   );
@@ -34,6 +36,10 @@ export async function markOpSynced(opId: string): Promise<void> {
     `UPDATE outbox SET status = 'synced', syncedAt = ?, error = NULL WHERE opId = ?`,
     [new Date().toISOString(), opId],
   );
+  // 顺带回收 7 天前的 synced 行（含完整 items JSON，长期运营会无限膨胀拖慢全表扫描）；
+  // failed 行按产品语义保留（同步异常列表可重试/放弃），不在此清理。
+  const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  await db.runAsync(`DELETE FROM outbox WHERE status = 'synced' AND syncedAt < ?`, [cutoff]);
 }
 
 export async function markOpFailed(opId: string, error: string): Promise<void> {

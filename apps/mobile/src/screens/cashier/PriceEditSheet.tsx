@@ -35,7 +35,7 @@ export function PriceEditSheet() {
   function confirm() {
     if (!line) return;
     const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) {
+    if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
       Alert.alert("价格有误", "请输入有效的金额");
       return;
     }
