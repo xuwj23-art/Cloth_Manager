@@ -143,9 +143,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.md,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
+    minHeight: 48,
     fontSize: font.body,
     color: colors.text,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   btn: {
     backgroundColor: colors.primary,

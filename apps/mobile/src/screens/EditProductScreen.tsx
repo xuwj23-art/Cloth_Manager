@@ -513,7 +513,9 @@ export function EditProductScreen() {
                 </View>
                 <View style={styles.skuPriceRow}>
                   <View style={styles.fieldGrow}>
-                    <Text style={styles.fieldLabel}>进价(元)</Text>
+                    <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
+                      进价(元)
+                    </Text>
                     <TextInput
                       style={styles.fieldInput}
                       keyboardType="decimal-pad"
@@ -522,7 +524,9 @@ export function EditProductScreen() {
                     />
                   </View>
                   <View style={styles.fieldGrow}>
-                    <Text style={styles.fieldLabel}>售价(元)</Text>
+                    <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
+                      售价(元)
+                    </Text>
                     <TextInput
                       style={styles.fieldInput}
                       keyboardType="decimal-pad"
@@ -531,7 +535,9 @@ export function EditProductScreen() {
                     />
                   </View>
                   <View style={styles.fieldGrow}>
-                    <Text style={styles.fieldLabel}>库存</Text>
+                    <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
+                      库存
+                    </Text>
                     <TextInput
                       style={styles.fieldInput}
                       keyboardType="number-pad"
@@ -704,19 +710,27 @@ const styles = StyleSheet.create({
   skuViewRight: { alignItems: "flex-end", gap: 2 },
   skuPrice: { fontSize: font.body, fontWeight: "800", color: colors.primary },
   skuStock: { fontSize: font.caption, color: colors.textMuted },
-  skuPriceRow: { flexDirection: "row", gap: 10, marginTop: 8 },
-  fieldGrow: { flex: 1, gap: 4 },
-  fieldLabel: { fontSize: 12, color: colors.textMuted },
+  skuPriceRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  fieldGrow: { flex: 1, minWidth: 0, gap: 4 },
+  fieldLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.textMuted,
+    includeFontPadding: false,
+  },
   fieldInput: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 8,
+    minHeight: 40,
     fontSize: font.body,
     textAlign: "center",
     backgroundColor: colors.card,
     color: colors.text,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   printBtn: {
     marginTop: 4,

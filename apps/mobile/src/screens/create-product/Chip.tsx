@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text } from "react-native";
-import { colors, font, radius, space } from "../../theme/tokens";
+import { colors, font, radius } from "../../theme/tokens";
 
 export function Chip({
   label,
@@ -16,7 +16,9 @@ export function Chip({
       style={[styles.chip, active && styles.chipActive]}
       android_ripple={{ color: colors.primarySoft, borderless: false }}
     >
-      <Text style={[styles.text, active && styles.textActive]}>{label}</Text>
+      <Text style={[styles.text, active && styles.textActive]} numberOfLines={1}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -24,8 +26,8 @@ export function Chip({
 const styles = StyleSheet.create({
   chip: {
     minHeight: 40,
-    paddingHorizontal: 14,
-    paddingVertical: space.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
@@ -37,6 +39,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  text: { color: colors.text, fontSize: font.body },
+  text: {
+    color: colors.text,
+    fontSize: font.caption,
+    includeFontPadding: false,
+  },
   textActive: { color: "#fff", fontWeight: "700" },
 });

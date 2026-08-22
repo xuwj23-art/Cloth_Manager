@@ -239,7 +239,7 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 ### 7.5 EAS / app.json 要点
 
-- **当前版本 `1.3.1`**（`app.json` `version`，Android `versionCode=5`）。
+- **当前版本 `1.3.2`**（`app.json` `version`，Android `versionCode=6`）。
 - `runtimeVersion.policy = "appVersion"`；`updates.url` 指向 Expo（owner `wesleysho`，projectId `3b8070f8-...`）。
   - ⚠️ 改 `version` 会同时改 `runtimeVersion`，旧包收不到新 runtime 的 OTA；升版后须 `expo prebuild -p android`（同步 `build.gradle` 版本 + `strings.xml` 的 runtime + 重写渠道头）→ 重打包 → 再按新 runtime `eas update`。
 - channel：`development`(devClient APK) / `preview`(APK) / `production`(AAB)。

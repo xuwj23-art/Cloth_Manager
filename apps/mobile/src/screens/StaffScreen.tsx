@@ -139,12 +139,14 @@ export function StaffScreen() {
             <TextInput
               style={styles.input}
               placeholder="姓名"
+              placeholderTextColor={colors.textMuted}
               value={name}
               onChangeText={setName}
             />
             <TextInput
               style={styles.input}
               placeholder="手机号"
+              placeholderTextColor={colors.textMuted}
               keyboardType="phone-pad"
               value={phone}
               onChangeText={setPhone}
@@ -152,6 +154,7 @@ export function StaffScreen() {
             <TextInput
               style={styles.input}
               placeholder="初始密码"
+              placeholderTextColor={colors.textMuted}
               secureTextEntry
               value={password}
               onChangeText={setPassword}
@@ -177,14 +180,14 @@ export function StaffScreen() {
         renderItem={({ item }) => (
           <View style={styles.memberRow}>
             <View style={styles.memberInfo}>
-              <Text style={styles.memberName}>
+              <Text style={styles.memberName} numberOfLines={1}>
                 {item.name}
                 <Text style={item.role === "owner" ? styles.ownerTag : styles.staffTag}>
                   {"  "}
                   {item.role === "owner" ? "店主" : "店员"}
                 </Text>
               </Text>
-              <Text style={styles.memberMeta}>
+              <Text style={styles.memberMeta} numberOfLines={2}>
                 {item.phone} · 加入 {formatDate(item.createdAt)}
               </Text>
             </View>
@@ -238,6 +241,7 @@ export function StaffScreen() {
             <TextInput
               style={styles.input}
               placeholder="新密码"
+              placeholderTextColor={colors.textMuted}
               secureTextEntry
               value={resetPwd}
               onChangeText={(t) => {
@@ -293,8 +297,13 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
     borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    minHeight: 48,
     fontSize: 15,
+    color: colors.text,
+    backgroundColor: colors.card,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   addBtn: {
     backgroundColor: "#2563eb",
@@ -321,7 +330,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#eee",
   },
-  memberInfo: { flex: 1, gap: 3 },
+  memberInfo: { flex: 1, minWidth: 0, gap: 3, paddingRight: 8 },
   rowBtns: { flexDirection: "row", alignItems: "center", gap: 6 },
   resetBtn: {
     borderWidth: 1,

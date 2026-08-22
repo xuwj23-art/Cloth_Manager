@@ -357,8 +357,15 @@ export function CreateProductScreen() {
             <Text style={styles.sectionTitle}>价格与库存</Text>
             <View style={styles.row}>
               {isOwner ? (
-                <View style={styles.flex1}>
-                  <Text style={styles.fieldLabel}>进价（元）</Text>
+                <View style={styles.priceCol}>
+                  <Text
+                    style={styles.fieldLabel}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    进价(元)
+                  </Text>
                   <TextInput
                     style={styles.input}
                     keyboardType="decimal-pad"
@@ -369,8 +376,15 @@ export function CreateProductScreen() {
                   />
                 </View>
               ) : null}
-              <View style={styles.flex1}>
-                <Text style={styles.fieldLabel}>售价（元）</Text>
+              <View style={styles.priceCol}>
+                <Text
+                  style={styles.fieldLabel}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.75}
+                >
+                  售价(元)
+                </Text>
                 <TextInput
                   style={styles.input}
                   keyboardType="decimal-pad"
@@ -380,8 +394,10 @@ export function CreateProductScreen() {
                   onChangeText={setSalePrice}
                 />
               </View>
-              <View style={[styles.flex1, { maxWidth: 88 }]}>
-                <Text style={styles.fieldLabel}>库存</Text>
+              <View style={styles.priceCol}>
+                <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
+                  库存
+                </Text>
                 <TextInput
                   style={styles.input}
                   keyboardType="number-pad"
@@ -668,7 +684,7 @@ const styles = StyleSheet.create({
   back: { color: colors.primary, fontSize: font.body, width: 40, fontWeight: "600" },
   title: { fontSize: font.title, fontWeight: "800", color: colors.text },
   scroll: { flex: 1 },
-  content: { padding: space.lg, paddingBottom: 32, gap: space.md },
+  content: { padding: space.lg, paddingBottom: 48, gap: space.md },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
@@ -677,21 +693,26 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: font.body, fontWeight: "700", color: colors.text },
   fieldLabel: {
-    fontSize: font.body,
+    fontSize: 13,
+    lineHeight: 18,
     color: colors.textMuted,
     marginTop: space.sm,
     fontWeight: "600",
+    includeFontPadding: false,
   },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 44,
     fontSize: font.body,
     color: colors.text,
     backgroundColor: colors.bg,
     marginTop: 6,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   mini: { paddingVertical: 9, marginTop: 4 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
@@ -713,8 +734,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   miniAddText: { color: colors.primary, fontSize: 22, fontWeight: "700", lineHeight: 24 },
-  row: { flexDirection: "row", gap: 10 },
+  row: { flexDirection: "row", gap: 8 },
   flex1: { flex: 1 },
+  priceCol: { flex: 1, minWidth: 0 },
   preview: {
     fontSize: font.caption,
     color: colors.primary,
