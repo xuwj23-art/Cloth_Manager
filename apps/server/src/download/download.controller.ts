@@ -1,62 +1,77 @@
-import { Controller, Get, Req, Res } from "@nestjs/common";
+import { Controller, Get, Param, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { createReadStream } from "node:fs";
 import * as QRCode from "qrcode";
-import { APK_NAME, DOWNLOAD_DIR } from "./download.constants";
-import { renderDownloadPage } from "./download-page.template";
+import { APK_NAME } from "./download.constants";
+import { DownloadApkService } from "./download-apk.service";
+import { renderDownloadPage, type DownloadPageVersion } from "./download-page.template";
 
 /**
  * APK 对外下载页（公开访问，不在 /api/v1 前缀下，见 main.ts 的 exclude）。
- * - GET /download           带二维码 + 下载按钮 + 安装说明的网页
- * - GET /download/app.apk   直接下载 APK（流式发送，几乎不占内存）
+ * - GET /download                版本列表页：生效版本大按钮 + 全部历史版本可选下载
+ * - GET /download/app.apk        下载「当前生效版本」（固定链接，二维码/书签永远指向它）
+ * - GET /download/apk/:file      下载指定版本（文件名白名单校验，防路径穿越）
  *
- * APK 文件放在 DOWNLOAD_DIR/app.apk，覆盖式更新；可选 version.txt 写版本号。
- *
- * E7：HTML 模板抽到 download-page.template.ts，本 controller 只负责
- * 收集请求时数据（文件大小/版本/QR）→ 交给模板渲染 → 以 text/html 返回。
+ * 版本发现与生效规则见 DownloadApkService（文件驱动 + current.json，无数据库）。
  */
 @Controller("download")
 export class DownloadController {
+  constructor(private readonly apks: DownloadApkService) {}
+
   @Get()
   async page(@Req() req: Request, @Res() res: Response): Promise<void> {
-    const apkPath = join(DOWNLOAD_DIR, APK_NAME);
-    const exists = existsSync(apkPath);
     const base = `${req.protocol}://${req.get("host")}`;
-    const pageUrl = `${base}/download`;
+    const versions = this.apks.listVersions();
+    const activeFile = this.apks.resolveActive()?.file ?? "";
 
-    let sizeMB = "";
-    let updated = "";
-    if (exists) {
-      const st = statSync(apkPath);
-      sizeMB = (st.size / 1024 / 1024).toFixed(1);
-      updated = new Date(st.mtime).toLocaleString("zh-CN", { hour12: false });
-    }
+    const rows: DownloadPageVersion[] = versions.map((v) => ({
+      file: v.file,
+      version: v.version ?? "未标注版本",
+      sizeMB: (v.sizeBytes / 1024 / 1024).toFixed(1),
+      updated: new Date(v.mtimeMs).toLocaleString("zh-CN", { hour12: false }),
+      note: v.note,
+      isActive: v.file === activeFile,
+    }));
 
-    let version = "";
-    const verPath = join(DOWNLOAD_DIR, "version.txt");
-    if (existsSync(verPath)) version = readFileSync(verPath, "utf8").trim();
-
-    const qr = exists ? await QRCode.toDataURL(pageUrl, { width: 320, margin: 1 }) : "";
+    const qr =
+      versions.length > 0
+        ? await QRCode.toDataURL(`${base}/download`, { width: 320, margin: 1 })
+        : "";
 
     res.set("Content-Type", "text/html; charset=utf-8");
-    res.send(renderDownloadPage({ exists, sizeMB, updated, version, qr }));
+    res.send(renderDownloadPage({ versions: rows, qr }));
   }
 
+  /** 固定链接：永远返回当前生效版本（兼容旧二维码与已分发的链接） */
   @Get(APK_NAME)
   apk(@Res() res: Response): void {
-    const apkPath = join(DOWNLOAD_DIR, APK_NAME);
-    if (!existsSync(apkPath)) {
+    const active = this.apks.resolveActive();
+    if (!active) {
       res.status(404).send("APK 尚未上传");
       return;
     }
-    const st = statSync(apkPath);
+    this.streamApk(res, active.file);
+  }
+
+  /** 指定版本下载（文件名经白名单校验，非法直接 404） */
+  @Get("apk/:file")
+  apkFile(@Param("file") file: string, @Res() res: Response): void {
+    this.streamApk(res, file);
+  }
+
+  /** 流式发送 APK（几乎不占内存）；文件不存在时 404 */
+  private streamApk(res: Response, file: string): void {
+    const s = this.apks.statFile(file);
+    if (!s) {
+      res.status(404).send("版本不存在");
+      return;
+    }
     res.set({
       "Content-Type": "application/vnd.android.package-archive",
-      "Content-Length": String(st.size),
-      "Content-Disposition": `attachment; filename="cloth-scan.apk"`,
+      "Content-Length": String(s.size),
+      "Content-Disposition": `attachment; filename="${file}"`,
       "Cache-Control": "no-cache",
     });
-    createReadStream(apkPath).pipe(res);
+    createReadStream(s.path).pipe(res);
   }
 }

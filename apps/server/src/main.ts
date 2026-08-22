@@ -15,9 +15,10 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     cors: true,
   });
-  // download 页要做对外公开链接，排除在 /api/v1 前缀外（变成 /download）
+  // download 页要做对外公开链接，排除在 /api/v1 前缀外（变成 /download、
+  // /download/app.apk、/download/apk/<版本文件名>）
   app.setGlobalPrefix(API_PREFIX.replace(/^\//, ""), {
-    exclude: ["download", "download/app.apk"],
+    exclude: ["download", "download/app.apk", "download/apk/:file"],
   });
 
   // 上传的图片以静态资源对外提供：/uploads/<filename>
