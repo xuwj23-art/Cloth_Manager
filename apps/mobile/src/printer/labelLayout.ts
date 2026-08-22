@@ -12,11 +12,6 @@ export const DEFAULT_LABEL_SIZE: LabelSizeMm = { widthMm: 60, heightMm: 40 };
 /** 打印方向：landscape=内容正排；portrait=内容旋转 90°（横版纸印出纵向阅读的标签） */
 export type LabelOrientation = "landscape" | "portrait";
 
-/** TSPL 价格用全角￥，多数热敏机的中文字库都含该字形，避免缺字 */
-function yuanLabel(cents: number): string {
-  return `￥${(cents / 100).toFixed(2)}`;
-}
-
 /**
  * 估算 drawText 文本长度（mm，沿文字阅读方向）。CTPL 默认点阵字体：
  * ASCII≈12 点/字、中文/全角≈24 点/字（scale=1），scale 为整数放大倍数。
@@ -43,13 +38,12 @@ function estimateQrModules(dataLen: number): number {
  * 把商品 + 各 SKU 打印份数，排版成一次蓝牙打印任务。
  *
  * 物理标签固定为 60×40（60mm 进纸方向）。orientation 决定内容朝向：
- *  - landscape（正排）：二维码居中靠上，SKU、价格在下方居中。
- *  - portrait（纵向）：把内容旋转 90° 印在 60×40 横版纸上——二维码在打印画布左侧
- *    （占满 40mm 高、尽量大），SKU/价格文本旋转 90° 排在右侧。打印出来后把标签
- *    转 90° 拿在手里，即是「二维码在上、SKU、价格在下」的纵向标签（40 宽 × 60 高）。
+ *  - landscape（正排）：二维码与 SKU 条码作为一组在标签内居中。
+ *  - portrait（纵向）：内容旋转 90° 印在 60×40 横版纸上——二维码在打印画布一侧，
+ *    SKU 文本旋转 90° 排在另一侧。打印出来后把标签转 90° 拿在手里，即是
+ *    「二维码在上、SKU 在下」的纵向标签（40 宽 × 60 高）。
  *
- * 注：二维码尺寸随条码长度变化，按估算值居中；首次实物试打如有偏移，可微调
- * 下方常量（portrait 文本若上下颠倒/错位，把 PORTRAIT_TEXT_ROTATE 在 90/270 之间切换）。
+ * 标签不含价格。二维码尺寸算法保持不变。
  */
 export function buildCtPrintJob(
   product: ProductWithSkus,
@@ -71,9 +65,7 @@ export function buildCtPrintJob(
 
   // 用一个待打印的条码估算二维码尺寸（同款各 SKU 条码长度相近）
   const sample =
-    product.skus.find((s) => (qtyBySku[s.id] ?? 0) > 0)?.barcode ??
-    product.skus[0]?.barcode ??
-    "";
+    product.skus.find((s) => (qtyBySku[s.id] ?? 0) > 0)?.barcode ?? product.skus[0]?.barcode ?? "";
   const modules = estimateQrModules(sample.length);
 
   if (orientation === "portrait") {
@@ -106,25 +98,29 @@ interface BuildCtx {
   wantCell: number;
 }
 
-/** 正排（横版）：二维码居中靠上，SKU、价格在下方居中 */
+/** scale=1 点阵字高约 24 点 */
+function textHeightMm(scale: number, dpi: number): number {
+  return (24 * scale) / (dpi / 25.4);
+}
+
+/** 正排（横版）：二维码 + SKU 作为一组在标签内水平、垂直居中 */
 function buildLandscape(
   product: ProductWithSkus,
   qtyBySku: Record<string, number>,
   ctx: BuildCtx & { qrXAdjustMm: number },
 ): CtPrintJob {
   const { W, H, dpi, dotsPerMm, modules, wantCell, qrXAdjustMm } = ctx;
-  // 二维码尺寸：宽度不超出标签，且给下方两行文本留约 11mm
-  const maxCell = Math.max(
-    3,
-    Math.floor((Math.min(W - 4, H - 11) * dotsPerMm) / modules),
-  );
+  // 二维码尺寸算法不变（仍按给两行文本留空的上限，避免二维码变大）
+  const maxCell = Math.max(3, Math.floor((Math.min(W - 4, H - 11) * dotsPerMm) / modules));
   const qrCell = Math.min(wantCell, maxCell);
   const qrSizeMm = (modules * qrCell) / dotsPerMm;
 
-  const qrYMm = 2;
+  const gapQrSku = 1.5;
+  const skuH = textHeightMm(1, dpi);
+  const groupH = qrSizeMm + gapQrSku + skuH;
+  const qrYMm = Math.max(1, (H - groupH) / 2);
   const qrXMm = Math.max(1, (W - qrSizeMm) / 2 + qrXAdjustMm);
-  const codeYMm = qrYMm + qrSizeMm + 1.5;
-  const priceYMm = codeYMm + 4.5;
+  const codeYMm = qrYMm + qrSizeMm + gapQrSku;
   const centerX = (w: number) => Math.max(1, (W - w) / 2);
 
   const labels: CtLabel[] = [];
@@ -132,14 +128,10 @@ function buildLandscape(
     const copies = qtyBySku[sku.id] ?? 0;
     if (copies <= 0) continue;
     const code = sku.barcode;
-    const price = yuanLabel(sku.salePrice);
     labels.push({
       qr: sku.barcode,
       copies,
-      texts: [
-        { xMm: centerX(textWidthMm(code, 1, dpi)), yMm: codeYMm, scale: 1, text: code },
-        { xMm: centerX(textWidthMm(price, 2, dpi)), yMm: priceYMm, scale: 2, text: price },
-      ],
+      texts: [{ xMm: centerX(textWidthMm(code, 1, dpi)), yMm: codeYMm, scale: 1, text: code }],
     });
   }
   return { widthMm: W, heightMm: H, dpi, qrXMm, qrYMm, qrCell, labels };
@@ -154,7 +146,7 @@ const PORTRAIT_QR_Y_ADJUST_MM = 1;
 /** portrait SKU 行水平微调（mm，沿画布 Y；正=纵向标签里往右） */
 const PORTRAIT_SKU_Y_ADJUST_MM = 2;
 
-/** portrait 整组（二维码+SKU+价格）竖直微调（mm，沿画布 X；正=纵向标签里整体上移） */
+/** portrait 整组（二维码+SKU）竖直微调（mm，沿画布 X；正=纵向标签里整体上移） */
 const PORTRAIT_GROUP_X_ADJUST_MM = 4;
 
 /**
@@ -162,10 +154,10 @@ const PORTRAIT_GROUP_X_ADJUST_MM = 4;
  *
  * 坐标说明（已据实物照片校准）：
  *  - 画布 X 轴(0..W) 对应「拿在手里的纵向标签」的上下方向：X 越大越靠上。
- *    所以「二维码在上 / SKU / 价格在下」⇒ 画布 X：price < sku < 二维码。
+ *    「二维码在上 / SKU 在下」⇒ 画布 X：sku < 二维码。
  *  - 画布 Y 轴(0..H) 对应纵向标签的左右方向；旋转文本沿 Y 方向延伸，
- *    用 (H - 文本长度)/2 在 H 内居中（之前误用 (H+L)/2 导致贴边/被切）。
- *  - 整组（二维码 + 两行文本）在 X 方向整体居中。
+ *    用 (H - 文本长度)/2 在 H 内居中。
+ *  - 整组（二维码 + SKU）在 X 方向整体居中。
  */
 function buildPortrait(
   product: ProductWithSkus,
@@ -173,23 +165,16 @@ function buildPortrait(
   ctx: BuildCtx,
 ): CtPrintJob {
   const { W, H, dpi, dotsPerMm, modules, wantCell } = ctx;
-  // 二维码尽量大：受限于画布高度 H（纵向标签的宽度），留约 4mm 边距
+  // 二维码尽量大：受限于画布高度 H（纵向标签的宽度），留约 4mm 边距；算法不变
   const maxCell = Math.max(3, Math.floor(((H - 4) * dotsPerMm) / modules));
   const qrCell = Math.min(wantCell, maxCell);
   const qrSizeMm = (modules * qrCell) / dotsPerMm;
 
-  const gapQrSku = 4; // 二维码 ↔ SKU 行间距（沿 X）
-  const gapSkuPrice = 5; // SKU ↔ 价格行间距（沿 X）
-  const groupLen = qrSizeMm + gapQrSku + gapSkuPrice;
-  // 整体居中后按微调量上移；上移上限保证二维码顶部不超出画布
-  const maxPriceX = Math.max(2, W - 1 - gapSkuPrice - gapQrSku - qrSizeMm);
-  const priceXMm = Math.min(
-    maxPriceX,
-    Math.max(2, (W - groupLen) / 2 + PORTRAIT_GROUP_X_ADJUST_MM),
-  ); // 最下（X 最小）
-  const skuXMm = priceXMm + gapSkuPrice;
-  const qrXMm = skuXMm + gapQrSku; // 最上（X 最大），二维码左下角
-  // 在 H 内居中，再按微调量整体右移；保证不超出 H
+  const gapQrSku = 4;
+  const groupLen = qrSizeMm + gapQrSku;
+  const maxSkuX = Math.max(2, W - 1 - gapQrSku - qrSizeMm);
+  const skuXMm = Math.min(maxSkuX, Math.max(2, (W - groupLen) / 2 + PORTRAIT_GROUP_X_ADJUST_MM));
+  const qrXMm = skuXMm + gapQrSku;
   const qrYMm = Math.min(
     Math.max(1, H - qrSizeMm - 1),
     Math.max(1, (H - qrSizeMm) / 2 + PORTRAIT_QR_Y_ADJUST_MM),
@@ -202,7 +187,6 @@ function buildPortrait(
     const copies = qtyBySku[sku.id] ?? 0;
     if (copies <= 0) continue;
     const code = sku.barcode;
-    const price = yuanLabel(sku.salePrice);
     labels.push({
       qr: sku.barcode,
       copies,
@@ -213,13 +197,6 @@ function buildPortrait(
           scale: 1,
           rotate: PORTRAIT_TEXT_ROTATE,
           text: code,
-        },
-        {
-          xMm: priceXMm,
-          yMm: centerY(textWidthMm(price, 1, dpi)),
-          scale: 1,
-          rotate: PORTRAIT_TEXT_ROTATE,
-          text: price,
         },
       ],
     });

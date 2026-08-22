@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,137 +12,61 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
-import { expandSkuMatrix, CreateProductInput } from "@cloth-scan/shared";
-import { createProduct, imageUrl, uploadImage } from "../api";
+import * as Haptics from "expo-haptics";
+import {
+  CreateProductInput,
+  expandSkuMatrix,
+  HOT_CATEGORY_COUNT,
+  HOT_MATERIAL_COUNT,
+  normalizeProductTitle,
+  PRESET_CATEGORIES,
+  PRESET_COLORS,
+  PRESET_MATERIALS,
+  PRESET_SIZES,
+  SYSTEM_COLORS,
+  VISION_ERROR_MESSAGES,
+  type RecognizeGarmentResult,
+} from "@cloth-scan/shared";
+import { ApiError, createProduct, recognizeGarment, uploadImage } from "../api";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { colors, font, radius, space, touch } from "../theme/tokens";
+import { Chip } from "./create-product/Chip";
+import { PhotoSlots, type PhotoKey } from "./create-product/PhotoSlots";
+import { PhotoSourceSheet } from "./create-product/PhotoSourceSheet";
+import { VisionReviewModal, type VisionDraft } from "./create-product/VisionReviewModal";
 
 type CreateProductNav = NativeStackNavigationProp<RootStackParamList, "CreateProduct">;
+type Mode = "entry" | "manual";
 
-const PRESET_COLORS = ["黑", "白", "灰", "红", "蓝", "绿", "黄", "粉", "卡其"];
-const PRESET_SIZES = ["S", "M", "L", "XL", "XXL", "均码"];
-
-/**
- * 材质（单选）。女装热门排在最前（默认两行展示），其余折叠。
- */
-const PRESET_MATERIALS = [
-  // —— 热门（默认显示）——
-  "纯棉",
-  "雪纺",
-  "牛仔",
-  "针织",
-  "真丝",
-  "羊毛",
-  "蕾丝",
-  "莫代尔",
-  "棉麻",
-  "羊绒",
-  // —— 折叠 ——
-  "亚麻",
-  "苎麻",
-  "涤纶",
-  "锦纶",
-  "氨纶",
-  "天丝",
-  "粘纤",
-  "桑蚕丝",
-  "羊羔毛",
-  "马海毛",
-  "灯芯绒",
-  "皮革",
-  "麂皮绒",
-  "毛呢",
-  "法兰绒",
-  "珊瑚绒",
-  "天鹅绒",
-  "丝绒",
-  "网纱",
-  "醋酸",
-  "冰丝",
-  "太空棉",
-  "罗纹",
-  "混纺",
-  "化纤",
-  "羽绒",
-  "皮草",
-];
-
-/**
- * 服装品类（单选）。女装热门排在最前（默认两行展示），其余折叠。
- */
-const PRESET_CATEGORIES = [
-  // —— 热门（默认显示）——
-  "连衣裙",
-  "T恤",
-  "衬衫",
-  "卫衣",
-  "半身裙",
-  "阔腿裤",
-  "牛仔裤",
-  "针织衫",
-  "毛衣",
-  "外套",
-  // —— 折叠 ——
-  "短袖",
-  "长袖",
-  "Polo衫",
-  "打底衫",
-  "吊带",
-  "背心",
-  "马甲",
-  "休闲裤",
-  "西裤",
-  "工装裤",
-  "直筒裤",
-  "小脚裤",
-  "哈伦裤",
-  "打底裤",
-  "运动裤",
-  "卫裤",
-  "短裤",
-  "五分裤",
-  "七分裤",
-  "九分裤",
-  "背带裤",
-  "风衣",
-  "大衣",
-  "西装",
-  "棉服",
-  "棉袄",
-  "羽绒服",
-  "皮衣",
-  "套装",
-  "连体裤",
-  "睡衣套装",
-  "内衣",
-  "内裤",
-  "保暖内衣",
-  "围巾",
-  "丝巾",
-  "袜子",
-];
-
-/** 默认展示的热门数量（约两行） */
-const HOT_MATERIAL_COUNT = 10;
-const HOT_CATEGORY_COUNT = 10;
-
-/** 元 → 分 */
 function toCents(yuan: string): number {
   const n = Number(yuan);
   if (!Number.isFinite(n) || n < 0) return NaN;
   return Math.round(n * 100);
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export function CreateProductScreen() {
   const navigation = useNavigation<CreateProductNav>();
-  const [name, setName] = useState("");
-  const [coverPath, setCoverPath] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const insets = useSafeAreaInsets();
+  const [mode, setMode] = useState<Mode>("entry");
+  const [fromVision, setFromVision] = useState(false);
 
-  // 快速命名：材质 + 品类（各单选，自动组合写入品名）
-  const [material, setMaterial] = useState("");
+  const [photos, setPhotos] = useState<Record<PhotoKey, string | null>>({
+    front: null,
+    back: null,
+    detail: null,
+  });
+  const [uploadingKey, setUploadingKey] = useState<PhotoKey | null>(null);
+  const [pickingKey, setPickingKey] = useState<PhotoKey | null>(null);
+
+  const [material, setMaterial] = useState("默认");
   const [category, setCategory] = useState("");
   const [extraMaterials, setExtraMaterials] = useState<string[]>([]);
   const [extraCategories, setExtraCategories] = useState<string[]>([]);
@@ -148,38 +74,12 @@ export function CreateProductScreen() {
   const [customCategory, setCustomCategory] = useState("");
   const [materialsExpanded, setMaterialsExpanded] = useState(false);
   const [categoriesExpanded, setCategoriesExpanded] = useState(false);
-  // 详细设置（品名/颜色/尺码）默认折叠：一般服装只填价格库存即可建档
-  const [detailExpanded, setDetailExpanded] = useState(false);
 
-  function selectMaterial(m: string) {
-    const next = material === m ? "" : m;
-    setMaterial(next);
-    setName(`${next}${category}`);
-  }
-  function selectCategory(c: string) {
-    const next = category === c ? "" : c;
-    setCategory(next);
-    setName(`${material}${next}`);
-  }
-  function addCustomMaterial() {
-    const v = customMaterial.trim();
-    if (!v) return;
-    if (!PRESET_MATERIALS.includes(v) && !extraMaterials.includes(v))
-      setExtraMaterials((prev) => [...prev, v]);
-    setCustomMaterial("");
-    selectMaterial(v);
-  }
-  function addCustomCategory() {
-    const v = customCategory.trim();
-    if (!v) return;
-    if (!PRESET_CATEGORIES.includes(v) && !extraCategories.includes(v))
-      setExtraCategories((prev) => [...prev, v]);
-    setCustomCategory("");
-    selectCategory(v);
-  }
+  const [name, setName] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
 
-  const [colors, setColors] = useState<string[]>([]);
-  const [sizes, setSizes] = useState<string[]>([]);
+  const [colorsSel, setColorsSel] = useState<string[]>([]);
+  const [sizes, setSizes] = useState<string[]>(["均码"]);
   const [customColor, setCustomColor] = useState("");
   const [customSize, setCustomSize] = useState("");
 
@@ -190,11 +90,35 @@ export function CreateProductScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 未填写时的默认规格：保证至少生成一个 SKU
-  const effColors = colors.length ? colors : ["默认"];
+  const [recognizing, setRecognizing] = useState(false);
+  const [overlayText, setOverlayText] = useState("正在识别正面图…");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [aiResult, setAiResult] = useState<RecognizeGarmentResult | null>(null);
+  const [visionError, setVisionError] = useState<{
+    message: string;
+    canRetry: boolean;
+  } | null>(null);
+
+  const photosFull = Boolean(photos.front && photos.back && photos.detail);
+  const effColors = colorsSel.length ? colorsSel : ["默认"];
   const effSizes = sizes.length ? sizes : ["均码"];
   const skuCount = effColors.length * effSizes.length;
-  const effName = name.trim() || (material || category ? `${material}${category}` : "未命名商品");
+
+  function composeName(nextMaterial: string, nextCategory: string) {
+    const m = nextMaterial === "默认" ? "" : nextMaterial;
+    return `${m}${nextCategory}`;
+  }
+
+  function selectMaterial(m: string) {
+    const next = material === m ? "" : m;
+    setMaterial(next);
+    if (!nameTouched) setName(composeName(next, category));
+  }
+  function selectCategory(c: string) {
+    const next = category === c ? "" : c;
+    setCategory(next);
+    if (!nameTouched) setName(composeName(material, next));
+  }
 
   function toggle(list: string[], setList: (v: string[]) => void, value: string) {
     setList(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
@@ -211,7 +135,30 @@ export function CreateProductScreen() {
     clear();
   }
 
-  async function pickImage(fromCamera: boolean) {
+  function addCustomMaterial() {
+    const v = customMaterial.trim();
+    if (!v) return;
+    if (!(PRESET_MATERIALS as readonly string[]).includes(v) && !extraMaterials.includes(v)) {
+      setExtraMaterials((prev) => [...prev, v]);
+    }
+    setCustomMaterial("");
+    selectMaterial(v);
+  }
+  function addCustomCategory() {
+    const v = customCategory.trim();
+    if (!v) return;
+    if (!(PRESET_CATEGORIES as readonly string[]).includes(v) && !extraCategories.includes(v)) {
+      setExtraCategories((prev) => [...prev, v]);
+    }
+    setCustomCategory("");
+    selectCategory(v);
+  }
+
+  function pickImage(key: PhotoKey) {
+    setPickingKey(key);
+  }
+
+  async function pickFrom(key: PhotoKey, fromCamera: boolean) {
     setError(null);
     const perm = fromCamera
       ? await ImagePicker.requestCameraPermissionsAsync()
@@ -225,25 +172,84 @@ export function CreateProductScreen() {
       : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
     if (result.canceled || !result.assets?.[0]) return;
 
-    setUploading(true);
+    setUploadingKey(key);
     try {
       const path = await uploadImage(result.assets[0].uri);
-      setCoverPath(path);
+      setPhotos((p) => ({ ...p, [key]: path }));
     } catch (e) {
       setError(`图片上传失败：${(e as Error).message}`);
     } finally {
-      setUploading(false);
+      setUploadingKey(null);
     }
   }
 
+  function goManual() {
+    setMode("manual");
+    setReviewOpen(false);
+    setVisionError(null);
+  }
+
+  async function runRecognize() {
+    if (!photos.front || !photos.back || !photos.detail) {
+      return;
+    }
+    setVisionError(null);
+    setError(null);
+    setRecognizing(true);
+    setOverlayText("正在识别正面图…");
+    const started = Date.now();
+    try {
+      const result = await recognizeGarment(photos.front);
+      setAiResult(result);
+      setReviewOpen(true);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      const err = e as ApiError;
+      const code = err.code;
+      const fatal = code === "invalid_key" || code === "quota" || code === "unsafe";
+      const message =
+        (code && code in VISION_ERROR_MESSAGES
+          ? VISION_ERROR_MESSAGES[code as keyof typeof VISION_ERROR_MESSAGES]
+          : null) ??
+        err.message ??
+        VISION_ERROR_MESSAGES.retry_exhausted;
+      setVisionError({ message, canRetry: !fatal });
+      setError(message);
+    } finally {
+      const wait = 600 - (Date.now() - started);
+      if (wait > 0) await sleep(wait);
+      setRecognizing(false);
+    }
+  }
+
+  function applyVisionDraft(draft: VisionDraft) {
+    setName(draft.name);
+    setNameTouched(Boolean(draft.name));
+    setCategory(draft.category);
+    if (
+      draft.category &&
+      !(PRESET_CATEGORIES as readonly string[]).includes(draft.category) &&
+      !extraCategories.includes(draft.category)
+    ) {
+      setExtraCategories((p) => [...p, draft.category]);
+    }
+    setColorsSel(draft.colors);
+    setFromVision(true);
+    setMode("manual");
+    setReviewOpen(false);
+  }
+
   const preview = useMemo(() => {
-    const hasSpec = colors.length > 0 || sizes.length > 0;
-    const specText = hasSpec ? `${effColors.join("/")} × ${effSizes.join("/")}` : "默认 / 均码";
-    return `「${effName}」· 将生成 ${skuCount} 个规格（${specText}）`;
-  }, [skuCount, effColors, effSizes, effName, colors.length, sizes.length]);
+    const specText = `${effColors.join("/")} × ${effSizes.join("/")}`;
+    const shown = name.trim() || composeName(material, category) || "（待填写名称）";
+    return `「${shown}」· ${skuCount} 个规格（${specText}）`;
+  }, [skuCount, effColors, effSizes, name, material, category]);
 
   async function submit() {
     setError(null);
+    if (!photos.front || !photos.back || !photos.detail) {
+      return setError("请拍完三张图");
+    }
     const cost = costPrice.trim() === "" ? 0 : toCents(costPrice);
     const sale = toCents(salePrice);
     const stock = initialStock.trim() === "" ? 0 : Number(initialStock);
@@ -251,6 +257,15 @@ export function CreateProductScreen() {
     if (Number.isNaN(sale)) return setError("请填写有效的售价");
     if (Number.isNaN(cost) || cost < 0) return setError("进价格式有误");
     if (!Number.isInteger(stock) || stock < 0) return setError("库存需为非负整数");
+
+    const autoName = name.trim() || composeName(material, category);
+    if (!autoName) {
+      return setError("请填写商品名称或选择品类");
+    }
+    const finalName = normalizeProductTitle(autoName, effColors[0] ?? "默认", category);
+    if (finalName.length < 5) {
+      return setError("请填写商品名称或选择品类");
+    }
 
     const skus = expandSkuMatrix({
       colors: effColors,
@@ -260,9 +275,13 @@ export function CreateProductScreen() {
       initialStock: stock,
     });
 
+    const images = [photos.front, photos.back, photos.detail];
     const payload = {
-      name: effName,
-      coverImage: coverPath,
+      name: finalName,
+      coverImage: photos.front,
+      images,
+      material: material || "默认",
+      categoryName: category || undefined,
       skus,
     };
     const parsed = CreateProductInput.safeParse(payload);
@@ -277,7 +296,6 @@ export function CreateProductScreen() {
         {
           text: "好",
           onPress: () =>
-            // 回到商品列表（无论从首页还是商品列表进入建档，都落在商品列表）
             navigation.reset({
               index: 1,
               routes: [{ name: "Home" }, { name: "Products" }],
@@ -291,399 +309,476 @@ export function CreateProductScreen() {
     }
   }
 
+  const materialChips = (() => {
+    const all = [...PRESET_MATERIALS, ...extraMaterials];
+    if (materialsExpanded) return all;
+    const base = [...PRESET_MATERIALS.slice(0, HOT_MATERIAL_COUNT), ...extraMaterials];
+    if (material && !base.includes(material)) base.push(material);
+    return base;
+  })();
+
+  const categoryChips = (() => {
+    const all = [...PRESET_CATEGORIES, ...extraCategories];
+    if (categoriesExpanded) return all;
+    const base = [...PRESET_CATEGORIES.slice(0, HOT_CATEGORY_COUNT), ...extraCategories];
+    if (category && !base.includes(category)) base.push(category);
+    return base;
+  })();
+
+  const colorChips = [...new Set([...PRESET_COLORS, ...SYSTEM_COLORS, ...colorsSel])];
+  const sizeChips = [...new Set(["均码", ...PRESET_SIZES.filter((s) => s !== "均码"), ...sizes])];
+
+  const saveDisabled = submitting || salePrice.trim() === "" || !photosFull;
+  const entryDisabled = !photosFull || !!uploadingKey;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()}>
-          <Text style={styles.back}>返回</Text>
-        </Pressable>
-        <Text style={styles.title}>商品建档</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      {/* 封面图 */}
-      <Text style={styles.label}>封面图</Text>
-      <View style={styles.imageRow}>
-        <View style={styles.imageBox}>
-          {uploading ? (
-            <ActivityIndicator />
-          ) : coverPath ? (
-            <Image source={{ uri: imageUrl(coverPath) }} style={styles.image} />
-          ) : (
-            <Text style={styles.imagePlaceholder}>无图</Text>
-          )}
-        </View>
-        <View style={styles.imageBtns}>
-          <Pressable style={styles.smallBtn} onPress={() => pickImage(true)}>
-            <Text style={styles.smallBtnText}>拍照</Text>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <View style={styles.bodyWrap}>
+        <View style={styles.topbar}>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+            <Text style={styles.back}>返回</Text>
           </Pressable>
-          <Pressable style={styles.smallBtn} onPress={() => pickImage(false)}>
-            <Text style={styles.smallBtnText}>从相册选</Text>
-          </Pressable>
+          <Text style={styles.title}>商品建档</Text>
+          <View style={{ width: 40 }} />
         </View>
-      </View>
 
-      {/* 价格 / 库存（必填，普通服装填这三项即可建档） */}
-      <View style={styles.row}>
-        <View style={styles.flex1}>
-          <Text style={styles.label}>进价（元）</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            value={costPrice}
-            onChangeText={setCostPrice}
-          />
-        </View>
-        <View style={styles.flex1}>
-          <Text style={styles.label}>售价（元）</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            value={salePrice}
-            onChangeText={setSalePrice}
-          />
-        </View>
-      </View>
-      <Text style={styles.label}>库存</Text>
-      <TextInput
-        style={styles.input}
-        keyboardType="number-pad"
-        placeholder="1"
-        value={initialStock}
-        onChangeText={setInitialStock}
-      />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>商品照片</Text>
+            <PhotoSlots photos={photos} uploadingKey={uploadingKey} onPressSlot={pickImage} />
+          </View>
 
-      {/* 详细设置（品名 / 颜色 / 尺码）：默认折叠 */}
-      <Pressable
-        style={[styles.detailToggle, detailExpanded && styles.detailToggleActive]}
-        onPress={() => setDetailExpanded((v) => !v)}
-      >
-        <View style={styles.detailToggleLeft}>
-          <Text style={styles.detailToggleText}>详细设置</Text>
-          <Text style={styles.detailToggleSub}>品名 / 颜色 / 尺码（选填）</Text>
-        </View>
-        <View style={styles.detailToggleRight}>
-          <Text style={styles.detailToggleAction}>{detailExpanded ? "收起" : "展开"}</Text>
-          <Text style={styles.detailToggleAction}>{detailExpanded ? "▴" : "▾"}</Text>
-        </View>
-      </Pressable>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>价格与库存</Text>
+            <View style={styles.row}>
+              <View style={styles.flex1}>
+                <Text style={styles.fieldLabel}>进价（元）</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="decimal-pad"
+                  placeholder="选填"
+                  placeholderTextColor={colors.textMuted}
+                  value={costPrice}
+                  onChangeText={setCostPrice}
+                />
+              </View>
+              <View style={styles.flex1}>
+                <Text style={styles.fieldLabel}>售价（元）</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="decimal-pad"
+                  placeholder="必填"
+                  placeholderTextColor={colors.textMuted}
+                  value={salePrice}
+                  onChangeText={setSalePrice}
+                />
+              </View>
+              <View style={[styles.flex1, { maxWidth: 88 }]}>
+                <Text style={styles.fieldLabel}>库存</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  placeholder="1"
+                  placeholderTextColor={colors.textMuted}
+                  value={initialStock}
+                  onChangeText={setInitialStock}
+                />
+              </View>
+            </View>
+          </View>
 
-      {detailExpanded ? (
-        <View style={styles.detailBody}>
-          {/* 品名 */}
-          <Text style={styles.label}>品名</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="留空将按材质+品类或「未命名商品」自动命名"
-            value={name}
-            onChangeText={setName}
-          />
-
-          {/* 快速命名：材质 + 品类，自动组合写入品名 */}
-          <Text style={styles.quickHint}>
-            快速命名：选「材质」+「品类」自动组合（上方品名仍可手动编辑）
-          </Text>
-
-          {/* 材质 */}
-          <View style={styles.pickerHeader}>
-            <Text style={styles.pickerColTitle}>材质</Text>
-            {PRESET_MATERIALS.length > HOT_MATERIAL_COUNT ? (
-              <Pressable onPress={() => setMaterialsExpanded((v) => !v)} hitSlop={8}>
-                <Text style={styles.expandLink}>{materialsExpanded ? "收起 ▴" : "展开更多 ▾"}</Text>
+          <View style={styles.card}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.sectionTitle}>材质</Text>
+              {PRESET_MATERIALS.length > HOT_MATERIAL_COUNT ? (
+                <Pressable onPress={() => setMaterialsExpanded((v) => !v)} hitSlop={8}>
+                  <Text style={styles.expand}>{materialsExpanded ? "收起" : "更多"}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <View style={styles.chips}>
+              {materialChips.map((m) => (
+                <Chip key={m} label={m} active={material === m} onPress={() => selectMaterial(m)} />
+              ))}
+            </View>
+            <View style={styles.addRow}>
+              <TextInput
+                style={[styles.input, styles.flex1, styles.mini]}
+                placeholder="自定义材质"
+                placeholderTextColor={colors.textMuted}
+                value={customMaterial}
+                onChangeText={setCustomMaterial}
+                onSubmitEditing={addCustomMaterial}
+              />
+              <Pressable style={styles.miniAdd} onPress={addCustomMaterial}>
+                <Text style={styles.miniAddText}>+</Text>
               </Pressable>
-            ) : null}
-          </View>
-          <View style={styles.chips}>
-            {(() => {
-              const all = [...PRESET_MATERIALS, ...extraMaterials];
-              if (materialsExpanded) return all;
-              const base = [...PRESET_MATERIALS.slice(0, HOT_MATERIAL_COUNT), ...extraMaterials];
-              if (material && !base.includes(material)) base.push(material);
-              return base;
-            })().map((m) => (
-              <Chip key={m} label={m} active={material === m} onPress={() => selectMaterial(m)} />
-            ))}
-          </View>
-          <View style={styles.addRow}>
-            <TextInput
-              style={[styles.input, styles.flex1, styles.miniInput]}
-              placeholder="自定义材质"
-              value={customMaterial}
-              onChangeText={setCustomMaterial}
-              onSubmitEditing={addCustomMaterial}
-            />
-            <Pressable style={styles.miniAddBtn} onPress={addCustomMaterial}>
-              <Text style={styles.addBtnText}>+</Text>
-            </Pressable>
+            </View>
+
+            <View style={styles.pickerHeader}>
+              <Text style={styles.sectionTitle}>尺码</Text>
+            </View>
+            <View style={styles.chips}>
+              {sizeChips.map((s) => (
+                <Chip
+                  key={s}
+                  label={s}
+                  active={sizes.includes(s)}
+                  onPress={() => toggle(sizes, setSizes, s)}
+                />
+              ))}
+            </View>
+            <View style={styles.addRow}>
+              <TextInput
+                style={[styles.input, styles.flex1, styles.mini]}
+                placeholder="自定义尺码"
+                placeholderTextColor={colors.textMuted}
+                value={customSize}
+                onChangeText={setCustomSize}
+                onSubmitEditing={() =>
+                  addCustom(customSize, sizes, setSizes, () => setCustomSize(""))
+                }
+              />
+              <Pressable
+                style={styles.miniAdd}
+                onPress={() => addCustom(customSize, sizes, setSizes, () => setCustomSize(""))}
+              >
+                <Text style={styles.miniAddText}>+</Text>
+              </Pressable>
+            </View>
           </View>
 
-          {/* 品类 */}
-          <View style={styles.pickerHeader}>
-            <Text style={styles.pickerColTitle}>品类</Text>
-            {PRESET_CATEGORIES.length > HOT_CATEGORY_COUNT ? (
-              <Pressable onPress={() => setCategoriesExpanded((v) => !v)} hitSlop={8}>
-                <Text style={styles.expandLink}>
-                  {categoriesExpanded ? "收起 ▴" : "展开更多 ▾"}
+          {mode === "manual" ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>名称</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="商品名称"
+                placeholderTextColor={colors.textMuted}
+                value={name}
+                onChangeText={(t) => {
+                  setNameTouched(true);
+                  setName(t);
+                }}
+                maxLength={60}
+              />
+
+              <View style={styles.pickerHeader}>
+                <Text style={styles.sectionTitle}>品类</Text>
+                {PRESET_CATEGORIES.length > HOT_CATEGORY_COUNT ? (
+                  <Pressable onPress={() => setCategoriesExpanded((v) => !v)} hitSlop={8}>
+                    <Text style={styles.expand}>{categoriesExpanded ? "收起" : "更多"}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              <View style={styles.chips}>
+                {categoryChips.map((c) => (
+                  <Chip
+                    key={c}
+                    label={c}
+                    active={category === c}
+                    onPress={() => selectCategory(c)}
+                  />
+                ))}
+              </View>
+              <View style={styles.addRow}>
+                <TextInput
+                  style={[styles.input, styles.flex1, styles.mini]}
+                  placeholder="自定义品类"
+                  placeholderTextColor={colors.textMuted}
+                  value={customCategory}
+                  onChangeText={setCustomCategory}
+                  onSubmitEditing={addCustomCategory}
+                />
+                <Pressable style={styles.miniAdd} onPress={addCustomCategory}>
+                  <Text style={styles.miniAddText}>+</Text>
+                </Pressable>
+              </View>
+
+              <Text style={[styles.sectionTitle, { marginTop: space.md }]}>颜色</Text>
+              <View style={styles.chips}>
+                {colorChips.map((c) => (
+                  <Chip
+                    key={c}
+                    label={c}
+                    active={colorsSel.includes(c)}
+                    onPress={() => toggle(colorsSel, setColorsSel, c)}
+                  />
+                ))}
+              </View>
+              <View style={styles.addRow}>
+                <TextInput
+                  style={[styles.input, styles.flex1, styles.mini]}
+                  placeholder="自定义颜色"
+                  placeholderTextColor={colors.textMuted}
+                  value={customColor}
+                  onChangeText={setCustomColor}
+                  onSubmitEditing={() =>
+                    addCustom(customColor, colorsSel, setColorsSel, () => setCustomColor(""))
+                  }
+                />
+                <Pressable
+                  style={styles.miniAdd}
+                  onPress={() =>
+                    addCustom(customColor, colorsSel, setColorsSel, () => setCustomColor(""))
+                  }
+                >
+                  <Text style={styles.miniAddText}>+</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {mode === "manual" ? <Text style={styles.preview}>{preview}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {visionError && !recognizing ? (
+            <View style={styles.visionErrBox}>
+              {visionError.canRetry ? (
+                <Pressable style={styles.retryBtn} onPress={() => void runRecognize()}>
+                  <Text style={styles.retryText}>重试识别</Text>
+                </Pressable>
+              ) : (
+                <Pressable style={styles.retryBtn} onPress={goManual}>
+                  <Text style={styles.retryText}>改用手动入库</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : null}
+        </ScrollView>
+
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          {mode === "entry" ? (
+            <View style={styles.barRow}>
+              <Pressable
+                style={[styles.primaryBtn, styles.flex1, entryDisabled && styles.btnDisabled]}
+                disabled={entryDisabled || recognizing}
+                onPress={() => void runRecognize()}
+              >
+                <Text style={[styles.primaryBtnText, entryDisabled && styles.btnDisabledText]}>
+                  AI 入库
                 </Text>
               </Pressable>
-            ) : null}
-          </View>
-          <View style={styles.chips}>
-            {(() => {
-              const all = [...PRESET_CATEGORIES, ...extraCategories];
-              if (categoriesExpanded) return all;
-              const base = [...PRESET_CATEGORIES.slice(0, HOT_CATEGORY_COUNT), ...extraCategories];
-              if (category && !base.includes(category)) base.push(category);
-              return base;
-            })().map((c) => (
-              <Chip key={c} label={c} active={category === c} onPress={() => selectCategory(c)} />
-            ))}
-          </View>
-          <View style={styles.addRow}>
-            <TextInput
-              style={[styles.input, styles.flex1, styles.miniInput]}
-              placeholder="自定义品类"
-              value={customCategory}
-              onChangeText={setCustomCategory}
-              onSubmitEditing={addCustomCategory}
-            />
-            <Pressable style={styles.miniAddBtn} onPress={addCustomCategory}>
-              <Text style={styles.addBtnText}>+</Text>
-            </Pressable>
-          </View>
-
-          {/* 颜色 */}
-          <Text style={styles.label}>颜色（可多选）</Text>
-          <View style={styles.chips}>
-            {[...new Set([...PRESET_COLORS, ...colors])].map((c) => (
-              <Chip
-                key={c}
-                label={c}
-                active={colors.includes(c)}
-                onPress={() => toggle(colors, setColors, c)}
-              />
-            ))}
-          </View>
-          <View style={styles.addRow}>
-            <TextInput
-              style={[styles.input, styles.flex1]}
-              placeholder="自定义颜色"
-              value={customColor}
-              onChangeText={setCustomColor}
-              onSubmitEditing={() =>
-                addCustom(customColor, colors, setColors, () => setCustomColor(""))
-              }
-            />
-            <Pressable
-              style={styles.addBtn}
-              onPress={() => addCustom(customColor, colors, setColors, () => setCustomColor(""))}
-            >
-              <Text style={styles.addBtnText}>添加</Text>
-            </Pressable>
-          </View>
-
-          {/* 尺码 */}
-          <Text style={styles.label}>尺码（可多选）</Text>
-          <View style={styles.chips}>
-            {[...new Set([...PRESET_SIZES, ...sizes])].map((s) => (
-              <Chip
-                key={s}
-                label={s}
-                active={sizes.includes(s)}
-                onPress={() => toggle(sizes, setSizes, s)}
-              />
-            ))}
-          </View>
-          <View style={styles.addRow}>
-            <TextInput
-              style={[styles.input, styles.flex1]}
-              placeholder="自定义尺码"
-              value={customSize}
-              onChangeText={setCustomSize}
-              onSubmitEditing={() =>
-                addCustom(customSize, sizes, setSizes, () => setCustomSize(""))
-              }
-            />
-            <Pressable
-              style={styles.addBtn}
-              onPress={() => addCustom(customSize, sizes, setSizes, () => setCustomSize(""))}
-            >
-              <Text style={styles.addBtnText}>添加</Text>
-            </Pressable>
-          </View>
+              <Pressable
+                style={[styles.secondaryBtn, styles.flex1, entryDisabled && styles.btnDisabled]}
+                disabled={entryDisabled}
+                onPress={goManual}
+              >
+                <Text style={[styles.secondaryBtnText, entryDisabled && styles.btnDisabledText]}>
+                  手动入库
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.barRow}>
+              <Pressable
+                style={[
+                  styles.secondaryBtn,
+                  { flex: 0.38 },
+                  (!photosFull || recognizing) && styles.btnDisabled,
+                ]}
+                disabled={!photosFull || recognizing}
+                onPress={() => void runRecognize()}
+              >
+                <Text
+                  style={[
+                    styles.secondaryBtnText,
+                    (!photosFull || recognizing) && styles.btnDisabledText,
+                  ]}
+                >
+                  {fromVision ? "重新识别" : "AI 入库"}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.primaryBtn, { flex: 0.62 }, saveDisabled && styles.btnDisabled]}
+                disabled={saveDisabled}
+                onPress={() => void submit()}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={[styles.primaryBtnText, saveDisabled && styles.btnDisabledText]}>
+                    确认建档
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          )}
         </View>
-      ) : null}
 
-      <Text style={styles.preview}>{preview}</Text>
-      {error && <Text style={styles.error}>{error}</Text>}
+        <Modal visible={recognizing} transparent animationType="fade">
+          <View style={styles.overlay} pointerEvents="auto">
+            <View style={styles.overlayCard}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.overlayText}>{overlayText}</Text>
+            </View>
+          </View>
+        </Modal>
 
-      <Pressable
-        style={[styles.submit, (submitting || salePrice.trim() === "") && styles.disabled]}
-        disabled={submitting || salePrice.trim() === ""}
-        onPress={submit}
-      >
-        {submitting ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.submitText}>保存建档</Text>
-        )}
-      </Pressable>
-    </ScrollView>
-  );
-}
+        <PhotoSourceSheet
+          visible={pickingKey !== null}
+          label={pickingKey === "back" ? "反面" : pickingKey === "detail" ? "细节" : "正面"}
+          onCamera={() => {
+            const key = pickingKey;
+            setPickingKey(null);
+            if (key) void pickFrom(key, true);
+          }}
+          onLibrary={() => {
+            const key = pickingKey;
+            setPickingKey(null);
+            if (key) void pickFrom(key, false);
+          }}
+          onClose={() => setPickingKey(null)}
+        />
 
-function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable style={[styles.chip, active && styles.chipActive]} onPress={onPress}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </Pressable>
+        <VisionReviewModal
+          visible={reviewOpen}
+          initial={
+            aiResult
+              ? { name: aiResult.name, category: aiResult.category, color: aiResult.color }
+              : null
+          }
+          onCancel={() => setReviewOpen(false)}
+          onConfirm={applyVisionDraft}
+        />
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  content: { padding: 16, paddingBottom: 48, gap: 6 },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  bodyWrap: { flex: 1 },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 8,
+    paddingHorizontal: space.lg,
+    paddingVertical: 14,
+    backgroundColor: colors.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  back: { color: "#2563eb", fontSize: 16, width: 40 },
-  title: { fontSize: 20, fontWeight: "800", color: "#111" },
-  label: { fontSize: 14, color: "#374151", marginTop: 12, fontWeight: "600" },
+  back: { color: colors.primary, fontSize: font.body, width: 40, fontWeight: "600" },
+  title: { fontSize: font.title, fontWeight: "800", color: colors.text },
+  scroll: { flex: 1 },
+  content: { padding: space.lg, paddingBottom: 32, gap: space.md },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: space.lg,
+    gap: 4,
+  },
+  sectionTitle: { fontSize: font.body, fontWeight: "700", color: colors.text },
+  fieldLabel: {
+    fontSize: font.body,
+    color: colors.textMuted,
+    marginTop: space.sm,
+    fontWeight: "600",
+  },
   input: {
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
+    borderColor: colors.border,
+    borderRadius: radius.md,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    marginTop: 4,
+    paddingVertical: 11,
+    fontSize: font.body,
+    color: colors.text,
+    backgroundColor: colors.bg,
+    marginTop: 6,
   },
-  imageRow: { flexDirection: "row", gap: 12, alignItems: "center", marginTop: 4 },
-  imageBox: {
-    width: 88,
-    height: 88,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    backgroundColor: "#f9fafb",
-  },
-  image: { width: "100%", height: "100%" },
-  imagePlaceholder: { color: "#9ca3af" },
-  imageBtns: { gap: 8 },
-  smallBtn: {
-    borderWidth: 1.5,
-    borderColor: "#2563eb",
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  smallBtnText: { color: "#2563eb", fontWeight: "600" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  quickHint: { fontSize: 12, color: "#9ca3af", marginTop: 8, lineHeight: 17 },
+  mini: { paddingVertical: 9, marginTop: 4 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   pickerHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 12,
+    marginTop: space.sm,
   },
-  pickerColTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#374151",
-  },
-  expandLink: { fontSize: 13, color: "#2563eb", fontWeight: "600" },
-  detailToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 18,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: "#f8fafc",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-  },
-  detailToggleActive: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#bfdbfe",
-  },
-  detailToggleLeft: { flex: 1, paddingRight: 12 },
-  detailToggleText: { fontSize: 15, fontWeight: "700", color: "#1f2937" },
-  detailToggleSub: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
-  detailToggleRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    flexShrink: 0,
-  },
-  detailToggleAction: { fontSize: 14, color: "#2563eb", fontWeight: "700" },
-  detailBody: {
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    paddingTop: 2,
-    backgroundColor: "#fcfdff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#eef2f7",
-    gap: 6,
-  },
-  miniInput: { paddingVertical: 7, fontSize: 14 },
-  miniAddBtn: {
-    backgroundColor: "#e5edff",
-    borderRadius: 10,
-    width: 42,
-    height: 40,
+  expand: { fontSize: font.caption, color: colors.primary, fontWeight: "700" },
+  addRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  miniAdd: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 4,
   },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    backgroundColor: "#fff",
-  },
-  chipActive: { backgroundColor: "#2563eb", borderColor: "#2563eb" },
-  chipText: { color: "#374151", fontSize: 15 },
-  chipTextActive: { color: "#fff", fontWeight: "700" },
-  addRow: { flexDirection: "row", gap: 8, alignItems: "flex-end" },
-  addBtn: {
-    backgroundColor: "#e5edff",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    justifyContent: "center",
-    marginTop: 4,
-    height: 42,
-  },
-  addBtnText: { color: "#2563eb", fontWeight: "700" },
-  row: { flexDirection: "row", gap: 12 },
+  miniAddText: { color: colors.primary, fontSize: 22, fontWeight: "700", lineHeight: 24 },
+  row: { flexDirection: "row", gap: 10 },
   flex1: { flex: 1 },
   preview: {
-    marginTop: 16,
-    fontSize: 14,
-    color: "#2563eb",
+    fontSize: font.caption,
+    color: colors.primary,
     fontWeight: "600",
+    paddingHorizontal: 4,
   },
-  error: { color: "#dc2626", marginTop: 8 },
-  submit: {
-    backgroundColor: "#2563eb",
-    paddingVertical: 16,
-    borderRadius: 12,
+  error: { color: colors.danger, fontSize: font.body, paddingHorizontal: 4 },
+  visionErrBox: { paddingHorizontal: 4 },
+  retryBtn: {
+    alignSelf: "flex-start",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: { color: colors.primary, fontWeight: "700", fontSize: font.body },
+  bottomBar: {
+    backgroundColor: colors.card,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    gap: 8,
+  },
+  barRow: { flexDirection: "row", gap: 10 },
+  primaryBtn: {
+    height: touch.buttonHeight,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
     alignItems: "center",
-    marginTop: 16,
+    justifyContent: "center",
   },
-  disabled: { opacity: 0.5 },
-  submitText: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  primaryBtnText: { color: "#fff", fontSize: font.body, fontWeight: "800" },
+  secondaryBtn: {
+    height: touch.buttonHeight,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.card,
+  },
+  secondaryBtnText: { color: colors.primary, fontSize: font.body, fontWeight: "700" },
+  btnDisabled: {
+    backgroundColor: "#EEF0F3",
+    borderColor: "#EEF0F3",
+    opacity: 1,
+  },
+  btnDisabledText: { color: "#9CA3AF" },
+  overlay: {
+    flex: 1,
+    backgroundColor: colors.backdrop,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  overlayCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    paddingVertical: 28,
+    paddingHorizontal: 32,
+    alignItems: "center",
+    gap: 14,
+    minWidth: 220,
+  },
+  overlayText: { fontSize: font.body, color: colors.text, fontWeight: "600" },
 });

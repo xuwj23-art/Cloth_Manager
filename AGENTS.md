@@ -127,7 +127,7 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `prisma/`   | PrismaClient 单例                                                                                                                                                             |
 | `auth/`     | 注册（需邀请码）/登录/JWT/`me`/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles`                                                                              |
-| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据                                                                                           |
+| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据、建档识图（`recognize-garment`）                                                          |
 | `sales/`    | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单                                                                                                                      |
 | `uploads/`  | 图片上传 + sharp 压缩主图/缩略图（仅 owner）                                                                                                                                  |
 | `download/` | 公开 APK 下载页 `/download`：多版本可选（`app-x.y.z.apk` 文件驱动 + `current.json` 定生效版），`app.apk` 固定链接永远指生效版，`apk/:file` 指定版本下载（文件名白名单防穿越） |
@@ -137,16 +137,16 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 枚举：`UserRole(owner|staff)`、`StockMovementType(in|out|adjust|transfer)`、`SaleOrderStatus(draft|completed|voided)`。
 
-| 模型            | 关键字段                                                        | 备注                     |
-| --------------- | --------------------------------------------------------------- | ------------------------ |
-| `Shop`          | name                                                            | 多租户根                 |
-| `User`          | shopId, phone(unique), passwordHash, role                       | 登录主体                 |
-| `Category`      | shopId, name                                                    | 当前业务少用             |
-| `Product`       | archivedAt(软归档), deletedAt(软删除), coverImage, images[]     | 一个「款」               |
-| `Sku`           | barcode(unique=QR内容), costPrice/salePrice(分), stock, version | 颜色×尺码的具体单品      |
-| `StockMovement` | type, quantity(±), opId(unique 幂等), refOrderId                | 库存唯一真相来源         |
-| `SaleOrder`     | status, totalAmount(分), opId(unique)                           | 一笔销售单               |
-| `SaleItem`      | price, cost(进价快照), subtotal                                 | 报表利润 = Σ(price−cost) |
+| 模型            | 关键字段                                                                            | 备注                                          |
+| --------------- | ----------------------------------------------------------------------------------- | --------------------------------------------- |
+| `Shop`          | name                                                                                | 多租户根                                      |
+| `User`          | shopId, phone(unique), passwordHash, role                                           | 登录主体                                      |
+| `Category`      | shopId, name                                                                        | 当前业务少用                                  |
+| `Product`       | archivedAt(软归档), deletedAt(软删除), coverImage, images[], material, categoryName | 一个「款」；材质/品类名为芯片中文，不参与 SKU |
+| `Sku`           | barcode(unique=QR内容), costPrice/salePrice(分), stock, version                     | 颜色×尺码的具体单品                           |
+| `StockMovement` | type, quantity(±), opId(unique 幂等), refOrderId                                    | 库存唯一真相来源                              |
+| `SaleOrder`     | status, totalAmount(分), opId(unique)                                               | 一笔销售单                                    |
+| `SaleItem`      | price, cost(进价快照), subtotal                                                     | 报表利润 = Σ(price−cost)                      |
 
 ### 6.3 关键业务逻辑去哪找
 
@@ -164,35 +164,39 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 | JWT 校验（回查用户存在性，删店员立即失效）                   | `auth/jwt-auth.guard.ts`                                                   |
 | 登录失败限速（15 分钟 5 次锁定）                             | `auth/auth.service.ts`                                                     |
 | 图片压缩/缩略图（30MP 输入上限，失败即拒）                   | `uploads/uploads.controller.ts`（sharp，主图1280/缩略320）                 |
+| 建档识图（百炼 Qwen VL，无密钥不挡启动）                     | `products/garment-vision.service.ts` `recognize`                           |
 
 ### 6.4 环境变量
 
-| 变量            | 必填   | 说明                                                |
-| --------------- | ------ | --------------------------------------------------- |
-| `DATABASE_URL`  | ✅     | PG 连接串（本地 docker 端口 55432）                 |
-| `JWT_SECRET`    | ✅     | 生产必须改随机长串                                  |
-| `REGISTER_CODE` | 生产✅ | 注册邀请码；**未设置=关闭注册**。本地测注册需手动加 |
-| `PORT`          | ✗      | 默认 3000                                           |
-| `DB_PASSWORD`   | 生产✅ | 仅 `docker-compose.prod.yml` 用（根目录 `.env`）    |
+| 变量                   | 必填   | 说明                                                |
+| ---------------------- | ------ | --------------------------------------------------- |
+| `DATABASE_URL`         | ✅     | PG 连接串（本地 docker 端口 55432）                 |
+| `JWT_SECRET`           | ✅     | 生产必须改随机长串                                  |
+| `REGISTER_CODE`        | 生产✅ | 注册邀请码；**未设置=关闭注册**。本地测注册需手动加 |
+| `PORT`                 | ✗      | 默认 3000                                           |
+| `DB_PASSWORD`          | 生产✅ | 仅 `docker-compose.prod.yml` 用（根目录 `.env`）    |
+| `DASHSCOPE_API_KEY`    | ✗      | 阿里云百炼。不配则「AI 入库」返回 503，服务仍启动   |
+| `GARMENT_VISION_MODEL` | ✗      | 默认 `qwen3-vl-plus`                                |
 
 ### 6.5 迁移
 
-按时间顺序：`init` → `product_archive`(archivedAt) → `add_saleitem_cost`(cost) → `product_soft_delete`(deletedAt)。
+按时间顺序：`init` → `product_archive`(archivedAt) → `add_saleitem_cost`(cost) → `product_soft_delete`(deletedAt) → `product_material_category`(material/categoryName)。
 容器启动时自动 `prisma migrate deploy && node dist/main.js`（见 `apps/server/Dockerfile`）。**改 schema 后必须新建迁移**，不要只改 schema 不生成迁移。
 
 ### 6.6 API 路由速查（除 `/download` 外都带 `/api/v1`）
 
-| 方法 路径                                                   | 角色                    |
-| ----------------------------------------------------------- | ----------------------- |
-| POST `/auth/register`（需 inviteCode）/ `/auth/login`       | 公开                    |
-| GET `/auth/me`                                              | 登录                    |
-| GET/POST/DELETE `/auth/staff`                               | owner                   |
-| POST/GET/PATCH/DELETE `/products*`、POST `/products/demo`   | owner（列表/扫码=登录） |
-| GET `/skus/by-barcode/:barcode`                             | 登录                    |
-| POST `/sales`（开单=owner+staff）、GET/PATCH/DELETE 其余    | owner                   |
-| POST `/uploads`                                             | owner                   |
-| GET `/health`                                               | 公开                    |
-| GET `/download`、`/download/app.apk`、`/download/apk/:file` | 公开（无前缀）          |
+| 方法 路径                                                   | 角色                      |
+| ----------------------------------------------------------- | ------------------------- |
+| POST `/auth/register`（需 inviteCode）/ `/auth/login`       | 公开                      |
+| GET `/auth/me`                                              | 登录                      |
+| GET/POST/DELETE `/auth/staff`                               | owner                     |
+| POST/GET/PATCH/DELETE `/products*`、POST `/products/demo`   | owner（列表/扫码=登录）   |
+| POST `/products/recognize-garment`                          | owner（识图，无密钥 503） |
+| GET `/skus/by-barcode/:barcode`                             | 登录                      |
+| POST `/sales`（开单=owner+staff）、GET/PATCH/DELETE 其余    | owner                     |
+| POST `/uploads`                                             | owner                     |
+| GET `/health`                                               | 公开                      |
+| GET `/download`、`/download/app.apk`、`/download/apk/:file` | 公开（无前缀）            |
 
 ---
 
@@ -202,15 +206,15 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 React Navigation（`@react-navigation/native` + native-stack，`src/navigation/RootNavigator.tsx`）；`AuthProvider` 决定登录态、登录后包 `SyncProvider`；列表屏用 `useFocusEffect` 在返回时刷新。
 
-| 屏幕                                                           | 职责                                   |
-| -------------------------------------------------------------- | -------------------------------------- |
-| `LoginScreen`                                                  | 登录 / 注册门店                        |
-| `HomeScreen`                                                   | 入口、今日营业额（新手引导已移除）     |
-| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗         |
-| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 建档 / 编辑下架             |
-| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）            |
-| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner） |
-| `StaffScreen`                                                  | 店员管理（owner）                      |
+| 屏幕                                                           | 职责                                                  |
+| -------------------------------------------------------------- | ----------------------------------------------------- |
+| `LoginScreen`                                                  | 登录 / 注册门店                                       |
+| `HomeScreen`                                                   | 入口、今日营业额（新手引导已移除）                    |
+| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗                        |
+| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类 |
+| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                           |
+| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                |
+| `StaffScreen`                                                  | 店员管理（owner）                                     |
 
 ### 7.2 网络 & 后端地址
 
@@ -230,7 +234,7 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 - 原生模块 `modules/ct-printer/`（Kotlin 封装厂商 jar，**仅 Android**）；Expo Go 中模块为 null → 自动降级 PDF。
 - `src/printer/ctPrinter.ts`：权限、SPP/BLE 自动连接、打印。
-- `src/printer/labelLayout.ts`：`buildCtPrintJob()` 用 mm 排版（默认 60×40mm，二维码居中 + SKU 条码 + 全角￥价格），原生按 DPI 换算，203/300dpi 通用。
+- `src/printer/labelLayout.ts`：`buildCtPrintJob()` 用 mm 排版（默认 60×40mm，二维码 + SKU 条码居中，不含价格），原生按 DPI 换算，203/300dpi 通用。
 
 ### 7.5 EAS / app.json 要点
 
@@ -245,7 +249,7 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 ## 8. 共享包 `packages/shared`
 
-前后端共用，改这里同时影响双端（注意 §2 规则 7）。导出：`API_PREFIX`、枚举（`enums.ts`）、鉴权（`auth.ts`）、商品 + `expandSkuMatrix`（`product.ts`）、库存（`inventory.ts`）、销售 DTO/响应（`sale.ts`）、购物车纯函数（`cart.ts`：`addToCart/addToCartQty/setQuantity/setLinePrice/cartToSaleInput`）。购物车与建档逻辑有 vitest 单测。
+前后端共用，改这里同时影响双端（注意 §2 规则 7）。导出：`API_PREFIX`、枚举（`enums.ts`）、鉴权（`auth.ts`）、商品 + `expandSkuMatrix`（`product.ts`）、建档芯片与识图映射（`catalog-presets.ts`：`mapGarmentVision` / `normalizeProductTitle`）、识图 DTO（`garment-vision.ts`）、库存（`inventory.ts`）、销售 DTO/响应（`sale.ts`）、购物车纯函数（`cart.ts`：`addToCart/addToCartQty/setQuantity/setLinePrice/cartToSaleInput`）。购物车与建档逻辑有 vitest 单测。
 
 ---
 

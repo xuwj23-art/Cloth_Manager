@@ -3,9 +3,6 @@
  *
  * 设计语言（UI-REFERENCES §3）：金额统一半角 `¥X.XX`（屏幕显示）；
  * 时间戳统一 `YYYY-MM-DD HH:mm`（本地时区）。
- *
- * 注意：打印标签用的全角 `￥`（TSPL 字库兼容）见 printer/labelLayout.ts 的 yuanLabel，
- * 不要与此处的 yuan 混用。
  */
 
 /** 分 → "¥123.45"（半角符号，用于屏幕显示） */

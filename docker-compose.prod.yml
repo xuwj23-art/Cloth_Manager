@@ -50,6 +50,9 @@ services:
       NODE_ENV: production
       # 日志时间戳用北京时间（报表切日已在代码内固定 UTC+8，这里只影响日志观感）
       TZ: Asia/Shanghai
+      # 建档识图（可选）。不配则 AI 入库返回 503，服务仍启动
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      GARMENT_VISION_MODEL: ${GARMENT_VISION_MODEL:-qwen3-vl-plus}
     healthcheck:
       # health 在 db 不可用时返回 503，可被 docker/监控捕获
       test:

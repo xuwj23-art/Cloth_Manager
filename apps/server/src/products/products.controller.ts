@@ -10,7 +10,7 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { CreateProductInput, UpdateProductInput } from "@cloth-scan/shared";
+import { CreateProductInput, RecognizeGarmentInput, UpdateProductInput } from "@cloth-scan/shared";
 import type { CatalogSyncResponse, ProductScope } from "@cloth-scan/shared";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -19,11 +19,15 @@ import { Roles } from "../auth/roles.decorator";
 import { CurrentUser } from "../auth/current-user.decorator";
 import type { RequestUser } from "../auth/auth.types";
 import { ProductsService } from "./products.service";
+import { GarmentVisionService } from "./garment-vision.service";
 
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProductsController {
-  constructor(private readonly products: ProductsService) {}
+  constructor(
+    private readonly products: ProductsService,
+    private readonly vision: GarmentVisionService,
+  ) {}
 
   /** 建档为店主专属（店员仅收银/查看） */
   @Post("products")
@@ -72,6 +76,18 @@ export class ProductsController {
   @Roles("owner")
   seedDemo(@CurrentUser() user: RequestUser) {
     return this.products.seedDemo(user.shopId);
+  }
+
+  /**
+   * 建档识图：只读本店已上传的本地 JPEG，转 base64 调视觉模型。
+   * 必须写在 products/:id 之前，避免被参数路由吞掉。
+   */
+  @Post("products/recognize-garment")
+  @Roles("owner")
+  recognizeGarment(
+    @Body(new ZodValidationPipe(RecognizeGarmentInput)) body: RecognizeGarmentInput,
+  ) {
+    return this.vision.recognize(body.imagePath);
   }
 
   /** 编辑商品（仅店主）：改名/改价/盘点改库存 */

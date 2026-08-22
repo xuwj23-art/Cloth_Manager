@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,11 +9,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ProductScope, ProductWithSkus } from "@cloth-scan/shared";
-import { deleteProduct, imageUrl, listProducts, thumbUrl } from "../api";
-import { ImageViewer } from "../components/ImageViewer";
+import { deleteProduct, listProducts, thumbUrl } from "../api";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { yuan } from "../utils/format";
 
@@ -25,7 +24,6 @@ export function ProductsScreen() {
   const [scope, setScope] = useState<ProductScope>("active");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,9 +37,11 @@ export function ProductsScreen() {
     }
   }, [scope]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
 
   const confirmDelete = useCallback(
     (product: ProductWithSkus) => {
@@ -126,19 +126,13 @@ export function ProductsScreen() {
                 style={styles.card}
                 onPress={() => navigation.navigate("EditProduct", { product: item })}
               >
-                <Pressable
-                  style={styles.cover}
-                  onPress={() => {
-                    const u = imageUrl(item.coverImage);
-                    if (u) setViewerUri(u);
-                  }}
-                >
+                <View style={styles.cover}>
                   {item.coverImage ? (
                     <Image source={{ uri: thumbUrl(item.coverImage) }} style={styles.coverImg} />
                   ) : (
                     <Text style={styles.coverPlaceholder}>无图</Text>
                   )}
-                </Pressable>
+                </View>
                 <View style={styles.info}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.meta}>
@@ -154,16 +148,12 @@ export function ProductsScreen() {
                   >
                     <Text style={styles.deleteText}>删除</Text>
                   </Pressable>
-                ) : (
-                  <Text style={styles.editArrow}>编辑 ›</Text>
-                )}
+                ) : null}
               </Pressable>
             );
           }}
         />
       )}
-
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }
@@ -197,7 +187,6 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: "#2563eb" },
   tabText: { fontSize: 14, color: "#6b7280", fontWeight: "600" },
   tabTextActive: { color: "#fff" },
-  editArrow: { color: "#9ca3af", fontSize: 13, alignSelf: "center" },
   deleteBtn: {
     alignSelf: "center",
     borderWidth: 1,

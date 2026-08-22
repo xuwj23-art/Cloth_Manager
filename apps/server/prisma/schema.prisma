@@ -75,6 +75,10 @@ model Product {
   categoryId String?
   coverImage String?
   images     String[]  @default([])
+  /// 材质名（芯片或自定义）。直播/建档展示用，不参与 SKU。
+  material     String?
+  /// 品类名（芯片或自定义）。与 categoryId 并存，建档页直接存中文名。
+  categoryName String?
   // 软下架/归档时间（null = 在售）。售罄自动归档，店主可手动下架/恢复。
   archivedAt DateTime?
   /// 软删除时间戳（须先 archivedAt）。删除时不删图片，保留历史账单可看图（PRD §7 规则 5）。

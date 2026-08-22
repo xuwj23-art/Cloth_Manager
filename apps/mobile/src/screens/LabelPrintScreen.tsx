@@ -68,7 +68,6 @@ function refToDataURL(
 interface LabelItem {
   qr: string;
   code: string;
-  price: string;
 }
 
 function buildLabelsHtml(labels: LabelItem[], size: LabelSize, orientation: Orientation): string {
@@ -85,12 +84,11 @@ function buildLabelsHtml(labels: LabelItem[], size: LabelSize, orientation: Orie
       }">
         <img class="qr" src="data:image/png;base64,${l.qr}"/>
         <div class="code">${escapeHtml(l.code)}</div>
-        <div class="price">${escapeHtml(l.price)}</div>
       </div>
     </div>`,
     )
     .join("");
-  // 居中竖排：大二维码（主视觉）→ SKU 条码 → 价格
+  // 居中竖排：大二维码（主视觉）→ SKU 条码
   return `<!doctype html><html><head><meta charset="utf-8"/>
   <style>
     *{box-sizing:border-box;}
@@ -100,9 +98,8 @@ function buildLabelsHtml(labels: LabelItem[], size: LabelSize, orientation: Orie
     .inner{display:flex;flex-direction:column;align-items:center;justify-content:center;
       padding:1.5mm;overflow:hidden;}
     .qr{height:64%;width:auto;aspect-ratio:1;}
-    .code{font-size:7pt;letter-spacing:0.3px;color:#222;margin-top:1mm;
-      max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .price{font-size:11pt;font-weight:800;margin-top:0.6mm;}
+    .code{font-size:7pt;letter-spacing:0.3px;color:#222;margin-top:1.2mm;
+      max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;}
   </style></head><body>${cells}</body></html>`;
 }
 
@@ -140,7 +137,6 @@ export function LabelPrintScreen() {
       const item: LabelItem = {
         qr: data,
         code: sku.barcode,
-        price: yuan(sku.salePrice),
       };
       for (let i = 0; i < q; i++) labels.push(item);
     }

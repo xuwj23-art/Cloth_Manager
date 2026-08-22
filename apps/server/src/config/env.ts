@@ -48,6 +48,21 @@ const envSchema = z.object({
 
   /** Node 环境（可选，仅信息性，不强制取值集合）。 */
   NODE_ENV: z.enum(["development", "production", "test"]).optional().default("development"),
+
+  /**
+   * 阿里云百炼 API Key（可选）。不配则建档「AI 入库」返回 503，服务仍可启动。
+   * 空字符串视为未配置。
+   */
+  DASHSCOPE_API_KEY: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() ? v.trim() : undefined)),
+
+  /** 视觉模型 id（可选，默认 qwen3-vl-plus）。以百炼当前文档为准。 */
+  GARMENT_VISION_MODEL: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() ? v.trim() : "qwen3-vl-plus")),
 });
 
 export type Env = z.infer<typeof envSchema>;

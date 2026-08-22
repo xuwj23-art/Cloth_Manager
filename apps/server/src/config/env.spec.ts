@@ -47,6 +47,17 @@ describe("config/env loadEnv", () => {
     expect(loadEnv({ ...VALID, REGISTER_CODE: "invite-xyz" }).REGISTER_CODE).toBe("invite-xyz");
   });
 
+  it("DASHSCOPE_API_KEY 可选：缺省不阻止启动", () => {
+    const env = loadEnv({ ...VALID });
+    expect(env.DASHSCOPE_API_KEY).toBeUndefined();
+    expect(env.GARMENT_VISION_MODEL).toBe("qwen3-vl-plus");
+  });
+
+  it("DASHSCOPE_API_KEY 空字符串视为未配置", () => {
+    const env = loadEnv({ ...VALID, DASHSCOPE_API_KEY: "" });
+    expect(env.DASHSCOPE_API_KEY).toBeUndefined();
+  });
+
   it("合并错误：多个字段同时错时一次列出（fail-fast 单次抛错）", () => {
     expect(() => loadEnv({})).toThrow(/DATABASE_URL[\s\S]*JWT_SECRET/);
   });

@@ -35,6 +35,10 @@ export const ProductSchema = z.object({
   categoryId: z.string().uuid().nullable(),
   coverImage: z.string().max(512).nullable(),
   images: z.array(z.string().max(512)).default([]),
+  /** 材质名（芯片或自定义，展示用；不参与 SKU） */
+  material: z.string().max(40).nullable().optional(),
+  /** 品类名（芯片或自定义，展示用；与 categoryId 并存） */
+  categoryName: z.string().max(40).nullable().optional(),
   /** 软下架/归档时间（null = 在售） */
   archivedAt: z.string().datetime().nullable().optional(),
   /** 软删除时间（null = 未删除）。已删除的商品永不复活（PRD §7 规则 5） */
@@ -84,6 +88,8 @@ export const CreateProductInput = z.object({
   categoryId: z.string().uuid().nullable().optional(),
   coverImage: z.string().max(512).nullable().optional(),
   images: z.array(z.string().max(512)).max(9).optional(),
+  material: z.string().max(40).optional(),
+  categoryName: z.string().max(40).optional(),
   skus: z.array(CreateSkuInput).min(1, "至少需要一个 SKU"),
 });
 export type CreateProductInput = z.infer<typeof CreateProductInput>;
@@ -104,6 +110,9 @@ export type UpdateSkuInput = z.infer<typeof UpdateSkuInput>;
 export const UpdateProductInput = z.object({
   name: z.string().min(1).max(80).optional(),
   coverImage: z.string().max(512).nullable().optional(),
+  images: z.array(z.string().max(512)).max(9).optional(),
+  material: z.string().max(40).nullable().optional(),
+  categoryName: z.string().max(40).nullable().optional(),
   skus: z.array(UpdateSkuInput).optional(),
 });
 export type UpdateProductInput = z.infer<typeof UpdateProductInput>;

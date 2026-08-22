@@ -80,6 +80,36 @@ describe("ProductsService.seedDemo", () => {
   });
 });
 
+describe("ProductsService.createProduct", () => {
+  it("images[0] 作为封面，并写入 material / categoryName", async () => {
+    const create = vi.fn().mockResolvedValue({ id: "p1", skus: [] });
+    const prisma = {
+      sku: { findMany: vi.fn().mockResolvedValue([]) },
+      product: { create },
+    } as unknown as PrismaService;
+    const service = new ProductsService(prisma);
+
+    await service.createProduct(SHOP, {
+      name: "酒红连衣裙",
+      images: ["/uploads/a.jpg", "/uploads/b.jpg", "/uploads/c.jpg"],
+      material: "默认",
+      categoryName: "连衣裙",
+      skus: [{ color: "酒红", size: "均码", costPrice: 0, salePrice: 5900, initialStock: 1 }],
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          coverImage: "/uploads/a.jpg",
+          images: ["/uploads/a.jpg", "/uploads/b.jpg", "/uploads/c.jpg"],
+          material: "默认",
+          categoryName: "连衣裙",
+        }),
+      }),
+    );
+  });
+});
+
 describe("ProductsService.updateProduct", () => {
   it("仅改价：更新售价、不产生库存流水、不触发归档", async () => {
     const prisma = makeUpdatePrisma({ ...baseProduct }, 5) as any;
@@ -117,6 +147,28 @@ describe("ProductsService.updateProduct", () => {
       (c: any[]) => c[0]?.data?.archivedAt instanceof Date,
     );
     expect(archiveCall).toBeTruthy();
+  });
+
+  it("传入 images 时同步封面为 images[0]，并写入材质/品类", async () => {
+    const prisma = makeUpdatePrisma({ ...baseProduct }, 5) as any;
+    const service = new ProductsService(prisma);
+
+    await service.updateProduct(SHOP, "p1", {
+      images: ["/uploads/f.jpg", "/uploads/b.jpg", "/uploads/d.jpg"],
+      material: "真丝",
+      categoryName: "连衣裙",
+    });
+
+    expect(prisma.__tx.product.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          coverImage: "/uploads/f.jpg",
+          images: { set: ["/uploads/f.jpg", "/uploads/b.jpg", "/uploads/d.jpg"] },
+          material: "真丝",
+          categoryName: "连衣裙",
+        }),
+      }),
+    );
   });
 
   it("跨门店编辑抛 NotFoundException", async () => {

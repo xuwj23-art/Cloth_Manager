@@ -71,7 +71,7 @@ export function RootNavigator() {
       <Stack.Screen
         name="EditProduct"
         component={EditProductScreen}
-        options={{ title: "编辑商品" }}
+        options={{ title: "商品详情" }}
       />
       <Stack.Screen
         name="LabelPrint"

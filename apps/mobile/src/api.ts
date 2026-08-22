@@ -12,6 +12,7 @@ import type {
   Product,
   ProductScope,
   ProductWithSkus,
+  RecognizeGarmentResult,
   RegisterInput,
   UpdateProductInput,
   SaleOrderDetail,
@@ -31,6 +32,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -99,13 +101,15 @@ async function request<T>(
   const res = await fetchWithTimeout(`${API_BASE}${path}`, { ...init, headers }, timeoutMs);
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
+    let code: string | undefined;
     try {
       const body = await res.json();
+      if (typeof body?.code === "string") code = body.code;
       if (body?.message) msg = Array.isArray(body.message) ? body.message.join("; ") : body.message;
     } catch {
       // ignore parse error
     }
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, code);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -182,6 +186,18 @@ export function createProduct(input: CreateProductInput): Promise<ProductWithSku
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+/**
+ * 建档识图（仅店主）。超时 45s，覆盖服务端最多 3 次上游重试。
+ * 失败时 ApiError.code 为 invalid_key / quota / unsafe / retry_exhausted。
+ */
+export function recognizeGarment(imagePath: string): Promise<RecognizeGarmentResult> {
+  return request(
+    "/products/recognize-garment",
+    { method: "POST", body: JSON.stringify({ imagePath }) },
+    45_000,
+  );
 }
 
 /** 商品列表（scope: active 在售 / archived 已售罄 / all 全部） */

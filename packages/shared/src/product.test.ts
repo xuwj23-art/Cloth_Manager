@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   expandSkuMatrix,
   CreateProductInput,
+  UpdateProductInput,
   shouldArchive,
   ProductSchema,
   Money,
@@ -45,6 +46,36 @@ describe("expandSkuMatrix", () => {
       initialStock: 3,
     });
     const parsed = CreateProductInput.safeParse({ name: "测试款", skus });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("CreateProductInput 可带 images / material / categoryName", () => {
+    const skus = expandSkuMatrix({
+      colors: ["酒红"],
+      sizes: ["均码"],
+      costPrice: 1000,
+      salePrice: 5900,
+      initialStock: 1,
+    });
+    const parsed = CreateProductInput.safeParse({
+      name: "酒红连衣裙",
+      images: ["/uploads/a.jpg", "/uploads/b.jpg", "/uploads/c.jpg"],
+      material: "默认",
+      categoryName: "连衣裙",
+      skus,
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
+describe("UpdateProductInput", () => {
+  it("可带 images / material / categoryName", () => {
+    const parsed = UpdateProductInput.safeParse({
+      name: "酒红连衣裙",
+      images: ["/uploads/a.jpg", "/uploads/b.jpg", "/uploads/c.jpg"],
+      material: "真丝",
+      categoryName: "连衣裙",
+    });
     expect(parsed.success).toBe(true);
   });
 });

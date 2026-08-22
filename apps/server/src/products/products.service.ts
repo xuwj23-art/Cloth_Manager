@@ -88,14 +88,19 @@ export class ProductsService {
     );
     let gi = 0;
 
+    const images = input.images ?? [];
+    const coverImage = images[0] ?? input.coverImage ?? null;
+
     try {
       return await this.prisma.product.create({
         data: {
           shopId,
           name: input.name,
           categoryId: input.categoryId ?? null,
-          coverImage: input.coverImage ?? null,
-          images: input.images ?? [],
+          coverImage,
+          images,
+          material: input.material ?? null,
+          categoryName: input.categoryName ?? null,
           skus: {
             create: input.skus.map((s) => ({
               color: s.color,
@@ -258,13 +263,20 @@ export class ProductsService {
       const freshSkus = await tx.sku.findMany({ where: { productId: id } });
       const freshById = new Map(freshSkus.map((k) => [k.id, k]));
 
-      if (input.name !== undefined || input.coverImage !== undefined) {
+      const productPatch: Prisma.ProductUpdateInput = {};
+      if (input.name !== undefined) productPatch.name = input.name;
+      if (input.images !== undefined) {
+        productPatch.images = { set: input.images };
+        productPatch.coverImage = input.images[0] ?? null;
+      } else if (input.coverImage !== undefined) {
+        productPatch.coverImage = input.coverImage;
+      }
+      if (input.material !== undefined) productPatch.material = input.material;
+      if (input.categoryName !== undefined) productPatch.categoryName = input.categoryName;
+      if (Object.keys(productPatch).length > 0) {
         await tx.product.update({
           where: { id },
-          data: {
-            ...(input.name !== undefined ? { name: input.name } : {}),
-            ...(input.coverImage !== undefined ? { coverImage: input.coverImage } : {}),
-          },
+          data: productPatch,
         });
       }
 
