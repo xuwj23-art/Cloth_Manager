@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -12,7 +13,7 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ShopMember } from "@cloth-scan/shared";
-import { apiCreateStaff, apiDeleteStaff, apiListStaff } from "../api";
+import { apiCreateStaff, apiDeleteStaff, apiListStaff, apiResetStaffPassword } from "../api";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type StaffNav = NativeStackNavigationProp<RootStackParamList, "Staff">;
@@ -33,6 +34,11 @@ export function StaffScreen() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // 重置店员密码弹层（Android 无 Alert.prompt，用 Modal + 输入框）
+  const [resetTarget, setResetTarget] = useState<ShopMember | null>(null);
+  const [resetPwd, setResetPwd] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,6 +100,25 @@ export function StaffScreen() {
         },
       ],
     );
+  };
+
+  const submitReset = async () => {
+    if (!resetTarget) return;
+    if (resetPwd.length < 6) {
+      Alert.alert("密码太短", "新密码至少 6 位");
+      return;
+    }
+    setResetting(true);
+    try {
+      await apiResetStaffPassword(resetTarget.id, resetPwd);
+      Alert.alert("已重置", `「${resetTarget.name}」的密码已更新，请告知对方新密码`);
+      setResetTarget(null);
+      setResetPwd("");
+    } catch (e) {
+      Alert.alert("重置失败", (e as Error).message);
+    } finally {
+      setResetting(false);
+    }
   };
 
   return (
@@ -168,13 +193,65 @@ export function StaffScreen() {
               </Text>
             </View>
             {item.role !== "owner" ? (
-              <Pressable style={styles.deleteBtn} onPress={() => confirmDelete(item)} hitSlop={8}>
-                <Text style={styles.deleteText}>删除</Text>
-              </Pressable>
+              <View style={styles.rowBtns}>
+                <Pressable
+                  style={styles.resetBtn}
+                  onPress={() => {
+                    setResetTarget(item);
+                    setResetPwd("");
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={styles.resetText}>重置密码</Text>
+                </Pressable>
+                <Pressable style={styles.deleteBtn} onPress={() => confirmDelete(item)} hitSlop={8}>
+                  <Text style={styles.deleteText}>删除</Text>
+                </Pressable>
+              </View>
             ) : null}
           </View>
         )}
       />
+
+      {/* 重置店员密码弹层 */}
+      <Modal
+        visible={resetTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setResetTarget(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>重置店员密码</Text>
+            <Text style={styles.modalMeta}>
+              为「{resetTarget?.name}」（{resetTarget?.phone}）设置新密码，无需原密码。
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="新密码（至少 6 位）"
+              secureTextEntry
+              value={resetPwd}
+              onChangeText={setResetPwd}
+            />
+            <View style={styles.modalBtns}>
+              <Pressable
+                style={styles.modalCancel}
+                onPress={() => setResetTarget(null)}
+                disabled={resetting}
+              >
+                <Text style={styles.modalCancelText}>取消</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalOk, resetting && styles.addBtnDisabled]}
+                onPress={submitReset}
+                disabled={resetting}
+              >
+                <Text style={styles.addText}>{resetting ? "重置中…" : "确认重置"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -230,6 +307,16 @@ const styles = StyleSheet.create({
     borderColor: "#eee",
   },
   memberInfo: { flex: 1, gap: 3 },
+  rowBtns: { flexDirection: "row", alignItems: "center", gap: 6 },
+  resetBtn: {
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    backgroundColor: "#eff6ff",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  resetText: { color: "#2563eb", fontSize: 13, fontWeight: "700" },
   deleteBtn: {
     borderWidth: 1,
     borderColor: "#fecaca",
@@ -237,11 +324,44 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    marginLeft: 8,
+    marginLeft: 4,
   },
   deleteText: { color: "#dc2626", fontSize: 13, fontWeight: "700" },
   memberName: { fontSize: 16, fontWeight: "700", color: "#111" },
   memberMeta: { fontSize: 13, color: "#6b7280" },
   ownerTag: { fontSize: 12, color: "#d97706", fontWeight: "700" },
   staffTag: { fontSize: 12, color: "#2563eb", fontWeight: "700" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 20,
+    gap: 12,
+  },
+  modalTitle: { fontSize: 17, fontWeight: "800", color: "#111" },
+  modalMeta: { fontSize: 13, color: "#6b7280" },
+  modalBtns: { flexDirection: "row", gap: 10, marginTop: 2 },
+  modalCancel: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  modalCancelText: { color: "#6b7280", fontSize: 15, fontWeight: "700" },
+  modalOk: {
+    flex: 1,
+    backgroundColor: "#2563eb",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
 });

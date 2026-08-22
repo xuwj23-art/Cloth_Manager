@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   AuthUser,
   CatalogSyncResponse,
+  ChangePasswordInput,
   CreateProductInput,
   CreateSaleOrderInput,
   CreateStaffInput,
@@ -143,6 +144,22 @@ export function apiCreateStaff(input: CreateStaffInput): Promise<AuthResponse> {
 /** 删除店员账号（仅店主） */
 export function apiDeleteStaff(id: string): Promise<{ ok: true }> {
   return request(`/auth/staff/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** 修改自己的密码（登录即可，需原密码） */
+export function apiChangePassword(input: ChangePasswordInput): Promise<{ ok: true }> {
+  return request("/auth/password", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+/** 重置店员密码（仅店主，无需原密码） */
+export function apiResetStaffPassword(id: string, newPassword: string): Promise<{ ok: true }> {
+  return request(`/auth/staff/${encodeURIComponent(id)}/password`, {
+    method: "PATCH",
+    body: JSON.stringify({ newPassword }),
+  });
 }
 
 /* ------------------------------- 业务 ------------------------------- */

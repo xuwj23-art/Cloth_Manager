@@ -128,6 +128,10 @@ export function HomeScreen() {
             {pendingCount > 0 ? ` · ${pendingCount} 笔待同步` : " · 已全部同步"}
           </Text>
         </View>
+
+        <Pressable style={styles.linkBtn} onPress={() => navigation.navigate("ChangePassword")}>
+          <Text style={styles.linkText}>修改密码</Text>
+        </Pressable>
       </View>
     </View>
   );

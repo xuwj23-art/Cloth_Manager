@@ -1,6 +1,7 @@
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { ProductWithSkus } from "@cloth-scan/shared";
 import { CashierScreen } from "../screens/CashierScreen";
+import { ChangePasswordScreen } from "../screens/ChangePasswordScreen";
 import { CreateProductScreen } from "../screens/CreateProductScreen";
 import { EditProductScreen } from "../screens/EditProductScreen";
 import { HomeScreen } from "../screens/HomeScreen";
@@ -19,6 +20,7 @@ import { SyncErrorsScreen } from "../screens/SyncErrorsScreen";
 export type RootStackParamList = {
   Home: undefined;
   Cashier: undefined;
+  ChangePassword: undefined;
   Products: { scope?: "active" | "archived" } | undefined;
   CreateProduct: undefined;
   EditProduct: { product: ProductWithSkus };
@@ -55,6 +57,11 @@ export function RootNavigator() {
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen name="Home" component={HomeScreen} options={{ title: "首页" }} />
       <Stack.Screen name="Cashier" component={CashierScreen} options={{ title: "扫码收银" }} />
+      <Stack.Screen
+        name="ChangePassword"
+        component={ChangePasswordScreen}
+        options={{ title: "修改密码" }}
+      />
       <Stack.Screen name="Products" component={ProductsScreen} options={{ title: "商品列表" }} />
       <Stack.Screen
         name="CreateProduct"
