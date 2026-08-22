@@ -6,6 +6,13 @@ services:
     image: postgres:16-alpine
     container_name: cloth_scan_db
     restart: unless-stopped
+    # 2G 小机：限制日志与内存，防止日志无限增长塞满磁盘拖垮数据库
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       POSTGRES_USER: cloth
       POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
@@ -24,6 +31,12 @@ services:
       dockerfile: apps/server/Dockerfile
     container_name: cloth_scan_server
     restart: unless-stopped
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       db:
         condition: service_healthy
@@ -33,6 +46,21 @@ services:
       # 注册邀请码：未设置则关闭注册。把它告诉信任的人才能注册门店。
       REGISTER_CODE: ${REGISTER_CODE:?请在 .env 设置 REGISTER_CODE}
       PORT: "3000"
+      # 生产标记：seed.ts 据此拒绝在生产库执行（否则容器内 ts-node 可造出弱口令账号）
+      NODE_ENV: production
+      # 日志时间戳用北京时间（报表切日已在代码内固定 UTC+8，这里只影响日志观感）
+      TZ: Asia/Shanghai
+    healthcheck:
+      # health 在 db 不可用时返回 503，可被 docker/监控捕获
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://localhost:3000/api/v1/health'').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     ports:
       - "3000:3000"
     volumes:

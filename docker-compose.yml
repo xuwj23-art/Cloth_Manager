@@ -7,9 +7,10 @@ services:
       POSTGRES_USER: cloth
       POSTGRES_PASSWORD: cloth
       POSTGRES_DB: cloth_scan
-    # 宿主机用 55432，避开 Windows 重启后 Hyper-V/WSL 动态保留的 5341-5440 端口段
+    # 宿主机用 55432，避开 Windows 重启后 Hyper-V/WSL 动态保留的 5341-5440 端口段；
+    # 只绑定 127.0.0.1，防止本文件被误跑到服务器上时把弱密码 PG 暴露到公网
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - cloth_scan_pgdata:/var/lib/postgresql/data
 

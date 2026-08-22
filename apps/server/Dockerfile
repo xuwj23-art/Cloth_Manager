@@ -18,11 +18,17 @@ WORKDIR /app
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN pnpm config set registry "$NPM_REGISTRY"
 
-# 拷贝整个仓库（node_modules / .git 等由 .dockerignore 排除）
-COPY . .
-
-# 只安装 server 及其依赖(shared)，跳过体积巨大的 mobile，省内存省时间
+# 先只拷贝清单文件安装依赖：源码改动不再使依赖层缓存失效，
+# 2G 内存服务器每次部署可省去 3~8 分钟的全量 pnpm install。
+# mobile 的 package.json 也要拷（frozen-lockfile 校验需要全部 workspace 清单）。
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/server/package.json apps/server/
+COPY apps/mobile/package.json apps/mobile/
+COPY packages/shared/package.json packages/shared/
 RUN pnpm install --frozen-lockfile --filter "@cloth-scan/server..."
+
+# 拷贝其余源码（node_modules / .git 等由 .dockerignore 排除）
+COPY . .
 
 # 构建共享包 -> 生成 Prisma Client -> 编译后端
 RUN pnpm --filter "@cloth-scan/shared" build \

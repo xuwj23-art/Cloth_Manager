@@ -33,7 +33,10 @@ project_name: "cloth_scan"
 # When using multiple language servers, the first language server that supports a given file will be used for that file.
 # The first language server is the default language and the respective language server will be used as a fallback.
 # Note that when using the JetBrains backend, language servers are not used and this list is correspondingly ignored.
-language_servers:
+# 注：此键写作 languages（而非新版 serena 的 language_servers）以兼容本机已装的
+# serena 1.6.1（旧版只认 languages，遇到 language_servers 会 KeyError 崩溃；
+# 新版对 languages 有自动重命名兼容，两个版本都能读）。
+languages:
   - typescript
 
 # the encoding used by text files in the project

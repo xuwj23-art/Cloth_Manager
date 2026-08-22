@@ -86,14 +86,14 @@ pnpm --filter @cloth-scan/mobile start
 
 ## 常用命令
 
-| 命令 | 作用 |
-|------|------|
-| `pnpm install` | 安装依赖 |
-| `pnpm --filter @cloth-scan/shared build` | 构建共享包 |
-| `pnpm --filter @cloth-scan/server dev` | 启动后端（热更新） |
-| `pnpm --filter @cloth-scan/server prisma:studio` | 可视化查看数据库 |
-| `pnpm --filter @cloth-scan/mobile start` | 启动手机 App |
-| `pnpm --filter @cloth-scan/shared test` | 跑共享包单元测试 |
+| 命令                                             | 作用               |
+| ------------------------------------------------ | ------------------ |
+| `pnpm install`                                   | 安装依赖           |
+| `pnpm --filter @cloth-scan/shared build`         | 构建共享包         |
+| `pnpm --filter @cloth-scan/server dev`           | 启动后端（热更新） |
+| `pnpm --filter @cloth-scan/server prisma:studio` | 可视化查看数据库   |
+| `pnpm --filter @cloth-scan/mobile start`         | 启动手机 App       |
+| `pnpm --filter @cloth-scan/shared test`          | 跑共享包单元测试   |
 
 ---
 
@@ -106,9 +106,10 @@ pnpm --filter @cloth-scan/mobile start
 - ✅ 蓝牙标签打印（驰腾 X1 / CTPL，本地原生模块，Expo Go 降级 PDF）
 - ✅ 部署：阿里云 Docker 生产环境、EAS OTA 热更新、本地 APK 打包、`/download` 下载页
 
-详细进度见 [`docs/进度记录.md`](docs/进度记录.md)。
+详细进度见 [`docs/archive/进度记录.md`](docs/archive/进度记录.md)。
 
 ## 后续可选方向
+
 - HTTPS / 域名、对象存储（OSS）、CI/CD
 - 大库存找货能力（搜索 / 扫码找货 / 入库时间筛选，已设计待开发）
 - 应用商店上架

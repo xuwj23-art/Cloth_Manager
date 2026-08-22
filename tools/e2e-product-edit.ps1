@@ -16,8 +16,8 @@ function Get_($path, $token) {
   return Invoke-RestMethod -Method Get -Uri "$base$path" -Headers $headers
 }
 
-# 1. 注册店主
-$reg = Post "/auth/register" @{ phone = $phone; password = "pass1234"; name = "Owner"; shopName = "Shop" } $null
+# 1. 注册店主（需与 apps/server/.env 的 REGISTER_CODE 一致）
+$reg = Post "/auth/register" @{ phone = $phone; password = "pass1234"; name = "Owner"; shopName = "Shop"; inviteCode = "dev-invite-code" } $null
 $token = $reg.token
 Write-Host "1. register OK, role=$($reg.user.role)"
 

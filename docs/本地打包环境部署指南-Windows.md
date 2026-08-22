@@ -8,20 +8,22 @@
 
 ## 0. 三种更新方式怎么选（重要）
 
-| 改动类型 | 用什么 | 耗时 | 要重装吗 |
-|---|---|---|---|
-| **JS / 界面 / 业务逻辑**（占绝大多数） | `eas update`（OTA 热更新） | 几十秒 | 否，手机重开 App 即可 |
-| **原生改动**（权限、插件、原生模块、targetSdk 等） | 本地 `pnpm build:android` + 局域网下载 | 增量约 1–2 分钟 | 是，需重新下载安装 |
-| 需要 Expo 云端签名/分发（备用） | `eas build -p android --profile preview` | 要排队 | 是 |
+| 改动类型                                           | 用什么                                   | 耗时            | 要重装吗              |
+| -------------------------------------------------- | ---------------------------------------- | --------------- | --------------------- |
+| **JS / 界面 / 业务逻辑**（占绝大多数）             | `eas update`（OTA 热更新）               | 几十秒          | 否，手机重开 App 即可 |
+| **原生改动**（权限、插件、原生模块、targetSdk 等） | 本地 `pnpm build:android` + 局域网下载   | 增量约 1–2 分钟 | 是，需重新下载安装    |
+| 需要 Expo 云端签名/分发（备用）                    | `eas build -p android --profile preview` | 要排队          | 是                    |
 
 **结论**：平时改 JS 走 OTA；只有动了原生才本地打包。本文档讲的就是“原生改动 → 本地打包 → 局域网装机”。
 
 > ⚠️ **OTA 能生效的前提：APK 必须嵌入了 `preview` 频道。**
 > 本地 `gradlew` 打的包默认**不带频道**，会导致 `eas update --channel preview` 永远收不到（表现：关掉重开 App 仍是旧界面）。
 > 已修复：`app.json` 的 `updates.requestHeaders` 写死了 `{"expo-channel-name":"preview"}`。**改了这个配置后，必须 `npx expo prebuild -p android --no-install` 再打包**，频道才会写进 `AndroidManifest.xml`。验证：
+>
 > ```powershell
 > Select-String -Path android\app\src\main\AndroidManifest.xml -Pattern "expo-channel-name"
 > ```
+>
 > 看到 `{"expo-channel-name":"preview"}` 即 OK。装上这个包后，以后的 JS 改动才能真正靠 OTA 更新。
 
 ---
@@ -37,6 +39,7 @@
   - **CMake 3.22.1**（新架构编译必需）
 
 > 重装环境时补 NDK/CMake 的命令：
+>
 > ```powershell
 > & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "ndk;27.1.12297006" "cmake;3.22.1"
 > ```
@@ -178,22 +181,33 @@ mkdir -p /opt/Cloth_Manager/apk
 
 **每次更新（本地打好包后）**
 
+APK 采用**多版本留存**：每个版本用带版本号的文件名上传，下载页 `/download` 会列出全部版本可选下载，`/download/app.apk` 固定链接永远指向「当前生效版本」。
+
 1. 把 APK 传到服务器。**⚠️ 这条要在「你自己的 Windows 电脑」的 PowerShell 里运行，不是在 SSH 连进服务器的那个窗口里**（因为 APK 在你电脑的 `E:` 盘）。提示符是 `PS E:\...>` 才对；`root@iZ...#` 是服务器，跑这条会失败。
 
 ```powershell
-scp "E:\Project\cloth_scan\apps\mobile\android\app\build\outputs\apk\release\app-release.apk" root@39.108.186.58:/opt/Cloth_Manager/apk/app.apk
+# 注意目标文件名带版本号（与 app.json 的 version 保持一致），如 1.2.1：
+scp "E:\Project\cloth_scan\apps\mobile\android\app\build\outputs\apk\release\app-release.apk" root@39.108.186.58:/opt/Cloth_Manager/apk/app-1.2.1.apk
 ```
 
 > 目标格式是 `root@公网IP:路径`——**不要**写成 `root@http://...` 或加 `:3000`（那是 App 的 HTTP 端口，跟 scp/SSH 的 22 端口无关）。
 > 若提示目录不存在，先在服务器上 `mkdir -p /opt/Cloth_Manager/apk`。
 
-2. （可选）写个版本号，会显示在下载页上：
+2. （可选，推荐）在服务器上写 `current.json`，指定生效版本与更新说明（下载页会显示）：
 
 ```bash
-echo "1.0.0" > /opt/Cloth_Manager/apk/version.txt
+cat > /opt/Cloth_Manager/apk/current.json <<'EOF'
+{
+  "active": "app-1.2.1.apk",
+  "notes": { "app-1.2.1.apk": "修复扫码/离线登录/重复删单", "app-1.2.0.apk": "试运行首发版" }
+}
+EOF
 ```
 
-3. 别人访问下载页（带二维码 + 下载按钮 + 安装说明）。本项目的固定地址：
+> 不写 `current.json` 或不写 `active`：自动把**版本号最高**的包当生效版本。
+> **回滚**：把 `active` 改回旧版本文件名即可，`/download/app.apk` 与下载页大按钮立即切回旧版。
+
+3. 别人访问下载页（带二维码 + 下载按钮 + 安装说明 + 全部版本列表）。本项目的固定地址：
 
 ```
 http://39.108.186.58:3000/download
@@ -203,19 +217,20 @@ http://39.108.186.58:3000/download
 > 别用私网 IP（`10.x` / `172.16~31.x` / `192.168.x` 开头的都是私有，外网打不开）。
 > 前提：阿里云**安全组**已放行 `3000/tcp`（App 能正常连服务器即说明已放行）。
 
-> - 文件名固定 `app.apk`，覆盖式更新，永远只保留最新一个，不占额外硬盘。
+> - 每个版本的包都留在服务器上（约 60–80MB/个），下载页可任选版本安装，出问题可装回旧版。
+> - 旧式的覆盖式 `app.apk` 仍兼容：目录里没有 `app-x.y.z.apk` 时它就是生效版本。
 > - 下载快慢取决于服务器公网带宽（入门带宽 1–3Mbps，60MB 约 2–8 分钟），不影响服务器稳定。
 > - 从「云端 EAS 版」换到「本地版」需先卸载旧 App（签名不同）；本地版之间可直接覆盖。
 
 ### scp 上传排错速查
 
-| 报错 / 现象 | 原因 | 解决 |
-|---|---|---|
-| `ssh: Could not resolve hostname http` | 目标写成了 `root@http://...` | 去掉 `http://`，只留 `root@39.108.186.58:路径` |
-| 目标里带了 `:3000` 连不上 | 把 App 的 HTTP 端口当成了 SSH 端口 | scp/SSH 走 22，不要写 `:3000` |
-| 在 `root@iZ...#` 下跑 scp 失败、找不到 `E:\...` | **跑在服务器上了**；服务器没有 `E:` 盘 | 到本机 PowerShell（`PS E:\...>`）再跑 |
-| `Permission denied (publickey)` | 服务器只认密钥、没配本机公钥 | 按上面「配置 SSH 免密」加公钥 |
-| 仍提示输入 passphrase | 密钥生成时带了密码短语 | 用 `cmd /c '...-N ""'` 重新生成无密码密钥 |
+| 报错 / 现象                                     | 原因                                   | 解决                                           |
+| ----------------------------------------------- | -------------------------------------- | ---------------------------------------------- |
+| `ssh: Could not resolve hostname http`          | 目标写成了 `root@http://...`           | 去掉 `http://`，只留 `root@39.108.186.58:路径` |
+| 目标里带了 `:3000` 连不上                       | 把 App 的 HTTP 端口当成了 SSH 端口     | scp/SSH 走 22，不要写 `:3000`                  |
+| 在 `root@iZ...#` 下跑 scp 失败、找不到 `E:\...` | **跑在服务器上了**；服务器没有 `E:` 盘 | 到本机 PowerShell（`PS E:\...>`）再跑          |
+| `Permission denied (publickey)`                 | 服务器只认密钥、没配本机公钥           | 按上面「配置 SSH 免密」加公钥                  |
+| 仍提示输入 passphrase                           | 密钥生成时带了密码短语                 | 用 `cmd /c '...-N ""'` 重新生成无密码密钥      |
 
 ---
 

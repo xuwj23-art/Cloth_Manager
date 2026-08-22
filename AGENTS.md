@@ -37,7 +37,7 @@
 cloth_scan/                      pnpm + turbo monorepo
 ├─ apps/
 │  ├─ mobile/    Expo/React Native 手机端（TypeScript）
-│  │  ├─ src/screens/   各业务页面（无 React Navigation，App.tsx 手动切屏）
+│  │  ├─ src/screens/   各业务页面（React Navigation native-stack 导航，src/navigation/）
 │  │  ├─ src/api.ts     REST 客户端    src/config.ts  后端地址 API_HOST
 │  │  ├─ src/db|sync/   SQLite 离线缓存 + outbox 同步引擎
 │  │  ├─ src/printer/   蓝牙标签打印（JS 封装 + 标签排版）
@@ -56,7 +56,7 @@ cloth_scan/                      pnpm + turbo monorepo
 
 **数据流**：手机端扫码 → 本地 SQLite 优先匹配 → 购物车（共享纯函数 `cart.ts`）→ 结算进 outbox（乐观扣本地库存，断网可用）→ 同步引擎 push 到后端 → 后端事务扣库存、记流水、防超卖。
 
-**请求约定**：所有 API 在 `/api/v1` 前缀下（常量 `API_PREFIX`）；唯一例外是公开下载页 `/download` 和 `/download/app.apk`（在 `main.ts` 里 exclude 出前缀）。图片静态服务在 `/uploads/`。
+**请求约定**：所有 API 在 `/api/v1` 前缀下（常量 `API_PREFIX`）；唯一例外是公开下载页 `/download`、`/download/app.apk`、`/download/apk/:file`（在 `main.ts` 里 exclude 出前缀）。图片静态服务在 `/uploads/`。
 
 ---
 
@@ -109,7 +109,7 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 | 命令                                                | 作用                          |
 | --------------------------------------------------- | ----------------------------- |
 | `pnpm --filter @cloth-scan/server typecheck`        | 后端类型检查                  |
-| `pnpm --filter @cloth-scan/server test`             | 后端单测（vitest，25 例）     |
+| `pnpm --filter @cloth-scan/server test`             | 后端单测（vitest）            |
 | `pnpm --filter @cloth-scan/server build`            | `nest build`（Docker 也用它） |
 | `pnpm --filter @cloth-scan/mobile typecheck`        | 移动端类型检查                |
 | `pnpm --filter @cloth-scan/shared build && ...test` | 共享包构建/测试               |
@@ -123,15 +123,15 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.1 模块职责（`src/app.module.ts`）
 
-| 模块        | 职责                                                                                             |
-| ----------- | ------------------------------------------------------------------------------------------------ |
-| `prisma/`   | PrismaClient 单例                                                                                |
-| `auth/`     | 注册（需邀请码）/登录/JWT/`me`/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles` |
-| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据              |
-| `sales/`    | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单                                         |
-| `uploads/`  | 图片上传 + sharp 压缩主图/缩略图（仅 owner）                                                     |
-| `download/` | 公开 APK 下载页 `/download`（服务端生成二维码，流式发送 APK）                                    |
-| `health/`   | `GET /api/v1/health`                                                                             |
+| 模块        | 职责                                                                                                                                                                          |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prisma/`   | PrismaClient 单例                                                                                                                                                             |
+| `auth/`     | 注册（需邀请码）/登录/JWT/`me`/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles`                                                                              |
+| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据                                                                                           |
+| `sales/`    | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单                                                                                                                      |
+| `uploads/`  | 图片上传 + sharp 压缩主图/缩略图（仅 owner）                                                                                                                                  |
+| `download/` | 公开 APK 下载页 `/download`：多版本可选（`app-x.y.z.apk` 文件驱动 + `current.json` 定生效版），`app.apk` 固定链接永远指生效版，`apk/:file` 指定版本下载（文件名白名单防穿越） |
+| `health/`   | `GET /api/v1/health`                                                                                                                                                          |
 
 ### 6.2 数据模型（`prisma/schema.prisma`）
 
@@ -150,18 +150,20 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.3 关键业务逻辑去哪找
 
-| 能力                                       | 位置                                                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| 注册邀请码校验（`REGISTER_CODE`）          | `auth/auth.service.ts`（未配置则禁止注册）                                 |
-| JWT/角色守卫                               | `auth/jwt-auth.guard.ts`、`auth/roles.guard.ts`、`auth/roles.decorator.ts` |
-| 售罄自动归档/补货恢复/已删不复活           | `products/products.service.ts` `recomputeArchive`                          |
-| 商品软删除（须先 archived，不删图）        | `products/products.service.ts` `deleteProduct`                             |
-| 列表过滤（deletedAt:null + scope）         | `products/products.service.ts` `listProducts`                              |
-| 销售开单（事务/幂等/防超卖/售罄归档）      | `sales/sales.service.ts` `createSale`                                      |
-| 账单编辑（改价/改量/删行，不能加货）       | `sales/sales.service.ts` `editOrder`                                       |
-| 删除整单（回滚库存）                       | `sales/sales.service.ts` `deleteOrder`                                     |
-| 销售报表（today/week/month + 利润 + 下钻） | `sales/sales.service.ts` `report`                                          |
-| 图片压缩/缩略图                            | `uploads/uploads.controller.ts`（sharp，主图1280/缩略320）                 |
+| 能力                                                         | 位置                                                                       |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 注册邀请码校验（`REGISTER_CODE`）                            | `auth/auth.service.ts`（未配置则禁止注册）                                 |
+| JWT/角色守卫                                                 | `auth/jwt-auth.guard.ts`、`auth/roles.guard.ts`、`auth/roles.decorator.ts` |
+| 售罄自动归档/补货恢复/已删不复活                             | `products/products.service.ts` `recomputeArchive`                          |
+| 商品软删除（须先 archived，不删图）                          | `products/products.service.ts` `deleteProduct`                             |
+| 列表过滤（deletedAt:null + scope 白名单）                    | `products/products.service.ts` `listProducts`                              |
+| 销售开单（事务/幂等/防超卖/售罄归档）                        | `sales/sales-command.service.ts` `createSale`                              |
+| 账单编辑（改价/改量/删行，终态守卫）                         | `sales/sales-command.service.ts` `editOrder`                               |
+| 删除整单（回滚库存，终态抢占防重复回滚）                     | `sales/sales-command.service.ts` `deleteOrder`                             |
+| 销售报表（today/week/month + 利润 + 下钻，固定北京时间切日） | `sales/sales-report.service.ts` `report`                                   |
+| JWT 校验（回查用户存在性，删店员立即失效）                   | `auth/jwt-auth.guard.ts`                                                   |
+| 登录失败限速（15 分钟 5 次锁定）                             | `auth/auth.service.ts`                                                     |
+| 图片压缩/缩略图（30MP 输入上限，失败即拒）                   | `uploads/uploads.controller.ts`（sharp，主图1280/缩略320）                 |
 
 ### 6.4 环境变量
 
@@ -180,17 +182,17 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.6 API 路由速查（除 `/download` 外都带 `/api/v1`）
 
-| 方法 路径                                                 | 角色                    |
-| --------------------------------------------------------- | ----------------------- |
-| POST `/auth/register`（需 inviteCode）/ `/auth/login`     | 公开                    |
-| GET `/auth/me`                                            | 登录                    |
-| GET/POST/DELETE `/auth/staff`                             | owner                   |
-| POST/GET/PATCH/DELETE `/products*`、POST `/products/demo` | owner（列表/扫码=登录） |
-| GET `/skus/by-barcode/:barcode`                           | 登录                    |
-| POST `/sales`（开单=owner+staff）、GET/PATCH/DELETE 其余  | owner                   |
-| POST `/uploads`                                           | owner                   |
-| GET `/health`                                             | 公开                    |
-| GET `/download`、`/download/app.apk`                      | 公开（无前缀）          |
+| 方法 路径                                                   | 角色                    |
+| ----------------------------------------------------------- | ----------------------- |
+| POST `/auth/register`（需 inviteCode）/ `/auth/login`       | 公开                    |
+| GET `/auth/me`                                              | 登录                    |
+| GET/POST/DELETE `/auth/staff`                               | owner                   |
+| POST/GET/PATCH/DELETE `/products*`、POST `/products/demo`   | owner（列表/扫码=登录） |
+| GET `/skus/by-barcode/:barcode`                             | 登录                    |
+| POST `/sales`（开单=owner+staff）、GET/PATCH/DELETE 其余    | owner                   |
+| POST `/uploads`                                             | owner                   |
+| GET `/health`                                               | 公开                    |
+| GET `/download`、`/download/app.apk`、`/download/apk/:file` | 公开（无前缀）          |
 
 ---
 
@@ -198,7 +200,7 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 7.1 屏幕与导航
 
-无 React Navigation：`App.tsx` 用 `useState<Screen>` 切屏 + `BackHandler` 逐级返回；`AuthProvider` 决定登录态、登录后包 `SyncProvider`。
+React Navigation（`@react-navigation/native` + native-stack，`src/navigation/RootNavigator.tsx`）；`AuthProvider` 决定登录态、登录后包 `SyncProvider`；列表屏用 `useFocusEffect` 在返回时刷新。
 
 | 屏幕                                                           | 职责                                   |
 | -------------------------------------------------------------- | -------------------------------------- |
@@ -232,7 +234,7 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 7.5 EAS / app.json 要点
 
-- **当前版本 `1.1.0`**（`app.json` `version`，Android `versionCode=2`）。
+- **当前版本 `1.2.0`**（`app.json` `version`，Android `versionCode=3`）。
 - `runtimeVersion.policy = "appVersion"`；`updates.url` 指向 Expo（owner `wesleysho`，projectId `3b8070f8-...`）。
   - ⚠️ 改 `version` 会同时改 `runtimeVersion`，旧包收不到新 runtime 的 OTA；升版后须 `expo prebuild -p android`（同步 `build.gradle` 版本 + `strings.xml` 的 runtime + 重写渠道头）→ 重打包 → 再按新 runtime `eas update`。
 - channel：`development`(devClient APK) / `preview`(APK) / `production`(AAB)。
@@ -249,12 +251,12 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ## 9. 构建 · 部署 · 分发
 
-| 场景                                         | 怎么做                                                                                                                     | 详见                                      |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| **JS/界面改动**（占绝大多数）                | OTA：`cd apps/mobile && eas update --channel preview -m "说明"`，手机重开 App 即生效、**免重装**                           | `docs/本地打包环境部署指南-Windows.md`    |
-| **原生改动**（权限/插件/原生模块/targetSdk） | 本地 `pnpm --filter @cloth-scan/mobile build:android` → APK 在 `android/app/build/outputs/apk/release/`                    | 同上 §3                                   |
-| **后端改动**                                 | 服务器 `git pull` + `docker compose -f docker-compose.prod.yml up -d --build`（迁移自动跑）                                | `docs/服务器部署指南.md`                  |
-| **给别人装 APK**                             | 下载页 `http://39.108.186.58:3000/download`；更新：`scp app-release.apk root@39.108.186.58:/opt/Cloth_Manager/apk/app.apk` | `docs/本地打包环境部署指南-Windows.md` §7 |
+| 场景                                         | 怎么做                                                                                                                                                                                     | 详见                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| **JS/界面改动**（占绝大多数）                | OTA：`cd apps/mobile && eas update --channel preview -m "说明"`，手机重开 App 即生效、**免重装**                                                                                           | `docs/本地打包环境部署指南-Windows.md`    |
+| **原生改动**（权限/插件/原生模块/targetSdk） | 本地 `pnpm --filter @cloth-scan/mobile build:android` → APK 在 `android/app/build/outputs/apk/release/`                                                                                    | 同上 §3                                   |
+| **后端改动**                                 | 服务器 `git pull` + `docker compose -f docker-compose.prod.yml up -d --build`（迁移自动跑）                                                                                                | `docs/服务器部署指南.md`                  |
+| **给别人装 APK**                             | 下载页 `http://39.108.186.58:3000/download`（多版本可选）；更新：`scp app-release.apk root@39.108.186.58:/opt/Cloth_Manager/apk/app-<版本>.apk` + 写 `current.json`；回滚=改 `active` 一行 | `docs/本地打包环境部署指南-Windows.md` §7 |
 
 本地打包前提：`apps/mobile/.env` 需含 `EXPO_NO_METRO_WORKSPACE_ROOT=1`（gitignore，换机要重建）。
 EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可覆盖安装。
@@ -286,7 +288,7 @@ EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可�
 | 注册总是失败/被拒                             | 后端没配 `REGISTER_CODE`（=关闭注册）或邀请码不匹配                                                                                                                                            |
 | 蓝牙打印在 Expo Go 不可用                     | 需 dev-client/APK；Expo Go 中自动降级 PDF                                                                                                                                                      |
 | OTA 更新装到手机却不生效                      | 本地 `gradlew` 包必须嵌入频道：`app.json` 已设 `updates.requestHeaders={"expo-channel-name":"preview"}`，改后需 `expo prebuild -p android` 再打包；验证 AndroidManifest 含 `expo-channel-name` |
-| 蓝牙打印首次连接闪退（第二次正常）            | 已知待办：CTPL SDK 延迟到首次 connect 才 init 导致竞态崩溃。修法=把 init 提前到打开设备列表时。详见 `docs/archive/进度记录.md`「已知问题」与 `docs/product/TECH-NOTES.md` §4.1                 |
+| 蓝牙打印首次连接闪退（第二次正常）            | **已修复**：Kotlin 侧已把 CTPL SDK init 提前（getBondedDevices 时 ensureInit + connect 强制主线程 + 15s 超时兜底），见 `modules/ct-printer/`                                                   |
 | PowerShell 报 `&&` 语法错                     | 用 `;` 或分行                                                                                                                                                                                  |
 | git push 连不上 GitHub                        | 多为本机代理端口问题，检查 `git config --get http.proxy` 与实际代理端口是否一致                                                                                                                |
 | scp 传 APK 报 `Permission denied (publickey)` | 服务器只认密钥；需把本机公钥加到服务器 `~/.ssh/authorized_keys`（见 `docs/本地打包环境部署指南-Windows.md` §7）。scp 要在**本机**跑，目标不带 `http://`/`:3000`                                |
