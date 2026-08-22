@@ -1,6 +1,8 @@
 import {
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -17,6 +19,32 @@ import type {
 } from "@cloth-scan/shared";
 import type { User } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+
+/**
+ * 登录失败限速（内存滑动窗口）：15 分钟内同一手机号连续失败 5 次即锁定。
+ * 后端公网明文暴露，无此防护可对 11 位手机号在线暴力破解。
+ * 单实例部署够用；进程重启计数清零可接受。Map 设上限防被轮换手机号撑爆内存。
+ */
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAP_CAP = 10_000;
+const loginFailures = new Map<string, number[]>();
+
+/** 返回剩余锁定毫秒（0=未锁定），顺带清理窗口外记录 */
+function loginLockRemaining(phone: string): number {
+  const now = Date.now();
+  const fails = (loginFailures.get(phone) ?? []).filter((t) => now - t < LOGIN_WINDOW_MS);
+  loginFailures.set(phone, fails);
+  if (fails.length < LOGIN_MAX_FAILURES) return 0;
+  return LOGIN_WINDOW_MS - (now - fails[0]!);
+}
+
+function recordLoginFailure(phone: string): void {
+  if (loginFailures.size > LOGIN_MAP_CAP) loginFailures.clear();
+  const fails = loginFailures.get(phone) ?? [];
+  fails.push(Date.now());
+  loginFailures.set(phone, fails);
+}
 
 @Injectable()
 export class AuthService {
@@ -62,38 +90,53 @@ export class AuthService {
     }
     const passwordHash = await bcrypt.hash(input.password, 10);
 
-    const user = await this.prisma.$transaction(async (tx) => {
-      const shop = await tx.shop.create({ data: { name: input.shopName } });
-      return tx.user.create({
-        data: {
-          shopId: shop.id,
-          name: input.name,
-          phone: input.phone,
-          passwordHash,
-          role: "owner",
-        },
+    // 并发同号注册：DB unique 兜底，把 P2002 转成 409 而不是 500
+    let user: User;
+    try {
+      user = await this.prisma.$transaction(async (tx) => {
+        const shop = await tx.shop.create({ data: { name: input.shopName } });
+        return tx.user.create({
+          data: {
+            shopId: shop.id,
+            name: input.name,
+            phone: input.phone,
+            passwordHash,
+            role: "owner",
+          },
+        });
       });
-    });
+    } catch (e) {
+      if ((e as { code?: string })?.code === "P2002") {
+        throw new ConflictException("该手机号已注册");
+      }
+      throw e;
+    }
 
     return this.toAuthResponse(user);
   }
 
   /** 登录 */
   async login(input: LoginInput): Promise<AuthResponse> {
+    const lockMs = loginLockRemaining(input.phone);
+    if (lockMs > 0) {
+      throw new HttpException(
+        `登录失败次数过多，请 ${Math.ceil(lockMs / 60000)} 分钟后再试`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
     const user = await this.prisma.user.findUnique({
       where: { phone: input.phone },
     });
     if (!user || !(await bcrypt.compare(input.password, user.passwordHash))) {
+      recordLoginFailure(input.phone);
       throw new UnauthorizedException("手机号或密码错误");
     }
+    loginFailures.delete(input.phone); // 成功登录清零计数
     return this.toAuthResponse(user);
   }
 
   /** 老板创建店员账号 */
-  async createStaff(
-    shopId: string,
-    input: CreateStaffInput,
-  ): Promise<AuthResponse> {
+  async createStaff(shopId: string, input: CreateStaffInput): Promise<AuthResponse> {
     const exists = await this.prisma.user.findUnique({
       where: { phone: input.phone },
     });
@@ -101,15 +144,24 @@ export class AuthService {
       throw new ConflictException("该手机号已注册");
     }
     const passwordHash = await bcrypt.hash(input.password, 10);
-    const user = await this.prisma.user.create({
-      data: {
-        shopId,
-        name: input.name,
-        phone: input.phone,
-        passwordHash,
-        role: "staff",
-      },
-    });
+    let user: User;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          shopId,
+          name: input.name,
+          phone: input.phone,
+          passwordHash,
+          role: "staff",
+        },
+      });
+    } catch (e) {
+      // 并发创建同号店员：DB unique 兜底转 409
+      if ((e as { code?: string })?.code === "P2002") {
+        throw new ConflictException("该手机号已注册");
+      }
+      throw e;
+    }
     return this.toAuthResponse(user);
   }
 

@@ -5,6 +5,13 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 
 /**
+ * Prisma/PG 的 Int 字段上限（price/subtotal/totalAmount 均为 Int4）。
+ * 共享校验器已限 Money≤10亿、quantity≤9999，但 price×quantity 相乘仍可能越界，
+ * 在服务端提前拦截为 400（否则 PG 抛 integer out of range → 500 → 离线单永久卡 pending）。
+ */
+const INT32_MAX = 2_147_483_647;
+
+/**
  * 销售写操作（命令侧）：createSale / editOrder / deleteOrder。
  *
  * 这一层承载 Wave 2 的全部并发/一致性保证（PRD §7 不变式），拆分时仅做代码移动，
@@ -88,6 +95,11 @@ export class SalesCommandService {
             affectedProductIds.add(sku!.productId);
             const price = item.price ?? sku!.salePrice;
             const subtotal = price * item.quantity;
+            if (subtotal > INT32_MAX) {
+              throw new BadRequestException(
+                `金额过大：${sku!.barcode} 单价 ${price} 分 × 数量 ${item.quantity} 超出系统上限`,
+              );
+            }
             total += subtotal;
             itemsData.push({
               skuId: sku!.id,
@@ -107,6 +119,9 @@ export class SalesCommandService {
             );
           }
           const paidAmount = total - orderDiscountCents;
+          if (total > INT32_MAX) {
+            throw new BadRequestException("整单金额超出系统上限，请分单结算");
+          }
 
           const order = await tx.saleOrder.create({
             data: {
@@ -169,7 +184,8 @@ export class SalesCommandService {
           where: { opId: input.opId },
           include: { items: true },
         });
-        if (existing) return existing;
+        // 门店隔离：opId 全局唯一，若命中的是别店的同 opId 单，不能跨店返回
+        if (existing && existing.shopId === shopId) return existing;
         // P2034 但无同 opId 单：真并发冲突（非幂等重复），向上抛由调用方重试
       }
       throw e;
@@ -183,37 +199,47 @@ export class SalesCommandService {
    * 事务保证一致。
    */
   async deleteOrder(shopId: string, id: string): Promise<{ ok: true }> {
-    const order = await this.prisma.saleOrder.findUnique({
-      where: { id },
-      include: { items: true },
-    });
-    if (!order || order.shopId !== shopId) {
-      throw new NotFoundException("单据不存在");
-    }
-
-    await this.prisma.$transaction(async (tx) => {
-      const affected = new Set<string>();
-      for (const it of order.items) {
-        const sku = await tx.sku.update({
-          where: { id: it.skuId },
-          data: {
-            stock: { increment: it.quantity },
-            version: { increment: 1 },
-          },
+    await this.prisma.$transaction(
+      async (tx) => {
+        // 终态守卫：条件更新抢占 completed→voided 终态。
+        // 重复删除（超时重试/双击/双设备）只有第一次 count===1，后续直接 404，
+        // 防止库存被重复加回（虚增）。
+        const claimed = await tx.saleOrder.updateMany({
+          where: { id, shopId, status: "completed", deletedAt: null },
+          data: { status: "voided", deletedAt: new Date() },
         });
-        affected.add(sku.productId);
-      }
-      // 删除该单的库存出库流水（原 createSale 写的 type=out 记录）。
-      // 软删后保留 SaleItem 行作为审计痕迹，不再级联删单据。
-      await tx.stockMovement.deleteMany({ where: { refOrderId: id } });
-      await tx.saleOrder.update({
-        where: { id },
-        data: { status: "voided", deletedAt: new Date() },
-      });
-      for (const productId of affected) {
-        await this.products.recomputeArchive(tx, productId);
-      }
-    });
+        if (claimed.count !== 1) {
+          throw new NotFoundException("单据不存在");
+        }
+        // 单据读取移入事务内，避免与并发编辑/删除竞态（TOCTOU）
+        const order = await tx.saleOrder.findUnique({
+          where: { id },
+          include: { items: true },
+        });
+        if (!order) {
+          throw new NotFoundException("单据不存在");
+        }
+        const affected = new Set<string>();
+        for (const it of order.items) {
+          const sku = await tx.sku.update({
+            where: { id: it.skuId },
+            data: {
+              stock: { increment: it.quantity },
+              version: { increment: 1 },
+            },
+          });
+          affected.add(sku.productId);
+        }
+        // 删除该单的库存出库流水（原 createSale 写的 type=out 记录）。
+        // 软删后保留 SaleItem 行作为审计痕迹，不再级联删单据。
+        await tx.stockMovement.deleteMany({ where: { refOrderId: id } });
+        for (const productId of affected) {
+          await this.products.recomputeArchive(tx, productId);
+        }
+      },
+      // 与 editOrder 一致：写命令用 Serializable，并发删/编冲突会中止其中一方
+      { isolationLevel: "Serializable" },
+    );
 
     return { ok: true };
   }
@@ -227,22 +253,28 @@ export class SalesCommandService {
    * 此处保留对 PrismaService 的直接回查以避免命令/报表服务双向依赖。
    */
   async editOrder(shopId: string, id: string, input: EditSaleOrderInput): Promise<SaleOrderDetail> {
-    const order = await this.prisma.saleOrder.findUnique({
-      where: { id },
-      include: { items: { include: { sku: true } } },
-    });
-    if (!order || order.shopId !== shopId) {
-      throw new NotFoundException("单据不存在");
-    }
-    const byId = new Map(order.items.map((it) => [it.id, it]));
-    for (const r of input.items) {
-      if (!byId.has(r.id)) {
-        throw new NotFoundException(`明细不存在：${r.id}`);
-      }
-    }
-
     await this.prisma.$transaction(
       async (tx) => {
+        // 事务内重读 + 终态守卫：已作废/已软删的单不可编辑
+        // （此前仅校验存在性，对已删单 PATCH 会改完库存后才在回读时 404）
+        const order = await tx.saleOrder.findUnique({
+          where: { id },
+          include: { items: { include: { sku: true } } },
+        });
+        if (
+          !order ||
+          order.shopId !== shopId ||
+          order.status === "voided" ||
+          order.deletedAt !== null
+        ) {
+          throw new NotFoundException("单据不存在");
+        }
+        const byId = new Map(order.items.map((it) => [it.id, it]));
+        for (const r of input.items) {
+          if (!byId.has(r.id)) {
+            throw new NotFoundException(`明细不存在：${r.id}`);
+          }
+        }
         const affected = new Set<string>();
         // E7：库存流水先收集，循环结束后一次 createMany 批量插入
         const movementData: {
@@ -310,6 +342,11 @@ export class SalesCommandService {
           if (r.quantity === 0) {
             await tx.saleItem.delete({ where: { id: r.id } });
           } else {
+            if (r.price * r.quantity > INT32_MAX) {
+              throw new BadRequestException(
+                `金额过大：单价 ${r.price} 分 × 数量 ${r.quantity} 超出系统上限`,
+              );
+            }
             await tx.saleItem.update({
               where: { id: r.id },
               data: { quantity: r.quantity, price: r.price, subtotal: r.price * r.quantity },
@@ -331,6 +368,10 @@ export class SalesCommandService {
         // 编辑不改优惠金额；若改后 subtotal 之和小于已记优惠，夹到 0（不允许实收为负）
         const disc = order.orderDiscountCents ?? 0;
         const paidAmount = Math.max(0, subtotalSum - disc);
+        // 与 createSale 对齐：totalAmount 是 Int4，单行各自合法但多行求和可能越界
+        if (paidAmount > INT32_MAX) {
+          throw new BadRequestException("整单金额超出系统上限，请分单结算");
+        }
         await tx.saleOrder.update({
           where: { id },
           data: { totalAmount: paidAmount },

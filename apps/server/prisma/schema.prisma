@@ -147,6 +147,8 @@ model SaleOrder {
   items    SaleItem[]
 
   @@index([shopId])
+  /// 报表/流水按门店+时间过滤排序（listOrders、by-day、月报），数据量增长后避免全表扫描
+  @@index([shopId, createdAt])
 }
 
 model SaleItem {

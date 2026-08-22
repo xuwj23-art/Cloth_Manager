@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type {
@@ -83,36 +88,44 @@ export class ProductsService {
     );
     let gi = 0;
 
-    return this.prisma.product.create({
-      data: {
-        shopId,
-        name: input.name,
-        categoryId: input.categoryId ?? null,
-        coverImage: input.coverImage ?? null,
-        images: input.images ?? [],
-        skus: {
-          create: input.skus.map((s) => ({
-            color: s.color,
-            size: s.size,
-            barcode: s.barcode ?? generated[gi++]!,
-            costPrice: s.costPrice,
-            salePrice: s.salePrice,
-            stock: s.initialStock ?? 0,
-            movements:
-              (s.initialStock ?? 0) > 0
-                ? {
-                    create: {
-                      type: "in",
-                      quantity: s.initialStock ?? 0,
-                      opId: randomUUID(),
-                    },
-                  }
-                : undefined,
-          })),
+    try {
+      return await this.prisma.product.create({
+        data: {
+          shopId,
+          name: input.name,
+          categoryId: input.categoryId ?? null,
+          coverImage: input.coverImage ?? null,
+          images: input.images ?? [],
+          skus: {
+            create: input.skus.map((s) => ({
+              color: s.color,
+              size: s.size,
+              barcode: s.barcode ?? generated[gi++]!,
+              costPrice: s.costPrice,
+              salePrice: s.salePrice,
+              stock: s.initialStock ?? 0,
+              movements:
+                (s.initialStock ?? 0) > 0
+                  ? {
+                      create: {
+                        type: "in",
+                        quantity: s.initialStock ?? 0,
+                        opId: randomUUID(),
+                      },
+                    }
+                  : undefined,
+            })),
+          },
         },
-      },
-      include: { skus: true },
-    });
+        include: { skus: true },
+      });
+    } catch (e) {
+      // 跨进程并发建档撞条码（generateUniqueBarcodes 是 check-then-act）→ 409 提示重试
+      if ((e as { code?: string })?.code === "P2002") {
+        throw new ConflictException("条码冲突（与其他商品重复），请重试");
+      }
+      throw e;
+    }
   }
 
   /**
@@ -236,8 +249,15 @@ export class ProductsService {
     if (!product || product.shopId !== shopId) {
       throw new NotFoundException("商品不存在");
     }
+    if (product.deletedAt) {
+      throw new NotFoundException("商品已删除，无法编辑");
+    }
 
     return this.prisma.$transaction(async (tx) => {
+      // 事务内重读 SKU，避免与并发开单/编辑竞态导致 adjust 流水 delta 用陈旧库存计算
+      const freshSkus = await tx.sku.findMany({ where: { productId: id } });
+      const freshById = new Map(freshSkus.map((k) => [k.id, k]));
+
       if (input.name !== undefined || input.coverImage !== undefined) {
         await tx.product.update({
           where: { id },
@@ -250,7 +270,7 @@ export class ProductsService {
 
       let stockChanged = false;
       for (const s of input.skus ?? []) {
-        const existing = product.skus.find((k) => k.id === s.id);
+        const existing = freshById.get(s.id);
         if (!existing) {
           throw new NotFoundException(`SKU 不存在：${s.id}`);
         }
@@ -288,6 +308,9 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product || product.shopId !== shopId) {
       throw new NotFoundException("商品不存在");
+    }
+    if (product.deletedAt) {
+      throw new NotFoundException("商品已删除，无法操作");
     }
     return this.prisma.product.update({
       where: { id },

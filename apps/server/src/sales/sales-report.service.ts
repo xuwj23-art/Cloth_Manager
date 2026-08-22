@@ -76,8 +76,8 @@ export class SalesReportService {
   async listByDay(shopId: string, date: string): Promise<SaleOrderDetail[]> {
     const [y, m, d] = date.split("-").map(Number);
     if (!y || !m || !d) return [];
-    const start = new Date(y, m - 1, d, 0, 0, 0, 0);
-    const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+    const start = cnStartOfDay(y, m, d);
+    const end = cnStartOfDay(y, m, d + 1);
     const orders = await this.prisma.saleOrder.findMany({
       where: {
         shopId,
@@ -215,8 +215,8 @@ export class SalesReportService {
    * E2：合计下推 DB aggregate；按天桶保留内存归组（groupBy 无法 date-trunc）。
    */
   async monthlyReport(shopId: string, year: number, month: number): Promise<MonthlySalesReport> {
-    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
-    const end = new Date(year, month, 1, 0, 0, 0, 0);
+    const start = cnStartOfDay(year, month, 1);
+    const end = cnStartOfDay(year, month + 1, 1);
 
     const where = {
       shopId,
@@ -259,7 +259,7 @@ export class SalesReportService {
     };
 
     const pad = (n: number) => String(n).padStart(2, "0");
-    const daysInMonth = new Date(year, month, 0).getDate();
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
     const days: DailySalesStat[] = Array.from({ length: daysInMonth }, (_, i) => ({
       date: `${year}-${pad(month)}-${pad(i + 1)}`,
       revenue: 0,
@@ -271,7 +271,7 @@ export class SalesReportService {
     for (const o of dayRows) {
       const cost = o.items.reduce((s, it) => s + it.cost * it.quantity, 0);
       const qty = o.items.reduce((s, it) => s + it.quantity, 0);
-      const d = days[o.createdAt.getDate() - 1];
+      const d = days[cnParts(o.createdAt).d - 1];
       if (d) {
         d.revenue += o.totalAmount;
         d.profit += o.totalAmount - cost;
@@ -447,19 +447,19 @@ export class SalesReportService {
     if (range === "today") return [];
     if (range === "week") {
       const names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-      const todayIdx = (now.getDay() + 6) % 7; // 周一=0
+      const todayIdx = (cnParts(now).day + 6) % 7; // 周一=0
       return names.slice(0, todayIdx + 1).map((n, i) => empty(`d${i}`, n));
     }
     // month：按日期段分周，最多 5 周（第5周=29~月末）
-    const maxIdx = Math.min(Math.floor((now.getDate() - 1) / 7), 4);
+    const maxIdx = Math.min(Math.floor((cnParts(now).d - 1) / 7), 4);
     return Array.from({ length: maxIdx + 1 }, (_, i) => empty(`w${i}`, `第${i + 1}周`));
   }
 
   /** 某订单时间落在哪个桶 */
   private bucketKey(range: SalesRange, date: Date): string | null {
     if (range === "today") return null;
-    if (range === "week") return `d${(date.getDay() + 6) % 7}`;
-    return `w${Math.min(Math.floor((date.getDate() - 1) / 7), 4)}`;
+    if (range === "week") return `d${(cnParts(date).day + 6) % 7}`;
+    return `w${Math.min(Math.floor((cnParts(date).d - 1) / 7), 4)}`;
   }
 
   private toDetail(o: {
@@ -513,25 +513,43 @@ export class SalesReportService {
   }
 }
 
-/** 本地时区下的「今日 0 点」 */
+/**
+ * 门店时区固定为北京时间（UTC+8，无夏令时）。
+ * 生产容器默认 UTC，若按进程本地时区切日，北京时间 0-8 点的销售会被归到前一天。
+ */
+const CN_TZ_OFFSET_MS = 8 * 3_600_000;
+
+/** 取某时刻的北京时间日历分量（读偏移后时间的 UTC 分量，不依赖进程时区） */
+function cnParts(d: Date): { y: number; m: number; d: number; day: number } {
+  const t = new Date(d.getTime() + CN_TZ_OFFSET_MS);
+  return {
+    y: t.getUTCFullYear(),
+    m: t.getUTCMonth() + 1,
+    d: t.getUTCDate(),
+    day: t.getUTCDay(), // 0=周日
+  };
+}
+
+/** 北京时间 y-m-d 的 0 点（换算回真实 UTC 时刻）。月/日越界自动进位（如 d+1、month+1）。 */
+function cnStartOfDay(y: number, m: number, d: number): Date {
+  return new Date(Date.UTC(y, m - 1, d) - CN_TZ_OFFSET_MS);
+}
+
+/** 北京时间「今日 0 点」 */
 function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const p = cnParts(new Date());
+  return cnStartOfDay(p.y, p.m, p.d);
 }
 
-/** 本地时区下「本周一 0 点」（周一为一周起点） */
+/** 北京时间「本周一 0 点」（周一为一周起点） */
 function startOfWeek(): Date {
-  const d = startOfToday();
-  const day = d.getDay(); // 0=周日,1=周一...
-  const diff = (day + 6) % 7; // 距上一个周一的天数
-  d.setDate(d.getDate() - diff);
-  return d;
+  const p = cnParts(new Date());
+  const diff = (p.day + 6) % 7; // 距上一个周一的天数
+  return cnStartOfDay(p.y, p.m, p.d - diff);
 }
 
-/** 本地时区下「本月 1 号 0 点」 */
+/** 北京时间「本月 1 号 0 点」 */
 function startOfMonth(): Date {
-  const d = startOfToday();
-  d.setDate(1);
-  return d;
+  const p = cnParts(new Date());
+  return cnStartOfDay(p.y, p.m, 1);
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -36,7 +37,13 @@ export class ProductsController {
 
   @Get("products")
   list(@CurrentUser() user: RequestUser, @Query("scope") scope?: ProductScope) {
-    return this.products.listProducts(user.shopId, scope ?? "active");
+    // 显式白名单：乱值直接 400，不落入 else 当 all 处理
+    const SCOPES: ProductScope[] = ["active", "archived", "all"];
+    const s = (scope ?? "active") as ProductScope;
+    if (!SCOPES.includes(s)) {
+      throw new BadRequestException(`无效的 scope：${String(scope)}`);
+    }
+    return this.products.listProducts(user.shopId, s);
   }
 
   /**

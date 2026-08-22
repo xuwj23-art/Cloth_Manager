@@ -11,6 +11,8 @@ function makeUpdatePrisma(product: any, aggStock: number) {
       findUnique: vi.fn().mockResolvedValue({ archivedAt: null }),
     },
     sku: {
+      // updateProduct 事务内重读 SKU（终态/竞态守卫），返回与 product.skus 一致的快照
+      findMany: vi.fn().mockResolvedValue(product.skus ?? []),
       update: vi.fn().mockResolvedValue({}),
       aggregate: vi.fn().mockResolvedValue({ _sum: { stock: aggStock } }),
     },
@@ -118,14 +120,9 @@ describe("ProductsService.updateProduct", () => {
   });
 
   it("跨门店编辑抛 NotFoundException", async () => {
-    const prisma = makeUpdatePrisma(
-      { ...baseProduct, shopId: "other" },
-      5,
-    ) as any;
+    const prisma = makeUpdatePrisma({ ...baseProduct, shopId: "other" }, 5) as any;
     const service = new ProductsService(prisma);
-    await expect(
-      service.updateProduct(SHOP, "p1", { name: "x" }),
-    ).rejects.toThrow();
+    await expect(service.updateProduct(SHOP, "p1", { name: "x" })).rejects.toThrow();
   });
 });
 
@@ -161,8 +158,6 @@ describe("ProductsService.setArchived", () => {
 
     await service.setArchived(SHOP, "p1", false);
 
-    expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { archivedAt: null } }),
-    );
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: { archivedAt: null } }));
   });
 });

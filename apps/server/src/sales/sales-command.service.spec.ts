@@ -105,7 +105,7 @@ describe("SalesCommandService.createSale", () => {
       code: "P2002",
       meta: { target: ["opId"] },
     });
-    const existing = { id: "order-existing", items: [] };
+    const existing = { id: "order-existing", shopId: SHOP, items: [] };
     const prisma = makePrisma({
       sku: { ...okSku },
       saleOrderCreateThrows: p2002,
@@ -132,7 +132,7 @@ describe("SalesCommandService.createSale", () => {
       new Error("Transaction failed due to a write conflict or a deadlock"),
       { code: "P2034" },
     );
-    const existing = { id: "order-existing", items: [] };
+    const existing = { id: "order-existing", shopId: SHOP, items: [] };
     const prisma = makePrisma({
       sku: { ...okSku },
       updateManyCount: 0, // 触发 $transaction reject（这里手动构造 reject 路径）
@@ -186,22 +186,30 @@ describe("SalesCommandService.createSale", () => {
 });
 
 describe("SalesCommandService.deleteOrder", () => {
-  it("整单软删除：库存加回 + 删出库流水 + 单据置 voided/deletedAt（不级联删 SaleItem）", async () => {
+  /** 新流程：事务内先 updateMany 条件抢占 completed→voided 终态（count!==1 即 404），
+   *  再回读 items 加回库存 + 删流水。重复删除/并发删除只有第一次生效。 */
+  function makeDeleteTx(opts: { claimCount?: number; order?: any } = {}) {
+    const order = opts.order ?? {
+      id: "o1",
+      shopId: SHOP,
+      status: "completed",
+      deletedAt: null,
+      items: [{ skuId: "s1", quantity: 2 }],
+    };
     const tx = {
+      saleOrder: {
+        updateMany: vi.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),
+        findUnique: vi.fn().mockResolvedValue(order),
+      },
       sku: { update: vi.fn().mockResolvedValue({ productId: "p1" }) },
       stockMovement: { deleteMany: vi.fn().mockResolvedValue({}) },
-      saleOrder: { update: vi.fn().mockResolvedValue({}) },
     };
+    return { tx, order };
+  }
+
+  it("整单软删除：抢占终态 + 库存加回 + 删出库流水（不级联删 SaleItem）", async () => {
+    const { tx } = makeDeleteTx();
     const prisma = {
-      saleOrder: {
-        findUnique: vi.fn().mockResolvedValue({
-          id: "o1",
-          shopId: SHOP,
-          status: "completed",
-          deletedAt: null,
-          items: [{ skuId: "s1", quantity: 2 }],
-        }),
-      },
       $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
     } as any;
     const service = new SalesCommandService(prisma, productsStub);
@@ -209,6 +217,11 @@ describe("SalesCommandService.deleteOrder", () => {
     const res = await service.deleteOrder(SHOP, "o1");
 
     expect(res).toEqual({ ok: true });
+    // 终态守卫：条件更新抢占，where 必须带 shopId + status + deletedAt
+    expect(tx.saleOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: "o1", shopId: SHOP, status: "completed", deletedAt: null },
+      data: { status: "voided", deletedAt: expect.any(Date) },
+    });
     expect(tx.sku.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "s1" },
@@ -218,12 +231,31 @@ describe("SalesCommandService.deleteOrder", () => {
     expect(tx.stockMovement.deleteMany).toHaveBeenCalledWith({
       where: { refOrderId: "o1" },
     });
-    // 软删除：update 置 voided + deletedAt，不再物理 delete
-    expect(tx.saleOrder.update).toHaveBeenCalledWith({
-      where: { id: "o1" },
-      data: { status: "voided", deletedAt: expect.any(Date) },
-    });
     expect((tx.saleOrder as any).delete).toBeUndefined();
+  });
+
+  it("重复删除：第二次抢占终态 count=0 → 404，库存不会被再次加回", async () => {
+    const { tx } = makeDeleteTx({ claimCount: 0 });
+    const prisma = {
+      $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
+    } as any;
+    const service = new SalesCommandService(prisma, productsStub);
+
+    await expect(service.deleteOrder(SHOP, "o1")).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.sku.update).not.toHaveBeenCalled();
+    expect(tx.stockMovement.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("跨店/不存在的单：同样 404，不产生任何库存变动", async () => {
+    // 抢占条件带 shopId，跨店单 count=0
+    const { tx } = makeDeleteTx({ claimCount: 0 });
+    const prisma = {
+      $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
+    } as any;
+    const service = new SalesCommandService(prisma, productsStub);
+
+    await expect(service.deleteOrder("other-shop", "o1")).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.sku.update).not.toHaveBeenCalled();
   });
 });
 
@@ -232,6 +264,8 @@ describe("SalesCommandService.editOrder", () => {
     const editable = {
       id: "o1",
       shopId: SHOP,
+      status: "completed",
+      deletedAt: null,
       orderDiscountCents: 0,
       items: [
         {
@@ -273,6 +307,11 @@ describe("SalesCommandService.editOrder", () => {
       ],
     };
     const tx = {
+      // 事务内重读订单（终态守卫）
+      saleOrder: {
+        findUnique: vi.fn().mockResolvedValue(editable),
+        update: vi.fn().mockResolvedValue({}),
+      },
       sku: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         update: vi.fn().mockResolvedValue({}),
@@ -286,15 +325,10 @@ describe("SalesCommandService.editOrder", () => {
         update: vi.fn().mockResolvedValue({}),
         findMany: vi.fn().mockResolvedValue([{ subtotal: 5000 }]),
       },
-      saleOrder: { update: vi.fn().mockResolvedValue({}), delete: vi.fn() },
     };
     const prisma = {
       saleOrder: {
-        findUnique: vi
-          .fn()
-          // 第一次：editOrder 取 editable（含 sku）；第二次：refetchDetail 取 detail（含 product）
-          .mockResolvedValueOnce(editable)
-          .mockResolvedValueOnce(detail),
+        findUnique: vi.fn().mockResolvedValue(detail), // refetchDetail 回读
       },
       $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
     } as any;
@@ -337,5 +371,121 @@ describe("SalesCommandService.editOrder", () => {
       ],
     });
     expect(result.totalAmount).toBe(5000);
+  });
+
+  it("已作废/已软删的单不可编辑：事务内终态守卫直接 404，不产生任何库存变动", async () => {
+    const tx = {
+      saleOrder: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "o1",
+          shopId: SHOP,
+          status: "voided",
+          deletedAt: new Date(),
+          items: [],
+        }),
+      },
+      sku: { updateMany: vi.fn(), update: vi.fn() },
+      saleItem: { update: vi.fn(), delete: vi.fn() },
+      stockMovement: { createMany: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
+    } as any;
+    const service = new SalesCommandService(prisma, productsStub);
+
+    await expect(
+      service.editOrder(SHOP, "o1", { items: [{ id: "i1", quantity: 1, price: 5000 }] }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.sku.updateMany).not.toHaveBeenCalled();
+    expect(tx.saleItem.update).not.toHaveBeenCalled();
+  });
+
+  it("改价后金额溢出 Int32：抛 400 而不是让 PG 报 500", async () => {
+    const editable = {
+      id: "o1",
+      shopId: SHOP,
+      status: "completed",
+      deletedAt: null,
+      orderDiscountCents: 0,
+      items: [
+        {
+          id: "i1",
+          skuId: "s1",
+          quantity: 1,
+          price: 5000,
+          subtotal: 5000,
+          sku: { id: "s1", productId: "p1", stock: 3, barcode: "B" },
+        },
+      ],
+    };
+    const tx = {
+      saleOrder: { findUnique: vi.fn().mockResolvedValue(editable), update: vi.fn() },
+      // delta=9998>0 会先走原子扣减（count=1 通过），随后溢出校验抛 400
+      sku: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      stockMovement: { createMany: vi.fn() },
+      saleItem: { update: vi.fn(), delete: vi.fn(), findMany: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
+    } as any;
+    const service = new SalesCommandService(prisma, productsStub);
+
+    await expect(
+      service.editOrder(SHOP, "o1", {
+        items: [{ id: "i1", quantity: 9999, price: 1_000_000_000 }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("多行合计金额溢出 Int32：同样 400，不写 totalAmount", async () => {
+    // 3 行各 10 亿元（单行合法），求和 30 亿超 Int4
+    const mkLine = (n: number) => ({
+      id: `i${n}`,
+      skuId: `s${n}`,
+      quantity: 1,
+      price: 5000,
+      subtotal: 5000,
+      sku: { id: `s${n}`, productId: "p1", stock: 9, barcode: "B" },
+    });
+    const editable = {
+      id: "o1",
+      shopId: SHOP,
+      status: "completed",
+      deletedAt: null,
+      orderDiscountCents: 0,
+      items: [mkLine(1), mkLine(2), mkLine(3)],
+    };
+    const tx = {
+      saleOrder: { findUnique: vi.fn().mockResolvedValue(editable), update: vi.fn() },
+      // quantity 不变 → delta=0，不触发任何库存操作
+      sku: { updateMany: vi.fn() },
+      stockMovement: { createMany: vi.fn() },
+      saleItem: {
+        update: vi.fn(),
+        delete: vi.fn(),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { subtotal: 1_000_000_000 },
+            { subtotal: 1_000_000_000 },
+            { subtotal: 1_000_000_000 },
+          ]),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn().mockImplementation((cb: any) => cb(tx)),
+    } as any;
+    const service = new SalesCommandService(prisma, productsStub);
+
+    await expect(
+      service.editOrder(SHOP, "o1", {
+        items: [1, 2, 3].map((n) => ({ id: `i${n}`, quantity: 1, price: 1_000_000_000 })),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.saleOrder.update).not.toHaveBeenCalled();
   });
 });

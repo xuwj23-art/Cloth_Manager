@@ -8,6 +8,11 @@ const DEMO_PHONE = "13800000000";
 const DEMO_PASSWORD = "123456";
 
 async function main() {
+  // 生产保护：误对生产库执行 db:seed 会造出弱口令 owner 账号
+  if (process.env.NODE_ENV === "production") {
+    console.error("拒绝在生产环境执行 seed（NODE_ENV=production）");
+    process.exit(1);
+  }
   const shop = await prisma.shop.create({ data: { name: "示例门店" } });
 
   await prisma.user.create({
@@ -26,9 +31,30 @@ async function main() {
       name: "纯棉圆领T恤",
       skus: {
         create: [
-          { color: "白", size: "M", barcode: "DEMO-WHITE-M", salePrice: 5900, costPrice: 2500, stock: 10 },
-          { color: "白", size: "L", barcode: "DEMO-WHITE-L", salePrice: 5900, costPrice: 2500, stock: 8 },
-          { color: "黑", size: "M", barcode: "DEMO-BLACK-M", salePrice: 5900, costPrice: 2500, stock: 5 },
+          {
+            color: "白",
+            size: "M",
+            barcode: "DEMO-WHITE-M",
+            salePrice: 5900,
+            costPrice: 2500,
+            stock: 10,
+          },
+          {
+            color: "白",
+            size: "L",
+            barcode: "DEMO-WHITE-L",
+            salePrice: 5900,
+            costPrice: 2500,
+            stock: 8,
+          },
+          {
+            color: "黑",
+            size: "M",
+            barcode: "DEMO-BLACK-M",
+            salePrice: 5900,
+            costPrice: 2500,
+            stock: 5,
+          },
         ],
       },
     },
