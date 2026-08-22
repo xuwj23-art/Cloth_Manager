@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useAuth } from "../auth-context";
@@ -17,6 +18,8 @@ type Mode = "login" | "register";
 
 export function LoginScreen() {
   const { login, register } = useAuth();
+  const { height: windowHeight } = useWindowDimensions();
+  const topPad = Math.round(windowHeight * 0.12);
   const [mode, setMode] = useState<Mode>("login");
   const [shopName, setShopName] = useState("");
   const [name, setName] = useState("");
@@ -44,7 +47,7 @@ export function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { paddingTop: topPad }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.hero}>
@@ -130,11 +133,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
-    justifyContent: "center",
-    padding: 24,
+    justifyContent: "flex-start",
+    paddingHorizontal: 24,
+    paddingBottom: 24,
     gap: 12,
   },
-  hero: { alignItems: "center", marginBottom: 20 },
+  hero: { alignItems: "center", marginBottom: 28 },
   input: {
     backgroundColor: colors.card,
     borderRadius: radius.md,

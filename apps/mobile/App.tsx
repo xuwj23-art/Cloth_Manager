@@ -1,7 +1,8 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ReactNode, useEffect } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import { Asset } from "expo-asset";
 import { useFonts } from "expo-font";
 import { NavigationContainer } from "@react-navigation/native";
 import { AuthProvider, useAuth } from "./src/auth-context";
@@ -85,9 +86,21 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export default function App() {
+  // 正式 APK 不会像 Expo Go 那样预装矢量字体；ionicons 必须与品牌字一样从
+  // 工程 assets 加载，且 family 名必须是 `ionicons`（@expo/vector-icons 写死的）。
   const [fontsLoaded, fontError] = useFonts({
+    ionicons: require("./assets/fonts/Ionicons.ttf"),
     NotoSerifSC: require("./assets/fonts/NotoSerifSC-Brand.ttf"),
   });
+
+  useEffect(() => {
+    void Asset.loadAsync([
+      require("./assets/logo_mark.png"),
+      require("./assets/logo_lockup.png"),
+    ]).catch(() => {
+      /* 启动不阻断，Image 仍会再试一次 */
+    });
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return (

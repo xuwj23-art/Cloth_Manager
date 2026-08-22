@@ -1,8 +1,8 @@
 import { Image, StyleSheet, Text, View } from "react-native";
 import { colors, fontFamily } from "../theme/tokens";
 
-const mark = require("../../assets/logo-mark.png");
-const lockup = require("../../assets/logo-lockup.png");
+const mark = require("../../assets/logo_mark.png");
+const lockup = require("../../assets/logo_lockup.png");
 
 export function BrandLockup({ variant = "header" }: { variant?: "header" | "login" }) {
   if (variant === "login") {
@@ -37,7 +37,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   loginWrap: { alignItems: "center", gap: 14 },
-  lockup: { width: 196, height: 154 },
+  lockup: { width: 168, height: 132 },
   loginTitle: {
     fontFamily: fontFamily.brand,
     fontSize: 26,
