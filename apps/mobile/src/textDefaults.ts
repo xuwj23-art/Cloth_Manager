@@ -2,8 +2,10 @@ import { Text, TextInput } from "react-native";
 import { colors } from "./theme/tokens";
 
 /**
- * 收银机布局按 dp 排，不能跟着系统「字体大小 / 显示大小」一起放大。
- * 华为等机型默认字号偏大时，占位符会被裁掉、三列表头会折行。
+ * 注意：React 19 + 新架构已忽略函数组件 defaultProps，这里的
+ * allowFontScaling:false 全局补丁【已失效】。真正的字体缩放锁定在
+ * plugins/lock-font-scale.js（MainActivity 强制 fontScale=1）。
+ * 本文件保留 TextInput 的占位色/去下划线等默认（如同样失效则各处已显式设置）。
  */
 function patchDefaults(
   component: { defaultProps?: Record<string, unknown> | undefined },
