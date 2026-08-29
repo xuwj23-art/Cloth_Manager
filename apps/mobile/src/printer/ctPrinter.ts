@@ -83,10 +83,7 @@ export async function getBondedDevices(): Promise<CtBondedDevice[]> {
 }
 
 /** 连接打印机；resolve 为连接结果码（257=SPP, 256=BLE, 258=USB） */
-export async function connectPrinter(
-  mac: string,
-  port: CtPort = "SPP",
-): Promise<number> {
+export async function connectPrinter(mac: string, port: CtPort = "SPP"): Promise<number> {
   if (!Native) throw new Error("当前为 Expo Go，蓝牙打印需使用安装版 App");
   await ensureBtPermissions();
   return Native.connect(mac, port);
@@ -96,12 +93,13 @@ export async function connectPrinter(
 function explainConnectError(msg: string): string {
   if (/代码=516/.test(msg))
     return "权限不足：请允许「附近的设备/蓝牙」和「位置」权限，并打开手机的「位置/GPS」开关后重试";
-  if (/代码=518/.test(msg))
-    return "SPP 配对失败：请到手机「系统设置→蓝牙」里重新配对这台打印机";
-  if (/代码=519/.test(msg))
-    return "BLE 服务不匹配：该打印机可能不支持当前蓝牙服务";
+  if (/代码=518/.test(msg)) return "SPP 配对失败：请到手机「系统设置→蓝牙」里重新配对这台打印机";
+  if (/代码=519/.test(msg)) return "BLE 服务不匹配：该打印机可能不支持当前蓝牙服务";
   if (/代码=514/.test(msg)) return "打印机已连接，无需重复连接";
   if (/代码=512/.test(msg)) return "不支持的连接类型";
+  // 其余未知错误码：保留码便于排查，同时给出可行动指引
+  const code = msg.match(/代码=(\d+)/)?.[1];
+  if (code) return `无法连接打印机（代码 ${code}）：请确认打印机已开机、在手机附近，然后重试`;
   return msg;
 }
 

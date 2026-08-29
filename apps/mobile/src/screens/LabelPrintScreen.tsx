@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +14,8 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import QRCode from "react-native-qrcode-svg";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import {
   connectPrinterAuto,
   disconnectPrinter,
@@ -27,6 +30,7 @@ import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.type
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { BackButton } from "../components/BackButton";
 import { useDialog } from "../dialog-context";
+import { colors, font, radius, space } from "../theme/tokens";
 import { yuan } from "../utils/format";
 
 type LabelPrintNav = NativeStackNavigationProp<RootStackParamList, "LabelPrint">;
@@ -46,8 +50,21 @@ const ORIENTATIONS = [
 ] as const;
 
 type Orientation = (typeof ORIENTATIONS)[number]["id"];
-
 type LabelSize = (typeof LABEL_SIZES)[number];
+
+/**
+ * 仅开发构建（__DEV__）使用的虚拟已配对设备：Android 模拟器没有真实蓝牙，
+ * 用于在模拟器上走通「连接中 / 失败 / 重试」的 UI 状态。生产包不受影响。
+ */
+const DEV_FIXTURE_DEVICES: CtBondedDevice[] = [{ name: "X1（调试）", mac: "00:11:22:33:44:55" }];
+
+/** 连接状态机：connecting 连接中（雷达动画）；success 已连上（对勾弹出，短驻自动关）；failed 失败（原因 + 重试） */
+interface ConnectState {
+  mac: string;
+  name: string;
+  phase: "connecting" | "success" | "failed";
+  msg?: string;
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -104,6 +121,254 @@ function buildLabelsHtml(labels: LabelItem[], size: LabelSize, orientation: Orie
   </style></head><body>${cells}</body></html>`;
 }
 
+/** 触感反馈（部分设备不支持时静默忽略） */
+function haptic(kind: "success" | "error" | "light") {
+  try {
+    if (kind === "success") {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (kind === "error") {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } else {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  } catch {
+    // 忽略
+  }
+}
+
+/**
+ * 连接中信号条：三根错峰呼吸的竖条（配对/传输场景的通用视觉词汇），
+ * 取代干巴巴的系统转圈，让「正在连接」一眼可读。挂载即循环，卸载自动停止。
+ */
+function SignalBars({ color = "#fff", barWidth = 3 }: { color?: string; barWidth?: number }) {
+  const v0 = useRef(new Animated.Value(0.35)).current;
+  const v1 = useRef(new Animated.Value(0.35)).current;
+  const v2 = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    const anims = [v0, v1, v2].map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 140),
+          Animated.timing(v, { toValue: 1, duration: 320, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.35, duration: 320, useNativeDriver: true }),
+        ]),
+      ),
+    );
+    anims.forEach((a) => a.start());
+    return () => anims.forEach((a) => a.stop());
+  }, [v0, v1, v2]);
+  return (
+    <View style={signalStyles.row}>
+      {[
+        { v: v0, h: 6 },
+        { v: v1, h: 11 },
+        { v: v2, h: 16 },
+      ].map((b, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            signalStyles.bar,
+            { height: b.h, width: barWidth, backgroundColor: color, opacity: b.v },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
+const signalStyles = StyleSheet.create({
+  row: { flexDirection: "row", alignItems: "flex-end", gap: 2.5, height: 16 },
+  bar: { borderRadius: 1.5 },
+});
+
+/**
+ * 连接中雷达动画：中心蓝牙图标 + 两圈错峰扩散的涟漪环，
+ * 表达「正在搜寻/建立连接」。挂载即循环，原生驱动，卸载自动停止。
+ */
+function RadarConnect({ size = 120 }: { size?: number }) {
+  const r1 = useRef(new Animated.Value(0)).current;
+  const r2 = useRef(new Animated.Value(0)).current;
+  const iconPulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const ring1 = Animated.loop(
+      Animated.timing(r1, { toValue: 1, duration: 1600, useNativeDriver: true }),
+    );
+    const ring2 = Animated.loop(
+      Animated.sequence([
+        Animated.delay(800),
+        Animated.timing(r2, { toValue: 1, duration: 1600, useNativeDriver: true }),
+      ]),
+    );
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(iconPulse, { toValue: 1.15, duration: 700, useNativeDriver: true }),
+        Animated.timing(iconPulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    ring1.start();
+    ring2.start();
+    pulse.start();
+    return () => {
+      ring1.stop();
+      ring2.stop();
+      pulse.stop();
+    };
+  }, [r1, r2, iconPulse]);
+
+  const ringStyle = (v: Animated.Value) => ({
+    position: "absolute" as const,
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    borderWidth: 2.5,
+    borderColor: colors.primary,
+    transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.3] }) }],
+    opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.8, 0] }),
+  });
+
+  return (
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <Animated.View style={ringStyle(r1)} pointerEvents="none" />
+      <Animated.View style={ringStyle(r2)} pointerEvents="none" />
+      <Animated.View
+        style={{
+          width: size * 0.5,
+          height: size * 0.5,
+          borderRadius: (size * 0.5) / 2,
+          backgroundColor: colors.primarySoft,
+          alignItems: "center",
+          justifyContent: "center",
+          transform: [{ scale: iconPulse }],
+        }}
+      >
+        <Ionicons name="bluetooth" size={26} color={colors.primary} />
+      </Animated.View>
+    </View>
+  );
+}
+
+/** 成功对勾：弹性放大进场（一次性） */
+function SuccessCheck({ size = 84 }: { size?: number }) {
+  const pop = useRef(new Animated.Value(0.3)).current;
+  useEffect(() => {
+    Animated.spring(pop, { toValue: 1, friction: 4, tension: 160, useNativeDriver: true }).start();
+  }, [pop]);
+  return (
+    <Animated.View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: "rgba(22,163,74,0.12)",
+        alignItems: "center",
+        justifyContent: "center",
+        transform: [{ scale: pop }],
+      }}
+    >
+      <Ionicons name="checkmark-circle" size={size * 0.62} color={colors.online} />
+    </Animated.View>
+  );
+}
+
+/**
+ * 连接状态二级弹窗：覆盖在设备列表弹层之上，设备列表保持干净。
+ * - connecting：雷达动画 + 预期文案（无按钮，连接不可中断，最长约 15 秒自动出结果）
+ * - success：对勾弹出，约 1 秒后自动关闭（设备列表一并收起）
+ * - failed：失败原因（完整多行）+ 重试 / 返回列表
+ */
+function ConnectDialog({
+  state,
+  onRetry,
+  onClose,
+}: {
+  state: ConnectState;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  const { phase, name } = state;
+  // success 短驻自动关闭由父组件计时，这里只负责展示
+  return (
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      onRequestClose={() => phase === "failed" && onClose()}
+    >
+      <View style={styles.cdMask}>
+        <View style={styles.cdCard}>
+          {phase === "connecting" ? (
+            <>
+              <RadarConnect />
+              <Text style={styles.cdTitle}>正在连接「{name}」</Text>
+              <Text style={styles.cdSub}>约需 3~15 秒，请保持打印机开机</Text>
+              <Text style={styles.cdSubMuted}>请勿锁屏或离开本页</Text>
+            </>
+          ) : phase === "success" ? (
+            <>
+              <SuccessCheck />
+              <Text style={[styles.cdTitle, { color: colors.online }]}>已连接</Text>
+              <Text style={styles.cdSub}>{name}</Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.cdFailIcon}>
+                <Ionicons name="close-circle" size={46} color={colors.danger} />
+              </View>
+              <Text style={[styles.cdTitle, { color: colors.danger }]}>连接失败</Text>
+              <Text style={styles.cdReason}>{state.msg}</Text>
+              <View style={styles.cdActions}>
+                <Pressable style={styles.cdSecondary} onPress={onClose}>
+                  <Ionicons name="chevron-back" size={16} color={colors.textMuted} />
+                  <Text style={styles.cdSecondaryText}>返回列表</Text>
+                </Pressable>
+                <Pressable style={styles.cdPrimary} onPress={onRetry}>
+                  <Ionicons name="refresh" size={16} color="#fff" />
+                  <Text style={styles.cdPrimaryText}>重试</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** 单台已配对设备的行：状态反馈统一走二级弹窗，列表只负责展示与点选 */
+function DeviceRow({
+  dev,
+  disabled,
+  onConnect,
+}: {
+  dev: CtBondedDevice;
+  disabled: boolean;
+  onConnect: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.devRow,
+        pressed && styles.devRowPressed,
+        disabled && styles.devRowDim,
+      ]}
+      disabled={disabled}
+      android_ripple={{ color: "rgba(37,99,235,0.10)", borderless: false }}
+      onPress={onConnect}
+      accessibilityRole="button"
+      accessibilityLabel={`连接打印机 ${dev.name}`}
+    >
+      <View style={styles.devIconChip}>
+        <Ionicons name="bluetooth" size={20} color={colors.primary} />
+      </View>
+      <View style={styles.devInfo}>
+        <Text style={styles.devName}>{dev.name}</Text>
+        <Text style={styles.devMac}>{dev.mac}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="#C7CDD6" />
+    </Pressable>
+  );
+}
+
 export function LabelPrintScreen() {
   const navigation = useNavigation<LabelPrintNav>();
   const route = useRoute<LabelPrintRoute>();
@@ -120,6 +385,7 @@ export function LabelPrintScreen() {
   const [devices, setDevices] = useState<CtBondedDevice[]>([]);
   const [scanning, setScanning] = useState(false);
   const [connected, setConnected] = useState(isPrinterConnected());
+  const [connect, setConnect] = useState<ConnectState | null>(null);
 
   function setQtyFor(id: string, n: number) {
     setQty((prev) => ({ ...prev, [id]: Math.max(0, n) }));
@@ -186,10 +452,12 @@ export function LabelPrintScreen() {
 
   async function openBluetooth() {
     setBtOpen(true);
+    setConnect(null);
     setScanning(true);
     try {
       const list = await getBondedDevices();
-      setDevices(list);
+      // 模拟器无真实蓝牙：开发构建下用虚拟设备走通连接 UI（生产包不走这里）
+      setDevices(list.length > 0 || !__DEV__ ? list : DEV_FIXTURE_DEVICES);
     } catch (e) {
       await notice("无法读取蓝牙设备", (e as Error).message);
     } finally {
@@ -198,25 +466,35 @@ export function LabelPrintScreen() {
   }
 
   async function doConnect(dev: CtBondedDevice) {
-    if (busy) return;
-    setBusy(true);
+    if (connect?.phase === "connecting") return;
+    haptic("light");
+    setConnect({ mac: dev.mac, name: dev.name, phase: "connecting" });
     try {
       await connectPrinterAuto(dev.mac);
       setConnected(true);
-      setBtOpen(false);
-      await notice("已连接", dev.name);
+      haptic("success");
+      setConnect({ mac: dev.mac, name: dev.name, phase: "success" });
     } catch (e) {
       const msg = (e as Error).message;
+      let hint = msg;
       // 若是权限/位置类失败，且系统定位没开，给出更明确指引
       if (/权限|516|位置/.test(msg) && !isLocationEnabled()) {
-        await notice("连接失败", "请打开手机定位后重试");
-      } else {
-        await notice("连接失败", msg);
+        hint = "请打开手机定位后重试";
       }
-    } finally {
-      setBusy(false);
+      setConnect({ mac: dev.mac, name: dev.name, phase: "failed", msg: hint });
+      haptic("error");
     }
   }
+
+  // success 短驻展示后自动收起二级弹窗与设备列表
+  useEffect(() => {
+    if (connect?.phase !== "success") return;
+    const t = setTimeout(() => {
+      setConnect(null);
+      setBtOpen(false);
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [connect?.phase]);
 
   async function handleBtPrint() {
     if (!isPrinterConnected()) {
@@ -243,6 +521,7 @@ export function LabelPrintScreen() {
   }
 
   const totalLabels = product.skus.reduce((s, k) => s + (qty[k.id] ?? 0), 0);
+  const connecting = connect?.phase === "connecting";
 
   return (
     <View style={styles.container}>
@@ -330,9 +609,33 @@ export function LabelPrintScreen() {
 
       {isPrinterAvailable ? (
         <View style={styles.btBar}>
-          <Text style={styles.btStatus}>
-            {connected ? "🟢 蓝牙打印机已连接" : "⚪ 蓝牙打印机未连接"}
-          </Text>
+          <View style={styles.btStatus}>
+            <View
+              style={[
+                styles.btChip,
+                connecting ? styles.btChipBusy : connected ? styles.btChipOn : styles.btChipOff,
+              ]}
+            >
+              {connecting ? (
+                <SignalBars color={colors.primary} />
+              ) : (
+                <Ionicons
+                  name={connected ? "bluetooth" : "bluetooth"}
+                  size={15}
+                  color={connected ? colors.online : "#9CA3AF"}
+                />
+              )}
+            </View>
+            <Text
+              style={[
+                styles.btStatusText,
+                connecting && { color: colors.primary, fontWeight: "700" },
+                connected && { color: colors.online, fontWeight: "700" },
+              ]}
+            >
+              {connecting ? "正在连接打印机…" : connected ? "蓝牙打印机已连接" : "蓝牙打印机未连接"}
+            </Text>
+          </View>
           {connected ? (
             <Pressable
               onPress={() => {
@@ -384,14 +687,18 @@ export function LabelPrintScreen() {
         visible={btOpen}
         transparent
         animationType="slide"
-        onRequestClose={() => setBtOpen(false)}
+        onRequestClose={() => {
+          if (!connecting) setBtOpen(false);
+        }}
       >
         <View style={styles.modalMask}>
           <View style={styles.modalCard}>
             <View style={styles.modalHead}>
               <Text style={styles.modalTitle}>选择蓝牙打印机</Text>
-              <Pressable onPress={openBluetooth} hitSlop={8} disabled={scanning}>
-                <Text style={styles.btLink}>{scanning ? "刷新中…" : "刷新"}</Text>
+              <Pressable onPress={openBluetooth} hitSlop={8} disabled={scanning || connecting}>
+                <Text style={[styles.btLink, (scanning || connecting) && styles.btLinkDim]}>
+                  {scanning ? "刷新中…" : "刷新"}
+                </Text>
               </Pressable>
             </View>
             <Text style={styles.modalHint}>
@@ -400,28 +707,44 @@ export function LabelPrintScreen() {
             {scanning ? (
               <ActivityIndicator style={{ marginVertical: 20 }} />
             ) : devices.length === 0 ? (
-              <Text style={styles.modalEmpty}>未找到已配对设备</Text>
+              <View style={styles.emptyBlock}>
+                <Ionicons name="hardware-chip-outline" size={30} color="#9CA3AF" />
+                <Text style={styles.emptyTitle}>未找到已配对设备</Text>
+                <Text style={styles.emptyHint}>
+                  打开手机「系统设置 → 蓝牙」，长按打印机完成配对后，点右上角「刷新」
+                </Text>
+              </View>
             ) : (
-              <ScrollView style={{ maxHeight: 280 }}>
+              <ScrollView style={{ maxHeight: 300 }}>
                 {devices.map((d) => (
-                  <Pressable
+                  <DeviceRow
                     key={d.mac}
-                    style={styles.devRow}
-                    disabled={busy}
-                    onPress={() => doConnect(d)}
-                  >
-                    <Text style={styles.devName}>{d.name}</Text>
-                    <Text style={styles.devMac}>{d.mac}</Text>
-                  </Pressable>
+                    dev={d}
+                    disabled={connecting}
+                    onConnect={() => void doConnect(d)}
+                  />
                 ))}
               </ScrollView>
             )}
-            <Pressable style={styles.modalClose} onPress={() => setBtOpen(false)}>
+            <Pressable
+              style={[styles.modalClose, connecting && styles.dim]}
+              disabled={connecting}
+              onPress={() => setBtOpen(false)}
+            >
               <Text style={styles.modalCloseText}>关闭</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
+
+      {/* 连接状态二级弹窗：覆盖在设备列表之上，列表本身保持干净 */}
+      {connect ? (
+        <ConnectDialog
+          state={connect}
+          onRetry={() => void doConnect(devices.find((d) => d.mac === connect.mac)!)}
+          onClose={() => setConnect(null)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -515,6 +838,8 @@ const styles = StyleSheet.create({
   },
   primaryText: { color: "#fff", fontSize: 15, fontWeight: "800" },
   dim: { opacity: 0.5 },
+
+  // ---- 底部蓝牙状态栏 ----
   btBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -524,8 +849,22 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#f0f0f0",
   },
-  btStatus: { fontSize: 13, color: "#374151", fontWeight: "600" },
+  btStatus: { flexDirection: "row", alignItems: "center", gap: 8 },
+  btChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btChipOn: { backgroundColor: "rgba(22,163,74,0.12)" },
+  btChipOff: { backgroundColor: "#f3f4f6" },
+  btChipBusy: { backgroundColor: colors.primarySoft },
+  btStatusText: { fontSize: 13, color: "#374151", fontWeight: "600" },
   btLink: { color: "#2563eb", fontSize: 14, fontWeight: "700" },
+  btLinkDim: { color: "#cbd5e1" },
+
+  // ---- 设备选择弹层 ----
   modalMask: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -545,14 +884,40 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 17, fontWeight: "800", color: "#111" },
   modalHint: { fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 18 },
-  modalEmpty: { fontSize: 14, color: "#9ca3af", textAlign: "center", marginVertical: 24 },
+  emptyBlock: {
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 26,
+    paddingHorizontal: space.lg,
+  },
+  emptyTitle: { fontSize: font.body, fontWeight: "700", color: "#374151" },
+  emptyHint: { fontSize: font.caption, color: "#9ca3af", textAlign: "center", lineHeight: 20 },
+
+  // ---- 设备行 ----
   devRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
     paddingVertical: 14,
+    paddingHorizontal: space.sm,
+    marginHorizontal: -space.sm,
+    borderRadius: radius.md,
     borderBottomWidth: 1,
     borderBottomColor: "#f3f4f6",
   },
+  devRowPressed: { backgroundColor: "rgba(37,99,235,0.06)" },
+  devRowDim: { opacity: 0.45 },
+  devIconChip: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  devInfo: { flex: 1, gap: 2, minWidth: 0 },
   devName: { fontSize: 15, fontWeight: "700", color: "#111" },
-  devMac: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+  devMac: { fontSize: 12, color: "#9ca3af" },
   modalClose: {
     marginTop: 16,
     paddingVertical: 13,
@@ -561,4 +926,63 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
   },
   modalCloseText: { fontSize: 15, fontWeight: "700", color: "#374151" },
+
+  // ---- 连接状态二级弹窗 ----
+  cdMask: {
+    flex: 1,
+    backgroundColor: "rgba(17,24,39,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: space.xxl,
+  },
+  cdCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: "#fff",
+    borderRadius: radius.xl,
+    padding: space.xxl,
+    alignItems: "center",
+    gap: space.md,
+  },
+  cdTitle: { fontSize: font.title, fontWeight: "800", color: colors.text },
+  cdSub: { fontSize: font.body, color: "#374151", textAlign: "center" },
+  cdSubMuted: { fontSize: font.caption, color: "#9ca3af", marginTop: -space.xs },
+  cdFailIcon: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: colors.dangerSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cdReason: {
+    fontSize: font.caption,
+    color: "#B91C1C",
+    lineHeight: 21,
+    textAlign: "center",
+  },
+  cdActions: { flexDirection: "row", gap: space.md, marginTop: space.sm, alignSelf: "stretch" },
+  cdSecondary: {
+    flex: 1,
+    height: 48,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  cdSecondaryText: { fontSize: font.body, fontWeight: "700", color: colors.textMuted },
+  cdPrimary: {
+    flex: 1,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  cdPrimaryText: { fontSize: font.body, fontWeight: "800", color: "#fff" },
 });
