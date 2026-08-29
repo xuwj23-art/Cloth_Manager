@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type {
   DailySalesStat,
   MonthlySalesReport,
   OperatorSalesStat,
+  RangeSalesReport,
   SaleOrderDetail,
   SalesBucket,
   SalesRange,
@@ -291,6 +292,62 @@ export class SalesReportService {
     return { year, month, total, byOperator, days };
   }
 
+  /**
+   * 任意时间段报表（含端点）：合计 + 各店员 + 时段内全部流水（倒序）。
+   * from/to 为北京时间本地日期 YYYY-MM-DD。区间最长 62 天（超长截断到 from+61 天），
+   * 覆盖月→周→日下钻与环比对比两类取数，无需分页。
+   */
+  async rangeReport(shopId: string, from: string, to: string): Promise<RangeSalesReport> {
+    const f = parseLocalDate(from);
+    const t = parseLocalDate(to);
+    if (!f || !t) throw new BadRequestException("日期格式应为 YYYY-MM-DD");
+    const start = cnStartOfDay(f.y, f.m, f.d);
+    let end = cnStartOfDay(t.y, t.m, t.d + 1); // to 含端点 → 次日 0 点
+    if (end <= start) throw new BadRequestException("结束日期不能早于开始日期");
+    const maxEnd = new Date(start.getTime() + 62 * 24 * 3_600_000);
+    if (end > maxEnd) end = maxEnd;
+
+    const where = {
+      shopId,
+      status: "completed" as const,
+      deletedAt: null,
+      createdAt: { gte: start, lt: end },
+    };
+
+    const [orderAgg, itemAgg, totalCost, byOperatorAgg, orders] = await Promise.all([
+      this.prisma.saleOrder.aggregate({
+        where,
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+      this.prisma.saleItem.aggregate({
+        where: { order: where },
+        _sum: { quantity: true },
+      }),
+      this.sumCost(where),
+      this.operatorGroupBy(where),
+      this.prisma.saleOrder.findMany({
+        where,
+        include: {
+          operator: true,
+          items: { include: { sku: { include: { product: true } } } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    const total: SalesStat = {
+      revenue: orderAgg._sum.totalAmount ?? 0,
+      cost: totalCost,
+      profit: (orderAgg._sum.totalAmount ?? 0) - totalCost,
+      orders: orderAgg._count,
+      quantity: itemAgg._sum.quantity ?? 0,
+    };
+    const byOperator = await this.materializeOperatorStats(byOperatorAgg, where);
+
+    return { from, to, total, byOperator, orders: orders.map((o) => this.toDetail(o)) };
+  }
+
   // ---- E2 下推辅助 -------------------------------------------------------
 
   /**
@@ -524,6 +581,17 @@ export class SalesReportService {
  * 生产容器默认 UTC，若按进程本地时区切日，北京时间 0-8 点的销售会被归到前一天。
  */
 const CN_TZ_OFFSET_MS = 8 * 3_600_000;
+
+/** 解析 YYYY-MM-DD 为本地日历分量；格式非法返回 null */
+function parseLocalDate(s: string): { y: number; m: number; d: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return { y, m: mo, d };
+}
 
 /** 取某时刻的北京时间日历分量（读偏移后时间的 UTC 分量，不依赖进程时区） */
 function cnParts(d: Date): { y: number; m: number; d: number; day: number } {

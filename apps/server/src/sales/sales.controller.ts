@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -89,6 +90,18 @@ export class SalesController {
     const safeYear = Number.isInteger(y) && y >= 2000 && y <= 2999 ? y : now.getFullYear();
     const safeMonth = Number.isInteger(m) && m >= 1 && m <= 12 ? m : now.getMonth() + 1;
     return this.reports.monthlyReport(user.shopId, safeYear, safeMonth);
+  }
+
+  /** 任意时间段报表（合计+店员+流水）：店主专属。from/to=YYYY-MM-DD（含端点，最长 62 天） */
+  @Get("range")
+  @Roles("owner")
+  range(@CurrentUser() user: RequestUser, @Query("from") from?: string, @Query("to") to?: string) {
+    const f = (from ?? "").trim();
+    const t = (to ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || !/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+      throw new BadRequestException("日期格式应为 YYYY-MM-DD");
+    }
+    return this.reports.rangeReport(user.shopId, f, t);
   }
 
   /** 某天销售流水：店主专属。date=YYYY-MM-DD */

@@ -193,3 +193,19 @@ export interface MonthlySalesReport {
   byOperator: OperatorSalesStat[];
   days: DailySalesStat[];
 }
+
+/* --------------------- 任意时间段报表（周/日下钻） --------------------- */
+
+/**
+ * 任意时间段报表：合计 + 各店员 + 该时段内全部订单流水（按时间倒序）。
+ * 用于销售统计下钻视图（月 → 周 → 日）与环比（客户端另取上一期数据对比）。
+ */
+export interface RangeSalesReport {
+  /** 起始日（含），YYYY-MM-DD（北京时间） */
+  from: string;
+  /** 结束日（含），YYYY-MM-DD（北京时间） */
+  to: string;
+  total: SalesStat;
+  byOperator: OperatorSalesStat[];
+  orders: SaleOrderDetail[];
+}

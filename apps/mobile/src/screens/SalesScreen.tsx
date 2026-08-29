@@ -1,195 +1,105 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   FlatList,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import type {
-  DailySalesStat,
-  MonthlySalesReport,
-  OperatorSalesStat,
-  SaleOrderDetail,
-  SalesRange,
-  SalesReport,
-  SalesStat,
-} from "@cloth-scan/shared";
-import { getMonthlySales, getSalesByDay, getSalesReport, listSales } from "../api";
+import type { RangeSalesReport, SaleOrderDetail } from "@cloth-scan/shared";
+import { getSalesRange } from "../api";
 import { BackButton } from "../components/BackButton";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { yuan } from "../utils/format";
+import { colors, font, radius, space } from "../theme/tokens";
+import { TimePickerSheet } from "./sales/TimePickerSheet";
+import {
+  DayBars,
+  HeroCard,
+  OrderRow,
+  PeriodSwitcher,
+  StaffCard,
+  WeekRows,
+  addDaysStr,
+  cnToday,
+  daysInMonth,
+  fmtWeekCompact,
+  monthWeekRows,
+  ordersToBars,
+  weekStartOfStr,
+  type Granularity,
+} from "./sales/SalesUi";
 
 type SalesNav = NativeStackNavigationProp<RootStackParamList, "Sales">;
 
-/** 月报列表用：不含年份（月份由分组标题给出），仅 "MM-DD HH:mm" */
-function formatTimeNoYear(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
+/** 视图切换动画方向：prev=往更早（内容自左滑入）next=更近（自右）down=粒度/选择器切换（自下淡入） */
+type EnterDir = "left" | "right" | "down";
 
-/** 日列表用：仅 "HH:mm" */
-function formatClock(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-/** YYYY-MM-DD → 「M月D日 周X」 */
-function formatDay(date: string): string {
-  const [y, m, d] = date.split("-").map(Number);
-  const wd = ["日", "一", "二", "三", "四", "五", "六"][new Date(y!, m! - 1, d!).getDay()];
-  return `${m}月${d}日 周${wd}`;
-}
-
-/** 最近 n 个月（含当月），当月在最前 */
-function lastMonths(n: number): { year: number; month: number }[] {
-  const now = new Date();
-  return Array.from({ length: n }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    return { year: d.getFullYear(), month: d.getMonth() + 1 };
-  });
-}
-
-export type SalesMonth = { year: number; month: number };
-export type SalesTab = SalesRange | "history";
-type SelMonth = SalesMonth;
-type TabKey = SalesTab;
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "today", label: "今日" },
-  { key: "week", label: "本周" },
-  { key: "month", label: "本月" },
-  { key: "history", label: "历史" },
-];
-
-/** 合计卡：营业额 + 毛利（含毛利率）+ 单数/件数 */
-function TotalCard({ total }: { total: SalesStat }) {
-  const margin = total.revenue > 0 ? Math.round((total.profit / total.revenue) * 100) : 0;
-  return (
-    <View style={styles.totalCard}>
-      <View style={styles.totalTop}>
-        <View>
-          <Text style={styles.totalLabel}>营业额</Text>
-          <Text style={styles.totalRevenue}>{yuan(total.revenue)}</Text>
-        </View>
-        <View style={{ alignItems: "flex-end" }}>
-          <Text style={styles.totalLabel}>毛利</Text>
-          <Text style={[styles.totalProfit, { color: total.profit >= 0 ? "#16a34a" : "#dc2626" }]}>
-            {yuan(total.profit)}
-          </Text>
-          <Text style={styles.totalMargin}>毛利率 {margin}%</Text>
-        </View>
-      </View>
-      <Text style={styles.totalMeta}>
-        {total.orders} 单 · {total.quantity} 件
-      </Text>
-    </View>
-  );
-}
-
-/** 店员销售额：按营业额从高到低 */
-function OperatorCard({ ops }: { ops: OperatorSalesStat[] }) {
-  if (!ops || ops.length === 0) return null;
-  return (
-    <View style={styles.opBox}>
-      <Text style={styles.chartTitle}>店员销售额</Text>
-      {ops.map((o) => (
-        <View key={o.operatorId ?? "__none__"} style={styles.opRow}>
-          <Text style={styles.opName} numberOfLines={1}>
-            {o.operatorName ?? "未指定 / 已删除"}
-          </Text>
-          <View style={styles.opRight}>
-            <Text style={styles.opRevenue}>{yuan(o.revenue)}</Text>
-            <Text style={styles.opMeta}>
-              {o.orders}单 · {o.quantity}件
-            </Text>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-/** 下钻迷你条形图：本周按天、本月按周；空数据也展示 */
-function BucketChart({ report }: { report: SalesReport }) {
-  if (report.buckets.length === 0) return null;
-  const max = Math.max(1, ...report.buckets.map((b) => b.revenue));
-  const title = report.range === "week" ? "每日营业额" : "每周营业额";
-  return (
-    <View style={styles.chartBox}>
-      <Text style={styles.chartTitle}>{title}</Text>
-      {report.buckets.map((b) => (
-        <View key={b.key} style={styles.barRow}>
-          <Text style={styles.barLabel}>{b.label}</Text>
-          <View style={styles.barTrack}>
-            <View style={[styles.barFill, { width: `${Math.max(2, (b.revenue / max) * 100)}%` }]} />
-          </View>
-          <View style={styles.barValues}>
-            <Text style={styles.barRevenue}>{yuan(b.revenue)}</Text>
-            <Text style={[styles.barProfit, { color: b.profit >= 0 ? "#16a34a" : "#dc2626" }]}>
-              利 {yuan(b.profit)}
-            </Text>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
+/**
+ * 销售统计（重构版）
+ *
+ * 统一心智：粒度（日/周/月）分段 + ‹ › 翻期；每个时段一张「夜色账本」Hero 概览
+ * （营业额/毛利/单数/件数 + 今日·本周·本月角标）+ 员工拆分（点击筛选流水）+ 流水。
+ * 日=流水直出；周=每日柱图（柱顶数值）后员工；月=周表（自然周裁剪到月内）后员工。
+ * 下钻链路：月（周表行）→ 周（每日柱）→ 日（流水）；右上角日历为通用时间选择器。
+ * 取数统一走 /sales/range（合计+员工+流水一次拿全，≤62 天）。
+ */
 export function SalesScreen() {
   const navigation = useNavigation<SalesNav>();
-  const [tab, setTab] = useState<SalesTab>("today");
-  const [sel, setSel] = useState<SalesMonth>(() => {
-    const d = new Date();
-    return { year: d.getFullYear(), month: d.getMonth() + 1 };
-  });
-  const [day, setDay] = useState<string | null>(null);
 
-  const [orders, setOrders] = useState<SaleOrderDetail[]>([]);
-  const [report, setReport] = useState<SalesReport | null>(null);
-  const [monthly, setMonthly] = useState<MonthlySalesReport | null>(null);
+  const [gran, setGran] = useState<Granularity>("day");
+  const [anchor, setAnchor] = useState<string>(() => cnToday());
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [operatorFilter, setOperatorFilter] = useState<string | null>(null);
+
+  const [data, setData] = useState<RangeSalesReport | null>(null);
+  const [loadedKey, setLoadedKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const months = useMemo(() => lastMonths(12), []);
-  const [monthOpen, setMonthOpen] = useState(false);
+  const todayStr = cnToday();
+  const listRef = useRef<FlatList<SaleOrderDetail>>(null);
+  const enterDir = useRef<EnterDir>("down");
 
-  // 历史 → 点某天查看当日流水
-  const [dayOrders, setDayOrders] = useState<SaleOrderDetail[]>([]);
-  const [dayLoading, setDayLoading] = useState(false);
+  // ---- 由粒度 + 锚点推导本期区间 -----------------------------------------
+  const period = useMemo(() => {
+    const [y, m] = anchor.split("-").map(Number);
+    if (gran === "day") return { from: anchor, to: anchor };
+    if (gran === "week") {
+      const from = weekStartOfStr(anchor);
+      return { from, to: addDaysStr(from, 6) };
+    }
+    const last = daysInMonth(y!, m!);
+    const mm = String(m!).padStart(2, "0");
+    return { from: `${y!}-${mm}-01`, to: `${y!}-${mm}-${String(last).padStart(2, "0")}` };
+  }, [gran, anchor]);
 
-  const load = useCallback(async (t: TabKey, m: SelMonth) => {
+  const viewKey = `${gran}:${period.from}`;
+
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      if (t === "history") {
-        setMonthly(await getMonthlySales(m.year, m.month));
-      } else {
-        const [rep, list] = await Promise.all([getSalesReport(t), listSales()]);
-        setReport(rep);
-        setOrders(list);
-      }
+      const cur = await getSalesRange(period.from, period.to);
+      setData(cur);
+      setLoadedKey(`${gran}:${period.from}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [period, gran]);
 
-  // 切 tab/月份时重载
   useEffect(() => {
-    void load(tab, sel);
-  }, [load, tab, sel]);
+    void load();
+  }, [load]);
 
-  // 返回本屏时自动刷新（替代原 salesRefreshKey 机制）：
-  // 从单据详情编辑/删除后返回，列表与报表会重新拉取最新数据。
-  // 首次挂载已由上面的 useEffect 触发，跳过避免双请求竞态。
+  // 从单据详情编辑/删除返回后刷新
   const firstFocusRef = useRef(true);
   useFocusEffect(
     useCallback(() => {
@@ -197,417 +107,330 @@ export function SalesScreen() {
         firstFocusRef.current = false;
         return;
       }
-      void load(tab, sel);
-    }, [load, tab, sel]),
+      void load();
+    }, [load]),
   );
 
-  // 当日流水：day 变化（含返回后重建）时按需加载
-  useEffect(() => {
-    if (tab !== "history" || day === null) {
-      setDayOrders([]);
-      return;
+  // ---- 步进标签：纯数字+符号（"7·21" / "7·21–27" / "2026·7"） -------------
+  const label = useMemo(() => {
+    if (gran === "month") {
+      const [y, m] = anchor.split("-").map(Number);
+      return `${y}·${m}`;
     }
-    let alive = true;
-    setDayLoading(true);
-    getSalesByDay(day)
-      .then((d) => alive && setDayOrders(d))
-      .catch(() => alive && setDayOrders([]))
-      .finally(() => alive && setDayLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [tab, day]);
+    if (gran === "week") return fmtWeekCompact(period.from, period.to);
+    const [y, m, d] = anchor.split("-").map(Number);
+    return y === Number(todayStr.split("-")[0]) ? `${m}·${d}` : `${y}·${m}·${d}`;
+  }, [gran, anchor, period, todayStr]);
 
-  function switchTab(next: TabKey) {
-    setDay(null);
-    setTab(next);
+  const nextDisabled = period.to >= todayStr;
+
+  // 当前时段角标：今日 / 本周 / 本月
+  const isCurrentPeriod =
+    gran === "day"
+      ? anchor === todayStr
+      : gran === "week"
+        ? todayStr >= period.from && todayStr <= period.to
+        : anchor.slice(0, 7) === todayStr.slice(0, 7);
+  const periodTag = gran === "day" ? "今日" : gran === "week" ? "本周" : "本月";
+
+  function scrollToTop() {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }
 
-  const soldDays = (monthly?.days ?? []).filter((d) => d.orders > 0);
+  function step(dir: -1 | 1) {
+    enterDir.current = dir === -1 ? "left" : "right";
+    if (gran === "month") {
+      const [y, m] = anchor.split("-").map(Number);
+      const nm = m! + dir;
+      const ny = nm < 1 ? y! - 1 : nm > 12 ? y! + 1 : y!;
+      const mm = ((nm - 1 + 12) % 12) + 1;
+      setAnchor(`${ny}-${String(mm).padStart(2, "0")}-15`);
+    } else {
+      setAnchor(addDaysStr(anchor, gran === "day" ? dir : dir * 7));
+    }
+    setOperatorFilter(null);
+    scrollToTop();
+  }
+
+  function switchGran(g: Granularity) {
+    if (g === gran) return;
+    enterDir.current = "down";
+    setGran(g);
+    setOperatorFilter(null);
+    scrollToTop();
+  }
+
+  function backToCurrent() {
+    enterDir.current = "down";
+    setAnchor(todayStr);
+    setOperatorFilter(null);
+    scrollToTop();
+  }
+
+  function pickTime(g: Granularity, a: string) {
+    enterDir.current = "down";
+    setGran(g);
+    setAnchor(a);
+    setOperatorFilter(null);
+    setPickerOpen(false);
+    scrollToTop();
+  }
+
+  const orders = useMemo(() => {
+    if (!data) return [];
+    if (operatorFilter === null) return data.orders;
+    return data.orders.filter((o) => (o.operatorId ?? "__none__") === operatorFilter);
+  }, [data, operatorFilter]);
+
+  const bars = useMemo(
+    () =>
+      gran === "week" && data ? ordersToBars(period.from, period.to, data.orders, todayStr) : [],
+    [gran, data, period, todayStr],
+  );
+
+  const weekRows = useMemo(
+    () =>
+      gran === "month" && data ? monthWeekRows(period.from, period.to, data.orders, todayStr) : [],
+    [gran, data, period, todayStr],
+  );
+
+  const stale = loadedKey !== viewKey; // 数据还是别的时段的，先别渲染卡片
 
   return (
     <View style={styles.container}>
       <View style={styles.topbar}>
         <BackButton onPress={() => navigation.goBack()} />
-        <Text style={styles.title}>销售记录</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      <View style={styles.tabs}>
-        {TABS.map((t) => (
-          <Pressable
-            key={t.key}
-            style={[styles.tab, tab === t.key && styles.tabActive]}
-            onPress={() => switchTab(t.key)}
-          >
-            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {tab === "history" && day === null ? (
-        <Pressable style={styles.monthSelect} onPress={() => setMonthOpen(true)}>
-          <Text style={styles.monthSelectText}>
-            {sel.year}年{sel.month}月
-          </Text>
-          <Text style={styles.monthSelectCaret}>▾</Text>
+        <Text style={styles.title}>销售统计</Text>
+        <Pressable
+          style={({ pressed }) => [styles.calBtn, pressed && styles.calBtnPressed]}
+          onPress={() => setPickerOpen(true)}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel="选择时间"
+        >
+          <Ionicons name="calendar-outline" size={22} color={colors.text} />
         </Pressable>
-      ) : null}
+      </View>
 
-      {/* 历史 → 当日流水明细 */}
-      {tab === "history" && day !== null ? (
-        <FlatList
-          data={dayOrders}
-          keyExtractor={(o) => o.id}
-          contentContainerStyle={styles.list}
-          ListHeaderComponent={
-            <View>
-              <Pressable style={styles.dayBack} onPress={() => setDay(null)}>
-                <Text style={styles.dayBackText}>‹ {sel.month}月明细</Text>
-              </Pressable>
-              <Text style={styles.dayTitle}>{formatDay(day)}</Text>
-              {dayLoading ? <ActivityIndicator style={{ marginTop: 16 }} /> : null}
-            </View>
-          }
-          ListEmptyComponent={dayLoading ? null : <Text style={styles.empty}>当日暂无流水</Text>}
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.orderCard}
-              onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
-            >
-              <View style={styles.orderLeft}>
-                <Text style={styles.orderTime}>{formatClock(item.createdAt)}</Text>
-                <Text style={styles.orderMeta}>
-                  {item.itemCount} 件{item.operatorName ? ` · ${item.operatorName}` : ""}
-                </Text>
-              </View>
-              <Text style={styles.orderAmount}>{yuan(item.totalAmount)}</Text>
-            </Pressable>
-          )}
-        />
-      ) : loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-        </View>
-      ) : error ? (
-        <View style={styles.center}>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable style={styles.retry} onPress={() => load(tab, sel)}>
-            <Text style={styles.retryText}>重试</Text>
-          </Pressable>
-        </View>
-      ) : tab === "history" ? (
-        <FlatList<DailySalesStat>
-          data={soldDays}
-          keyExtractor={(d) => d.date}
-          onRefresh={() => load(tab, sel)}
-          refreshing={loading}
-          contentContainerStyle={styles.list}
-          ListHeaderComponent={
-            monthly ? (
-              <View>
-                <TotalCard total={monthly.total} />
-                <OperatorCard ops={monthly.byOperator} />
-                <Text style={styles.sectionTitle}>每日明细</Text>
-              </View>
-            ) : null
-          }
-          ListEmptyComponent={<Text style={styles.empty}>该月暂无销售记录</Text>}
-          renderItem={({ item }) => (
-            <Pressable style={styles.dayRow} onPress={() => setDay(item.date)}>
-              <View>
-                <Text style={styles.dayDate}>{formatDay(item.date)}</Text>
-                <Text style={styles.dayMeta}>
-                  {item.orders} 单 · {item.quantity} 件
-                </Text>
-              </View>
-              <View style={styles.dayRight}>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.dayRevenue}>{yuan(item.revenue)}</Text>
-                  <Text
-                    style={[styles.dayProfit, { color: item.profit >= 0 ? "#16a34a" : "#dc2626" }]}
-                  >
-                    利 {yuan(item.profit)}
-                  </Text>
-                </View>
-                <Text style={styles.dayCaret}>›</Text>
-              </View>
-            </Pressable>
-          )}
-        />
-      ) : (
-        <FlatList
-          data={orders}
-          keyExtractor={(o) => o.id}
-          onRefresh={() => load(tab, sel)}
-          refreshing={loading}
-          contentContainerStyle={styles.list}
-          ListHeaderComponent={
-            <View>
-              {report ? (
-                <>
-                  <TotalCard total={report.total} />
-                  <OperatorCard ops={report.byOperator} />
-                  <BucketChart report={report} />
-                </>
-              ) : null}
-              <Text style={styles.sectionTitle}>流水（最近 50 笔）</Text>
-            </View>
-          }
-          ListEmptyComponent={
-            <Text style={styles.empty}>还没有销售记录，去「扫码收银」开张吧</Text>
-          }
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.orderCard}
-              onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
-            >
-              <View style={styles.orderLeft}>
-                <Text style={styles.orderTime}>{formatTimeNoYear(item.createdAt)}</Text>
-                <Text style={styles.orderMeta}>
-                  {item.itemCount} 件{item.operatorName ? ` · ${item.operatorName}` : ""}
-                </Text>
-              </View>
-              <Text style={styles.orderAmount}>{yuan(item.totalAmount)}</Text>
-            </Pressable>
-          )}
-        />
-      )}
+      <PeriodSwitcher
+        gran={gran}
+        onGran={switchGran}
+        label={label}
+        onPrev={() => step(-1)}
+        onNext={() => step(1)}
+        nextDisabled={nextDisabled}
+      />
 
-      {/* 月份选择 */}
-      <Modal
-        visible={monthOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMonthOpen(false)}
-      >
-        <Pressable style={styles.monthBackdrop} onPress={() => setMonthOpen(false)} />
-        <View style={styles.monthSheet}>
-          <Text style={styles.monthSheetTitle}>选择月份</Text>
-          <FlatList
-            data={months}
-            keyExtractor={(m) => `${m.year}-${m.month}`}
-            renderItem={({ item }) => {
-              const active = item.year === sel.year && item.month === sel.month;
-              return (
-                <Pressable
-                  style={[styles.monthItem, active && styles.monthItemActive]}
-                  onPress={() => {
-                    setSel(item);
-                    setDay(null);
-                    setMonthOpen(false);
-                  }}
-                >
-                  <Text style={[styles.monthItemText, active && styles.monthItemTextActive]}>
-                    {item.year}年{item.month}月
-                  </Text>
-                  {active ? <Text style={styles.monthCheck}>✓</Text> : null}
+      <FlatList<SaleOrderDetail>
+        ref={listRef}
+        data={stale ? [] : orders}
+        keyExtractor={(o) => o.id}
+        onRefresh={() => void load()}
+        refreshing={loading && loadedKey === viewKey}
+        contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          <AnimatedHeader dir={enterDir.current} viewKey={viewKey}>
+            {stale || !data ? (
+              <View style={styles.center}>
+                <ActivityIndicator size="large" color={colors.primary} />
+              </View>
+            ) : error ? (
+              <View style={styles.center}>
+                <Text style={styles.error}>{error}</Text>
+                <Pressable style={styles.retry} onPress={() => void load()}>
+                  <Text style={styles.retryText}>重试</Text>
                 </Pressable>
-              );
-            }}
+              </View>
+            ) : (
+              <View>
+                <HeroCard
+                  revenue={data.total.revenue}
+                  profit={data.total.profit}
+                  orders={data.total.orders}
+                  quantity={data.total.quantity}
+                  periodTag={periodTag}
+                  isCurrent={isCurrentPeriod}
+                  onBackToCurrent={backToCurrent}
+                />
+                {gran === "week" ? (
+                  <>
+                    <View style={styles.gap12} />
+                    <DayBars
+                      data={bars}
+                      onTapBar={(date) => {
+                        enterDir.current = "down";
+                        setGran("day");
+                        setAnchor(date);
+                        setOperatorFilter(null);
+                        scrollToTop();
+                      }}
+                    />
+                  </>
+                ) : null}
+                {gran === "month" ? (
+                  <>
+                    <View style={styles.gap12} />
+                    <WeekRows
+                      data={weekRows}
+                      onTapWeek={(ws) => {
+                        enterDir.current = "down";
+                        setGran("week");
+                        setAnchor(ws);
+                        setOperatorFilter(null);
+                        scrollToTop();
+                      }}
+                    />
+                  </>
+                ) : null}
+                <View style={styles.gap12} />
+                <StaffCard
+                  ops={data.byOperator}
+                  totalRevenue={data.total.revenue}
+                  activeOperatorId={operatorFilter}
+                  onToggle={setOperatorFilter}
+                />
+                <View style={styles.flowHead}>
+                  <Text style={styles.flowTitle}>
+                    流水 ·{" "}
+                    {operatorFilter !== null
+                      ? `${orders.length}/${data.total.orders}`
+                      : data.total.orders}{" "}
+                    单
+                  </Text>
+                  {operatorFilter !== null ? (
+                    <Pressable
+                      style={styles.filterChip}
+                      onPress={() => setOperatorFilter(null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="清除员工筛选"
+                    >
+                      <Ionicons name="close" size={12} color={colors.primary} />
+                      <Text style={styles.filterChipText}>看全部</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                {data.total.orders === 0 ? (
+                  <Text style={styles.empty}>该时段还没有销售记录</Text>
+                ) : orders.length === 0 ? (
+                  <Text style={styles.empty}>该员工在此时段暂无流水</Text>
+                ) : null}
+              </View>
+            )}
+          </AnimatedHeader>
+        }
+        renderItem={({ item }) => (
+          <OrderRow
+            order={item}
+            showDate={gran !== "day"}
+            onPress={() => navigation.navigate("SaleDetail", { orderId: item.id })}
           />
-        </View>
-      </Modal>
+        )}
+        ItemSeparatorComponent={() => <View style={styles.gap8} />}
+      />
+
+      <TimePickerSheet
+        visible={pickerOpen}
+        gran={gran}
+        anchor={anchor}
+        today={todayStr}
+        onClose={() => setPickerOpen(false)}
+        onPick={pickTime}
+      />
     </View>
   );
 }
 
+/** 视图切换过渡：轻量原生驱动（透明度 + 28px 位移，260ms cubic-out），随 viewKey 重放 */
+function AnimatedHeader({
+  dir,
+  viewKey,
+  children,
+}: {
+  dir: EnterDir;
+  viewKey: string;
+  children: ReactNode;
+}) {
+  const t = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    t.setValue(0);
+    Animated.timing(t, {
+      toValue: 1,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [viewKey, t]);
+  const dx = dir === "left" ? -28 : dir === "right" ? 28 : 0;
+  const dy = dir === "down" ? 18 : 0;
+  return (
+    <Animated.View
+      style={{
+        opacity: t,
+        transform: [
+          { translateX: t.interpolate({ inputRange: [0, 1], outputRange: [dx, 0] }) },
+          { translateY: t.interpolate({ inputRange: [0, 1], outputRange: [dy, 0] }) },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: "#F5F6F8" },
   topbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-  },
-  back: { color: "#2563eb", fontSize: 16 },
-  title: { fontSize: 18, fontWeight: "800", color: "#111" },
-  placeholder: { width: 32 },
-  tabs: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: "#f1f5f9",
-    alignItems: "center",
-  },
-  tabActive: { backgroundColor: "#2563eb" },
-  tabText: { fontSize: 15, fontWeight: "700", color: "#475569" },
-  tabTextActive: { color: "#fff" },
-  monthSelect: {
-    marginHorizontal: 12,
-    marginBottom: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#dbe2ea",
-    backgroundColor: "#f8fafc",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  monthSelectText: { fontSize: 16, fontWeight: "700", color: "#1f2937" },
-  monthSelectCaret: { fontSize: 14, color: "#6b7280" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  list: { padding: 12, gap: 10 },
-  totalCard: {
-    backgroundColor: "#f8fafc",
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#eef2f7",
-    marginBottom: 10,
-  },
-  totalTop: { flexDirection: "row", justifyContent: "space-between" },
-  totalLabel: { fontSize: 12, color: "#6b7280" },
-  totalRevenue: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: "#2563eb",
-    marginTop: 2,
-  },
-  totalProfit: { fontSize: 20, fontWeight: "800", marginTop: 2 },
-  totalMargin: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
-  totalMeta: { fontSize: 13, color: "#6b7280", marginTop: 8 },
-  opBox: {
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
     backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#eee",
-    padding: 12,
-    marginBottom: 10,
-    gap: 6,
   },
-  opRow: {
+  title: { fontSize: font.title, fontWeight: "800", color: colors.text },
+  calBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calBtnPressed: { backgroundColor: "#EEF1F5" },
+  list: { padding: space.lg, paddingBottom: 64 },
+  center: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space.md,
+    paddingVertical: 80,
+  },
+  gap8: { height: space.sm },
+  gap12: { height: space.md },
+  flowHead: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    marginTop: space.lg,
+    marginBottom: space.sm,
   },
-  opName: { flex: 1, fontSize: 14, fontWeight: "600", color: "#111" },
-  opRight: { alignItems: "flex-end" },
-  opRevenue: { fontSize: 15, fontWeight: "800", color: "#e11d48" },
-  opMeta: { fontSize: 11, color: "#9ca3af" },
-  chartBox: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#eee",
-    padding: 12,
-    marginBottom: 10,
-    gap: 8,
-  },
-  chartTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111",
-    marginBottom: 2,
-  },
-  barRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  barLabel: { width: 44, fontSize: 13, color: "#374151" },
-  barTrack: {
-    flex: 1,
-    height: 14,
-    backgroundColor: "#eef2f7",
-    borderRadius: 7,
-    overflow: "hidden",
-  },
-  barFill: { height: 14, backgroundColor: "#60a5fa", borderRadius: 7 },
-  barValues: { width: 96, alignItems: "flex-end" },
-  barRevenue: { fontSize: 12, fontWeight: "700", color: "#111" },
-  barProfit: { fontSize: 11 },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#374151",
-    marginTop: 4,
-    marginBottom: 6,
-  },
-  empty: { textAlign: "center", color: "#9ca3af", marginTop: 48 },
-  dayRow: {
+  flowTitle: { fontSize: font.body, fontWeight: "800", color: colors.text },
+  filterChip: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#eee",
+    gap: 3,
+    paddingHorizontal: 10,
+    height: 26,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
   },
-  dayDate: { fontSize: 15, fontWeight: "700", color: "#111" },
-  dayMeta: { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  dayRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  dayRevenue: { fontSize: 16, fontWeight: "800", color: "#e11d48" },
-  dayProfit: { fontSize: 12, marginTop: 2 },
-  dayCaret: { fontSize: 20, color: "#cbd5e1", fontWeight: "700" },
-  dayBack: { paddingVertical: 4, marginBottom: 4 },
-  dayBackText: { fontSize: 15, color: "#2563eb", fontWeight: "700" },
-  dayTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#111",
-    marginBottom: 8,
-  },
-  orderCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#eee",
-  },
-  orderLeft: { gap: 2 },
-  orderTime: { fontSize: 15, fontWeight: "600", color: "#111" },
-  orderMeta: { fontSize: 13, color: "#6b7280" },
-  orderAmount: { fontSize: 18, fontWeight: "800", color: "#e11d48" },
-  error: { color: "#dc2626" },
+  filterChipText: { fontSize: 12, fontWeight: "700", color: colors.primary },
+  empty: { textAlign: "center", color: "#9CA3AF", marginTop: 28, fontSize: font.caption },
+  error: { color: colors.danger },
   retry: {
     borderWidth: 1,
-    borderColor: "#2563eb",
-    borderRadius: 8,
+    borderColor: colors.primary,
+    borderRadius: radius.sm,
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
-  retryText: { color: "#2563eb" },
-  monthBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  monthSheet: {
-    position: "absolute",
-    left: 24,
-    right: 24,
-    top: "18%",
-    maxHeight: "64%",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-  },
-  monthSheetTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#111",
-    marginBottom: 8,
-  },
-  monthItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 13,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-  },
-  monthItemActive: { backgroundColor: "#eff6ff" },
-  monthItemText: { fontSize: 16, color: "#1f2937", fontWeight: "600" },
-  monthItemTextActive: { color: "#2563eb", fontWeight: "800" },
-  monthCheck: { fontSize: 16, color: "#2563eb", fontWeight: "800" },
+  retryText: { color: colors.primary, fontWeight: "700" },
 });
