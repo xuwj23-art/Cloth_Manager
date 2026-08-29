@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Platform,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth-context";
 import { BrandLockup } from "../components/BrandLockup";
-import { SyncAction } from "../components/SyncAction";
 import { useSync } from "../sync/sync-context";
 import { getSalesSummary } from "../api";
 import { countFailedOps } from "../db/outbox";
@@ -49,6 +49,95 @@ function Tile({
   );
 }
 
+/**
+ * 底部同步胶囊：已同步(绿对勾)/同步中(旋转)/离线/待同步(琥珀)，点击立即同步
+ */
+function SyncChip({
+  online,
+  syncing,
+  pendingCount,
+  onPress,
+}: {
+  online: boolean;
+  syncing: boolean;
+  pendingCount: number;
+  onPress: () => void;
+}) {
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!syncing) {
+      spin.stopAnimation();
+      spin.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [syncing, spin]);
+
+  let icon: keyof typeof Ionicons.glyphMap = "checkmark-circle";
+  let color = "#0EA472";
+  let label = "已同步";
+  if (syncing) {
+    icon = "sync";
+    color = colors.primary;
+    label = "同步中";
+  } else if (!online) {
+    icon = "cloud-offline-outline";
+    color = "#94A3B8";
+    label = "离线";
+  } else if (pendingCount > 0) {
+    icon = "cloud-upload-outline";
+    color = "#D97706";
+    label = `${pendingCount} 笔待同步`;
+  }
+
+  return (
+    <Pressable
+      style={({ pressed }) => [footStyles.chip, pressed && footStyles.chipPressed]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}，点击立即同步`}
+    >
+      {syncing ? (
+        <Animated.View
+          style={{
+            transform: [
+              { rotate: spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) },
+            ],
+          }}
+        >
+          <Ionicons name={icon} size={13} color={color} />
+        </Animated.View>
+      ) : (
+        <Ionicons name={icon} size={13} color={color} />
+      )}
+      <Text style={[footStyles.chipText, { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const footStyles = StyleSheet.create({
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    height: 30,
+    paddingHorizontal: 12,
+    borderRadius: radius.pill,
+    backgroundColor: "#F1F4F8",
+  },
+  chipPressed: { backgroundColor: "#E6EBF2" },
+  chipText: { fontSize: 12, fontWeight: "700" },
+});
+
 export function HomeScreen() {
   const navigation = useNavigation<HomeNav>();
   const insets = useSafeAreaInsets();
@@ -78,12 +167,13 @@ export function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      void loadToday();
       void countFailedOps()
         .then(setFailedCount)
         .catch(() => {
           /* ignore */
         });
-    }, []),
+    }, [loadToday]),
   );
 
   const roleLabel = isOwner ? "老板" : "店员";
@@ -163,19 +253,47 @@ export function HomeScreen() {
             />
           ) : null}
         </View>
-
-        <SyncAction
-          syncing={syncing}
-          online={online}
-          pendingCount={pendingCount}
-          onPress={() => void syncNow()}
-        />
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
-        <Text style={styles.identity}>
-          {user?.name}·{roleLabel}
-        </Text>
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        {user?.shopName ? (
+          <View style={styles.shopLine}>
+            <Ionicons name="storefront-outline" size={13} color="#C0A065" />
+            <Text style={styles.shopLineText} numberOfLines={1}>
+              {user.shopName}
+            </Text>
+          </View>
+        ) : null}
+        <View style={styles.footCard}>
+          <View style={styles.identity}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{(user?.name ?? "?").slice(0, 1)}</Text>
+            </View>
+            <View style={styles.idCol}>
+              <View
+                style={[styles.rolePill, isOwner ? styles.rolePillOwner : styles.rolePillStaff]}
+              >
+                <Text
+                  style={[
+                    styles.rolePillText,
+                    isOwner ? styles.rolePillTextOwner : styles.rolePillTextStaff,
+                  ]}
+                >
+                  {roleLabel}
+                </Text>
+              </View>
+              <Text style={styles.userName} numberOfLines={1}>
+                {user?.name ?? "未登录"}
+              </Text>
+            </View>
+          </View>
+          <SyncChip
+            online={online}
+            syncing={syncing}
+            pendingCount={pendingCount}
+            onPress={() => void syncNow()}
+          />
+        </View>
       </View>
     </View>
   );
@@ -260,14 +378,52 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tileLabel: { fontSize: font.body, fontWeight: "600", color: colors.text },
-  footer: {
+  footer: { paddingTop: 6, gap: 8 },
+  shopLine: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingTop: 4,
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: space.xl,
   },
-  identity: {
-    fontFamily: Platform.OS === "ios" ? "Songti SC" : "serif",
-    fontSize: 15,
-    color: colors.textMuted,
-    letterSpacing: 1.2,
+  shopLineText: { fontSize: 13, fontWeight: "600", color: "#8B95A6", letterSpacing: 1 },
+  footCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginHorizontal: space.xl,
   },
+  identity: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  avatarText: { fontSize: 17, fontWeight: "800", color: colors.primary },
+  idCol: { gap: 3, alignItems: "center", flexShrink: 1 },
+  userName: { fontSize: 13, fontWeight: "400", color: colors.textMuted, maxWidth: 80 },
+  rolePill: {
+    height: 20,
+    paddingHorizontal: 8,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  rolePillOwner: { backgroundColor: "rgba(192,160,101,0.16)" },
+  rolePillStaff: { backgroundColor: colors.primarySoft },
+  rolePillText: { fontSize: 10, fontWeight: "800" },
+  rolePillTextOwner: { color: "#8A6D3B" },
+  rolePillTextStaff: { color: colors.primary },
 });
