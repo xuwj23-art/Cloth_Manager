@@ -239,11 +239,13 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 ### 7.5 EAS / app.json 要点
 
-- **当前版本 `1.3.2`**（`app.json` `version`，Android `versionCode=6`）。
+- **当前版本 `1.4.0`**（`app.json` `version`，Android `versionCode=7`）。
 - `runtimeVersion.policy = "appVersion"`；`updates.url` 指向 Expo（owner `wesleysho`，projectId `3b8070f8-...`）。
   - ⚠️ 改 `version` 会同时改 `runtimeVersion`，旧包收不到新 runtime 的 OTA；升版后须 `expo prebuild -p android`（同步 `build.gradle` 版本 + `strings.xml` 的 runtime + 重写渠道头）→ 重打包 → 再按新 runtime `eas update`。
 - channel：`development`(devClient APK) / `preview`(APK) / `production`(AAB)。
 - **`targetSdkVersion: 33`**（刻意降级，兼容驰腾蓝牙 SDK 的广播注册，规避 Android 14 行为）。
+- **字体缩放锁定**：`plugins/lock-font-scale.js` 在 MainApplication/MainActivity 注入 `attachBaseContext` 强制 `fontScale=1`（React 19+新架构下 `Text.defaultProps` 已失效）。系统大字号（华为/荣耀长辈模式）不再影响 App 内排版。
+- **选图用 `react-native-image-crop-picker`**（原生依赖）：系统相册分区、uCrop 裁剪/旋转、fixOrientation。改动它或新增原生依赖必须重打 APK，OTA 不生效。
 - 权限：CAMERA、BLUETOOTH_*、LOCATION、POST_NOTIFICATIONS。
 
 ---
