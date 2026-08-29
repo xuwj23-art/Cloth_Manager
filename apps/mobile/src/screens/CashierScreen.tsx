@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAudioPlayer } from "expo-audio";
 import { cartItemCount, cartToSaleInput, cartTotalCents } from "@cloth-scan/shared";
@@ -26,8 +27,11 @@ import { NotFoundSheet } from "./cashier/NotFoundSheet";
 
 type CashierNav = NativeStackNavigationProp<RootStackParamList, "Cashier">;
 
-/** 绿色扫描框边长（dp） */
-const FRAME_SIZE = 150;
+/** 取景器瞄准框边长（dp）与四角括角规格 */
+const FRAME_SIZE = 140;
+const CORNER_LEN = 32;
+const CORNER_THICK = 3;
+const GOLD = "#E8C98A";
 type ScanResult = { data: string };
 
 /** 生成客户端幂等 opId（设备本地唯一即可） */
@@ -198,10 +202,13 @@ export function CashierScreen() {
       <View style={styles.topbar}>
         <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>扫码收银</Text>
-        <Text style={[styles.netDot, online ? styles.online : styles.offline]}>
-          {online ? "在线" : "离线"}
-          {pendingCount > 0 ? ` · 待同步${pendingCount}` : ""}
-        </Text>
+        <View style={styles.net}>
+          <View style={[styles.netDot, online ? styles.online : styles.offline]} />
+          <Text style={[styles.netText, online ? styles.online : styles.offline]}>
+            {online ? "在线" : "离线"}
+            {pendingCount > 0 ? ` · ${pendingCount}` : ""}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.cameraWrap}>
@@ -211,19 +218,38 @@ export function CashierScreen() {
           barcodeScannerSettings={{ barcodeTypes: ["qr", "ean13", "code128"] }}
           onBarcodeScanned={(e) => void handleScanned(e as ScanResult)}
         />
-        <View style={styles.frame} pointerEvents="none" />
+        {/* 深色压暗：让金括角与提示在任何衣物底色上可读 */}
+        <View style={styles.scrim} pointerEvents="none" />
+        {/* 动态提示：悬浮在取景器顶部 */}
+        <View style={styles.hintPill} pointerEvents="none">
+          <Ionicons name="scan-outline" size={13} color="rgba(255,255,255,0.85)" />
+          <Text style={styles.hintPillText} numberOfLines={1}>
+            {hint}
+          </Text>
+        </View>
+        {/* 瞄准框：四角金色括角 */}
+        <View style={styles.frame} pointerEvents="none">
+          <View style={[styles.corner, styles.cornerTL]} />
+          <View style={[styles.corner, styles.cornerTR]} />
+          <View style={[styles.corner, styles.cornerBL]} />
+          <View style={[styles.corner, styles.cornerBR]} />
+        </View>
+        <Pressable
+          style={styles.manualChip}
+          onPress={() => setSheet("manual")}
+          accessibilityRole="button"
+          accessibilityLabel="手动输入条码"
+        >
+          <Ionicons name="keypad-outline" size={14} color="#fff" />
+          <Text style={styles.manualChipText}>手输条码</Text>
+        </Pressable>
         <Pressable
           style={[styles.torchBtn, torch && styles.torchOn]}
           onPress={() => setTorch((t) => !t)}
+          accessibilityRole="button"
+          accessibilityLabel={torch ? "关闭补光灯" : "打开补光灯"}
         >
-          <Text style={styles.torchText}>{torch ? "💡 关灯" : "🔦 补光"}</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.hintRow}>
-        <Text style={styles.hint}>{hint}</Text>
-        <Pressable onPress={() => setSheet("manual")} hitSlop={8}>
-          <Text style={styles.manualLink}>手动输入</Text>
+          <Ionicons name="flashlight" size={17} color="#fff" />
         </Pressable>
       </View>
 
@@ -242,7 +268,7 @@ export function CashierScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.card },
+  container: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
     alignItems: "center",
@@ -256,48 +282,104 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
+    backgroundColor: colors.card,
   },
   title: { fontSize: font.title, fontWeight: "800", color: colors.text },
   link: { color: colors.primary, fontSize: font.body },
-  netDot: { fontSize: font.caption, fontWeight: "600" },
-  online: { color: colors.online },
-  offline: { color: colors.warn },
+  net: { flexDirection: "row", alignItems: "center", gap: 5 },
+  netText: { fontSize: font.caption - 1, fontWeight: "600" },
+  netDot: { width: 7, height: 7, borderRadius: 4 },
+  online: { color: colors.online, backgroundColor: colors.online },
+  offline: { color: colors.warn, backgroundColor: colors.warn },
   cameraWrap: {
-    height: 220,
+    height: 232,
     backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
     marginHorizontal: space.lg,
-    borderRadius: radius.md,
+    marginTop: space.sm,
+    borderRadius: radius.lg,
     overflow: "hidden",
   },
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(13,22,44,0.38)" },
+  hintPill: {
+    position: "absolute",
+    top: 12,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    maxWidth: "82%",
+    paddingHorizontal: 12,
+    height: 28,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(13,22,44,0.72)",
+  },
+  hintPillText: { color: "rgba(255,255,255,0.88)", fontSize: 12, fontWeight: "600" },
   frame: {
+    position: "absolute",
+    top: 44,
+    alignSelf: "center",
     width: FRAME_SIZE,
     height: FRAME_SIZE,
-    borderWidth: 3,
-    borderColor: "#4ADE80",
-    borderRadius: radius.md,
   },
+  corner: {
+    position: "absolute",
+    width: CORNER_LEN,
+    height: CORNER_LEN,
+    borderColor: GOLD,
+  },
+  cornerTL: {
+    top: 0,
+    left: 0,
+    borderTopWidth: CORNER_THICK,
+    borderLeftWidth: CORNER_THICK,
+    borderTopLeftRadius: 10,
+  },
+  cornerTR: {
+    top: 0,
+    right: 0,
+    borderTopWidth: CORNER_THICK,
+    borderRightWidth: CORNER_THICK,
+    borderTopRightRadius: 10,
+  },
+  cornerBL: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: CORNER_THICK,
+    borderLeftWidth: CORNER_THICK,
+    borderBottomLeftRadius: 10,
+  },
+  cornerBR: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: CORNER_THICK,
+    borderRightWidth: CORNER_THICK,
+    borderBottomRightRadius: 10,
+  },
+  manualChip: {
+    position: "absolute",
+    bottom: 10,
+    left: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  manualChipText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   torchBtn: {
     position: "absolute",
     bottom: 10,
     right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: "rgba(0,0,0,0.45)",
-    paddingHorizontal: space.md,
-    paddingVertical: 7,
-    borderRadius: radius.pill,
-  },
-  torchOn: { backgroundColor: "rgba(245,158,11,0.85)" },
-  torchText: { color: "#fff", fontSize: font.caption, fontWeight: "700" },
-  hintRow: {
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 14,
-    paddingVertical: space.sm,
   },
-  hint: { color: colors.textMuted, fontSize: font.body },
-  manualLink: { color: colors.primary, fontSize: font.body, fontWeight: "700" },
+  torchOn: { backgroundColor: "rgba(245,158,11,0.9)" },
   btn: {
     backgroundColor: colors.primary,
     paddingVertical: 14,

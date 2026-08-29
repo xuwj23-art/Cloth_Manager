@@ -1,18 +1,18 @@
 import { useState } from "react";
 import { Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Animated, { FadeIn } from "react-native-reanimated";
+import { Ionicons } from "@expo/vector-icons";
 import { colors, font, radius, space } from "../../theme/tokens";
 import { imageUrl, thumbUrl } from "../../api";
 import { ImageViewer } from "../../components/ImageViewer";
 import { useCashierStore } from "./store";
 import { cashierStyles, yuan } from "./ui";
 
-const slideMs = 150; // motion.cardMs
+const fadeMs = 200; // motion.cardMs
 
 /**
- * 扫码确认卡（UI-REFERENCES §2.4 Starbucks）。
- * 扫中后弹出：大商品图 + 规格 + 价 + 库存 + 数量步进器（-/+ 大按钮 56dp）+ "加入购物车"大按钮。
- * 入场：Reanimated slide-up + fade（150ms）。
+ * 扫码确认卡：大商品图 + 规格 + 价 + 库存 + 数量步进器 + 加入购物车。
+ * 入场：纯淡入（无位移/无弹簧，避免"弹"的观感过重）。
  */
 export function ConfirmCard() {
   const pendingSku = useCashierStore((s) => s.pendingSku);
@@ -41,10 +41,7 @@ export function ConfirmCard() {
   return (
     <Modal visible transparent animationType="none" onRequestClose={close}>
       <Pressable style={cashierStyles.backdrop} onPress={close} />
-      <Animated.View
-        entering={FadeInDown.duration(slideMs).springify().damping(20)}
-        style={cashierStyles.bottomSheet}
-      >
+      <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.bottomSheet}>
         {/* 头部：大封面 + 品名 + 规格 + 价 */}
         <View style={styles.header}>
           <Pressable
@@ -71,7 +68,7 @@ export function ConfirmCard() {
           </View>
         </View>
 
-        {/* 库存 + 数量步进器（Starbucks 式大按钮） */}
+        {/* 库存 + 数量步进器 */}
         <View style={styles.row}>
           <Text style={[styles.stock, sku.stock <= 3 && styles.stockLow]}>
             库存 {sku.stock}
@@ -82,16 +79,20 @@ export function ConfirmCard() {
               style={[cashierStyles.stepperBtn, qty <= 1 && cashierStyles.disabled]}
               disabled={qty <= 1}
               onPress={() => setPendingQty(Math.max(1, qty - 1))}
+              accessibilityRole="button"
+              accessibilityLabel="减少数量"
             >
-              <Text style={cashierStyles.stepperText}>−</Text>
+              <Ionicons name="remove" size={26} color={colors.primary} />
             </Pressable>
             <Text style={styles.qty}>{canAdd ? qty : 0}</Text>
             <Pressable
               style={[cashierStyles.stepperBtn, qty >= maxAddable && cashierStyles.disabled]}
               disabled={qty >= maxAddable}
               onPress={() => setPendingQty(Math.min(maxAddable, qty + 1))}
+              accessibilityRole="button"
+              accessibilityLabel="增加数量"
             >
-              <Text style={cashierStyles.stepperText}>＋</Text>
+              <Ionicons name="add" size={26} color={colors.primary} />
             </Pressable>
           </View>
         </View>
@@ -101,16 +102,27 @@ export function ConfirmCard() {
         {/* 动作栏：取消 + 加入大按钮 */}
         <View style={styles.actions}>
           <Pressable style={cashierStyles.secondaryBtn} onPress={close}>
-            <Text style={cashierStyles.secondaryBtnText}>取消</Text>
+            <View style={cashierStyles.iconRow}>
+              <Ionicons name="close" size={18} color={colors.textMuted} />
+              <Text style={cashierStyles.secondaryBtnText}>取消</Text>
+            </View>
           </Pressable>
           <Pressable
-            style={[cashierStyles.primaryBtn, styles.addBtn, !canAdd && cashierStyles.disabled]}
+            style={({ pressed }) => [
+              cashierStyles.primaryBtn,
+              styles.addBtn,
+              pressed && cashierStyles.primaryBtnPressed,
+              !canAdd && cashierStyles.disabled,
+            ]}
             disabled={!canAdd}
             onPress={confirmAdd}
           >
-            <Text style={cashierStyles.primaryBtnText}>
-              加入购物车 · {canAdd ? yuan(sku.salePrice * qty) : "—"}
-            </Text>
+            <View style={cashierStyles.iconRow}>
+              <Ionicons name="cart-outline" size={18} color="#fff" />
+              <Text style={cashierStyles.primaryBtnText} numberOfLines={1}>
+                加入 · {canAdd ? yuan(sku.salePrice * qty) : "—"}
+              </Text>
+            </View>
           </Pressable>
         </View>
       </Animated.View>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
-import { colors, font, space } from "../../theme/tokens";
+import { Ionicons } from "@expo/vector-icons";
+import { colors, font, radius, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
 import { cashierStyles, yuan } from "./ui";
 
@@ -21,6 +22,8 @@ export function PriceEditSheet() {
   const [error, setError] = useState<string | null>(null);
 
   const line = editingSkuId ? (cart.find((l) => l.skuId === editingSkuId) ?? null) : null;
+  /** 该行已改过价：左下钮从「取消」换成「恢复原价」，对齐整单优惠的清除交互 */
+  const hasEdit = !!(line?.origPrice != null && line.origPrice !== line.price);
 
   // 打开或切换目标行时回填当前价（元）。仅依赖 open/行 id，避免改价过程中被 value 变化打断。
   useEffect(() => {
@@ -70,15 +73,51 @@ export function PriceEditSheet() {
               onSubmitEditing={confirm}
             />
           </View>
-          <Text style={cashierStyles.hint}>当前 {yuan(line.price)} / 件</Text>
+          <Text style={cashierStyles.hint}>
+            {hasEdit
+              ? `吊牌价 ${yuan(line.origPrice!)} · 当前 ${yuan(line.price)} / 件`
+              : `当前 ${yuan(line.price)} / 件`}
+          </Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
 
           <View style={styles.actions}>
-            <Pressable style={cashierStyles.secondaryBtn} onPress={close}>
-              <Text style={cashierStyles.secondaryBtnText}>取消</Text>
-            </Pressable>
+            {hasEdit ? (
+              <Pressable
+                style={styles.restoreBtn}
+                onPress={() => editPrice(line.skuId, line.origPrice!)}
+              >
+                <View style={cashierStyles.iconRow}>
+                  <Ionicons name="refresh" size={17} color={colors.danger} />
+                  <Text style={styles.restoreText} numberOfLines={1} allowFontScaling={false}>
+                    恢复
+                  </Text>
+                </View>
+              </Pressable>
+            ) : (
+              <Pressable style={cashierStyles.secondaryBtn} onPress={close}>
+                <View style={cashierStyles.iconRow}>
+                  <Ionicons name="close" size={17} color={colors.textMuted} />
+                  <Text
+                    style={cashierStyles.secondaryBtnText}
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                  >
+                    取消
+                  </Text>
+                </View>
+              </Pressable>
+            )}
             <Pressable style={[cashierStyles.primaryBtn, styles.confirmBtn]} onPress={confirm}>
-              <Text style={cashierStyles.primaryBtnText}>确定</Text>
+              <View style={cashierStyles.iconRow}>
+                <Ionicons name="checkmark" size={18} color="#fff" />
+                <Text
+                  style={cashierStyles.primaryBtnText}
+                  numberOfLines={1}
+                  allowFontScaling={false}
+                >
+                  确定
+                </Text>
+              </View>
             </Pressable>
           </View>
         </Animated.View>
@@ -107,6 +146,17 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   actions: { flexDirection: "row", gap: space.md },
+  restoreBtn: {
+    flex: 1,
+    height: 56,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  restoreText: { fontSize: font.body, fontWeight: "700", color: colors.danger },
   confirmBtn: { flex: 2 },
   err: { fontSize: font.caption, color: colors.danger, fontWeight: "700", textAlign: "center" },
 });

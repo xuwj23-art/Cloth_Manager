@@ -8,6 +8,8 @@ export interface CartLine {
   color: string;
   size: string;
   price: number; // 成交单价（分）
+  /** 进车时的吊牌价（分）；改价后保留，用于展示划线原价 */
+  origPrice?: number;
   quantity: number;
   stock: number; // 可售库存（用于上限保护）
 }
@@ -50,6 +52,7 @@ export function addToCartQty(lines: CartLine[], sku: ScannedSku, qty: number): C
       color: sku.color,
       size: sku.size,
       price: sku.price,
+      origPrice: sku.price,
       quantity: Math.min(safeQty, sku.stock),
       stock: sku.stock,
     },

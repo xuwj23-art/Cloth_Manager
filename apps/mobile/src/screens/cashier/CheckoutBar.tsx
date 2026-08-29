@@ -1,5 +1,6 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, font, radius, space, touch } from "../../theme/tokens";
+import { Ionicons } from "@expo/vector-icons";
+import { colors, font, radius, space } from "../../theme/tokens";
 import {
   selectCount,
   selectDiscounted,
@@ -10,9 +11,9 @@ import {
 import { yuan } from "./ui";
 
 /**
- * 底部固定结算栏（UI-REFERENCES §2.4 Starbucks）。
- * 显示：件数 + 优惠后总价（大）+ 原价删除线（有优惠时）+ 「优惠/改价」入口 + 「结算」大按钮（墨绿，56dp）。
- * `onCheckout` / `onOpenDiscount` / `submitting` 由父组件提供。
+ * 底部结算栏：三区布局（金额块 flex / 优惠图标钮 / 结算钮）。
+ * - 优惠/改价入口用图标按钮替代裸文字链，不再与结算键在同一行抢宽度；
+ * - 金额只在左侧展示一次，结算钮不重复总价，360dp 窄屏下稳定不折行。
  */
 export function CheckoutBar({
   onCheckout,
@@ -31,39 +32,60 @@ export function CheckoutBar({
 
   const empty = cart.length === 0;
   const disabled = empty || submitting;
-  const tag = discounted ? "整单优惠" : "";
 
   return (
     <View style={styles.footer}>
-      <View style={styles.left}>
-        <View style={styles.labelRow}>
-          <Text style={styles.label}>合计（{count} 件）</Text>
-          <Pressable onPress={onOpenDiscount} disabled={empty} hitSlop={6}>
-            <Text style={[styles.adjustLink, empty && styles.adjustLinkDisabled]}>
-              {discounted ? "修改优惠" : "优惠 / 改价"}
+      {/* 左：金额块（全屏唯一金额展示位） */}
+      <View style={styles.amount}>
+        <View style={styles.priceRow}>
+          <Text style={styles.total} numberOfLines={1} allowFontScaling={false}>
+            {yuan(discounted ? finalTotal : total)}
+          </Text>
+          {discounted ? (
+            <Text style={styles.orig} numberOfLines={1}>
+              {yuan(total)}
             </Text>
-          </Pressable>
+          ) : null}
         </View>
-        {discounted ? (
-          <View style={styles.discRow}>
-            <Text style={styles.total}>{yuan(finalTotal)}</Text>
-            <Text style={styles.orig}>{yuan(total)}</Text>
-            <Text style={styles.tag}>{tag}</Text>
-          </View>
-        ) : (
-          <Text style={styles.total}>{yuan(total)}</Text>
-        )}
+        <Text style={styles.meta} numberOfLines={1}>
+          {count} 件{discounted ? ` · 已省 ${yuan(total - finalTotal)}` : ""}
+        </Text>
       </View>
 
+      {/* 中：整单优惠 / 改价（图标按钮；已设优惠时高亮红色提示） */}
       <Pressable
-        style={[styles.checkout, disabled && styles.disabled]}
+        style={[styles.discountBtn, discounted && styles.discountBtnOn, empty && styles.off]}
+        disabled={empty}
+        onPress={onOpenDiscount}
+        accessibilityRole="button"
+        accessibilityLabel={discounted ? "修改整单优惠" : "整单优惠或改价"}
+        hitSlop={4}
+      >
+        <Ionicons
+          name={discounted ? "pricetag" : "pricetag-outline"}
+          size={22}
+          color={discounted ? "#fff" : colors.primary}
+        />
+      </Pressable>
+
+      {/* 右：结算（禁用=中性灰，不与品牌蓝混淆） */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.checkout,
+          disabled ? styles.checkoutOff : pressed ? styles.checkoutPressed : null,
+        ]}
         disabled={disabled}
         onPress={onCheckout}
+        accessibilityRole="button"
+        accessibilityLabel="结算"
       >
         {submitting ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.checkoutText}>结算 · {yuan(discounted ? finalTotal : total)}</Text>
+          <>
+            <Ionicons name="card-outline" size={20} color={disabled ? "#9AA6B8" : "#fff"} />
+            <Text style={[styles.checkoutText, disabled && styles.checkoutTextOff]}>结算</Text>
+          </>
         )}
       </Pressable>
     </View>
@@ -74,56 +96,46 @@ const styles = StyleSheet.create({
   footer: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: space.md,
-    padding: space.lg,
+    gap: space.lg,
+    paddingVertical: space.md,
+    paddingBottom: space.md + 4,
+    paddingHorizontal: space.lg,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.card,
   },
-  left: { flex: 1 },
-  labelRow: { flexDirection: "row", alignItems: "center", gap: space.md },
-  label: { fontSize: font.caption, color: colors.textMuted },
-  adjustLink: {
-    fontSize: font.caption,
-    fontWeight: "700",
-    color: colors.primary,
-  },
-  adjustLinkDisabled: { color: "#CBD5E1" },
-  discRow: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
-  total: {
-    fontSize: font.display - 8,
-    fontWeight: "800",
-    color: colors.primary,
-  },
+  amount: { flex: 1, gap: 1, minWidth: 0 },
+  priceRow: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
+  total: { fontSize: 26, fontWeight: "800", color: "#101E3C" },
   orig: {
-    fontSize: font.body,
+    fontSize: font.caption,
     color: colors.textMuted,
     textDecorationLine: "line-through",
+    flexShrink: 1,
   },
-  tag: {
-    fontSize: font.caption,
-    fontWeight: "700",
-    color: colors.danger,
-    backgroundColor: colors.dangerSoft,
-    paddingHorizontal: space.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    overflow: "hidden",
-  },
-  checkout: {
-    backgroundColor: colors.primary,
-    height: touch.buttonHeight,
-    paddingHorizontal: space.xxl + 8,
+  meta: { fontSize: font.caption - 1, color: colors.textMuted },
+  discountBtn: {
+    width: 48,
+    height: 52,
     borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 140,
   },
-  checkoutText: {
-    color: "#fff",
-    fontSize: font.body,
-    fontWeight: "800",
+  discountBtnOn: { backgroundColor: colors.danger },
+  checkout: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 52,
+    paddingHorizontal: space.xl,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
   },
-  disabled: { opacity: 0.5 },
+  checkoutPressed: { backgroundColor: colors.primaryPressed },
+  checkoutOff: { backgroundColor: "#E8EDF4" },
+  checkoutText: { color: "#fff", fontSize: font.body, fontWeight: "800" },
+  checkoutTextOff: { color: "#9AA6B8" },
+  off: { opacity: 0.45 },
 });

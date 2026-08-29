@@ -1,5 +1,6 @@
 import { Modal, Pressable, Text, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
+import { Ionicons } from "@expo/vector-icons";
 import { font, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
 import { cashierStyles } from "./ui";
@@ -29,7 +30,10 @@ export function NotFoundSheet() {
             style={[cashierStyles.primaryBtn, { alignSelf: "stretch" }]}
             onPress={closeSheet}
           >
-            <Text style={cashierStyles.primaryBtnText}>知道了，重新扫码</Text>
+            <View style={cashierStyles.iconRow}>
+              <Ionicons name="scan-outline" size={18} color="#fff" />
+              <Text style={cashierStyles.primaryBtnText}>知道了，重新扫码</Text>
+            </View>
           </Pressable>
         </Animated.View>
       ) : null}

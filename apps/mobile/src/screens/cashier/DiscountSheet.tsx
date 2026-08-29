@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
+import { Ionicons } from "@expo/vector-icons";
 import { cartTotalCents } from "@cloth-scan/shared";
 import { colors, font, radius, space } from "../../theme/tokens";
 import { selectDiscounted, selectTotalCents, useCashierStore } from "./store";
@@ -15,7 +16,7 @@ type Tab = "zhe" | "total";
  * 第 2 波 Task 4：改用订单级 orderDiscountCents 字段，不再调 distributeOrderTotal
  * 把优惠摊到各行单价。各行 price 保持原价，优惠 = 原价合计 − 目标总价，单独提交。
  *
- * - 打折 tab：输入 8.8 = 8.8 折 → 目标总价 = round(orig * value / 10)
+ * - 打折 tab：输入 9.5 = 9.5 折 → 目标总价 = round(orig * value / 10)
  * - 改价 tab：输入优惠后总价（元）→ 目标总价 = round(value * 100)
  * - 确定：setOrderDiscount(max(0, orig − 目标总价))
  * - 清除优惠：setOrderDiscount(0)
@@ -91,7 +92,7 @@ export function DiscountSheet() {
         <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.centerSheet}>
           <Text style={cashierStyles.titleText}>整单优惠</Text>
 
-          {/* tab 段控件（大段，§2.5） */}
+          {/* tab 段控件 */}
           <View style={styles.tabs}>
             <Pressable
               style={[styles.tab, tab === "zhe" && styles.tabActive]}
@@ -101,7 +102,14 @@ export function DiscountSheet() {
                 setError(null);
               }}
             >
-              <Text style={[styles.tabText, tab === "zhe" && styles.tabTextActive]}>打折</Text>
+              <View style={cashierStyles.iconRow}>
+                <Ionicons
+                  name="pricetags-outline"
+                  size={15}
+                  color={tab === "zhe" ? "#fff" : "#475569"}
+                />
+                <Text style={[styles.tabText, tab === "zhe" && styles.tabTextActive]}>打折</Text>
+              </View>
             </Pressable>
             <Pressable
               style={[styles.tab, tab === "total" && styles.tabActive]}
@@ -111,14 +119,21 @@ export function DiscountSheet() {
                 setError(null);
               }}
             >
-              <Text style={[styles.tabText, tab === "total" && styles.tabTextActive]}>改价</Text>
+              <View style={cashierStyles.iconRow}>
+                <Ionicons
+                  name="create-outline"
+                  size={15}
+                  color={tab === "total" ? "#fff" : "#475569"}
+                />
+                <Text style={[styles.tabText, tab === "total" && styles.tabTextActive]}>改价</Text>
+              </View>
             </Pressable>
           </View>
 
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
-              placeholder={tab === "zhe" ? "8.8" : "0.00"}
+              placeholder={tab === "zhe" ? "9.5" : "0.00"}
               placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
               autoFocus
@@ -137,15 +152,24 @@ export function DiscountSheet() {
           <View style={styles.actions}>
             {hasDiscount ? (
               <Pressable style={styles.clearBtn} onPress={clearDiscount}>
-                <Text style={styles.clearText}>清除优惠</Text>
+                <View style={cashierStyles.iconRow}>
+                  <Ionicons name="refresh" size={17} color={colors.danger} />
+                  <Text style={styles.clearText}>清除</Text>
+                </View>
               </Pressable>
             ) : (
               <Pressable style={cashierStyles.secondaryBtn} onPress={close}>
-                <Text style={cashierStyles.secondaryBtnText}>取消</Text>
+                <View style={cashierStyles.iconRow}>
+                  <Ionicons name="close" size={17} color={colors.textMuted} />
+                  <Text style={cashierStyles.secondaryBtnText}>取消</Text>
+                </View>
               </Pressable>
             )}
             <Pressable style={[cashierStyles.primaryBtn, styles.confirmBtn]} onPress={confirm}>
-              <Text style={cashierStyles.primaryBtnText}>确定</Text>
+              <View style={cashierStyles.iconRow}>
+                <Ionicons name="checkmark" size={18} color="#fff" />
+                <Text style={cashierStyles.primaryBtnText}>确定</Text>
+              </View>
             </Pressable>
           </View>
         </Animated.View>
@@ -171,7 +195,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: space.sm,
+    gap: 4,
   },
   input: {
     borderBottomWidth: 2,

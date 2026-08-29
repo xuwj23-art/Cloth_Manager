@@ -57,7 +57,7 @@ export const cashierStyles = StyleSheet.create({
   },
 
   // ---- 按钮（≥48dp，主按钮 56dp，§3.3） ----
-  /** 主操作大按钮（结算 / 加入 / 确定）—— 墨绿品牌色 */
+  /** 主操作大按钮（结算 / 加入 / 确定）—— 品牌色 */
   primaryBtn: {
     backgroundColor: colors.primary,
     height: touch.buttonHeight,
@@ -66,10 +66,18 @@ export const cashierStyles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: space.xl,
   },
+  primaryBtnPressed: { backgroundColor: colors.primaryPressed },
   primaryBtnText: {
     color: "#fff",
     fontSize: font.body,
     fontWeight: "800",
+  },
+  /** 图标 + 文字横向排列（按钮内容） */
+  iconRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   /** 次操作按钮（取消 / 清除优惠）—— 描边 */
   secondaryBtn: {

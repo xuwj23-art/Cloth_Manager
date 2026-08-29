@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
+import { Ionicons } from "@expo/vector-icons";
 import { colors, radius, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
 import { cashierStyles } from "./ui";
@@ -54,7 +55,10 @@ export function ManualInputSheet({
 
           <View style={styles.actions}>
             <Pressable style={cashierStyles.secondaryBtn} onPress={() => setSheet("none")}>
-              <Text style={cashierStyles.secondaryBtnText}>取消</Text>
+              <View style={cashierStyles.iconRow}>
+                <Ionicons name="close" size={17} color={colors.textMuted} />
+                <Text style={cashierStyles.secondaryBtnText}>取消</Text>
+              </View>
             </Pressable>
             <Pressable
               style={[
@@ -65,7 +69,10 @@ export function ManualInputSheet({
               disabled={!code.trim()}
               onPress={submit}
             >
-              <Text style={cashierStyles.primaryBtnText}>查找</Text>
+              <View style={cashierStyles.iconRow}>
+                <Ionicons name="search" size={17} color="#fff" />
+                <Text style={cashierStyles.primaryBtnText}>查找</Text>
+              </View>
             </Pressable>
           </View>
         </Animated.View>

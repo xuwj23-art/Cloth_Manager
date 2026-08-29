@@ -2,8 +2,9 @@ import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import Animated, { FadeIn } from "react-native-reanimated";
+import { Ionicons } from "@expo/vector-icons";
 import type { CartLine } from "@cloth-scan/shared";
-import { colors, font, radius, space, touch } from "../../theme/tokens";
+import { colors, font, radius, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
 import { cashierStyles, yuan } from "./ui";
 
@@ -24,7 +25,11 @@ export function CartList() {
   if (cart.length === 0) {
     return (
       <View style={styles.emptyWrap}>
-        <Text style={styles.empty}>购物车为空，扫码添加商品</Text>
+        <View style={styles.emptyIcon}>
+          <Ionicons name="scan-outline" size={30} color={colors.primary} />
+        </View>
+        <Text style={styles.emptyTitle}>扫码即上购物车</Text>
+        <Text style={styles.emptySub}>支持连扫，同款自动累加数量</Text>
       </View>
     );
   }
@@ -58,88 +63,193 @@ interface CartRowProps {
   onEdit: () => void;
 }
 
-const CartRowBase = ({ line, index, onInc, onDec, onRemove, onEdit }: CartRowProps) => (
-  <Animated.View entering={FadeIn.delay(index * staggerMs).duration(150)} style={styles.row}>
-    {/* 缩略图占位：CartLine 不带封面图，用品名首字占位（墨绿浅底） */}
-    <View style={styles.thumb}>
-      <Text style={styles.thumbText}>{line.productName.slice(0, 1)}</Text>
-    </View>
+const CartRowBase = ({ line, index, onInc, onDec, onRemove, onEdit }: CartRowProps) => {
+  const edited = line.origPrice != null && line.origPrice !== line.price;
+  return (
+    <Animated.View entering={FadeIn.delay(index * staggerMs).duration(150)} style={styles.row}>
+      {/* 左：缩略字徽 + 中部「名称/规格」两行居中 */}
+      <View style={styles.mainZone}>
+        <View style={styles.thumb}>
+          <Text style={styles.thumbText}>{line.productName.slice(0, 1)}</Text>
+        </View>
+        <View style={styles.infoStack}>
+          <Text style={styles.name} numberOfLines={1} adjustsFontSizeToFit allowFontScaling={false}>
+            {line.productName}
+          </Text>
+          <Text style={styles.meta} numberOfLines={1} allowFontScaling={false}>
+            {line.color}/{line.size}
+          </Text>
+        </View>
+      </View>
 
-    <Pressable style={styles.info} onPress={onEdit}>
-      <Text style={styles.name} numberOfLines={1}>
-        {line.productName}
-      </Text>
-      <Text style={styles.meta}>
-        {line.color}/{line.size} · {yuan(line.price)}
-        <Text style={styles.editHint}> 改价</Text>
-      </Text>
-    </Pressable>
-
-    <View style={styles.stepper}>
-      <Pressable
-        style={[
-          cashierStyles.stepperBtn,
-          styles.stepSm,
-          line.quantity <= 1 && cashierStyles.disabled,
-        ]}
-        disabled={line.quantity <= 1}
-        onPress={onDec}
-      >
-        <Text style={cashierStyles.stepperText}>−</Text>
-      </Pressable>
-      <Text style={styles.qty}>{line.quantity}</Text>
-      <Pressable style={[cashierStyles.stepperBtn, styles.stepSm]} onPress={onInc}>
-        <Text style={cashierStyles.stepperText}>＋</Text>
-      </Pressable>
-      <Pressable style={styles.removeBtn} onPress={onRemove}>
-        <Text style={styles.removeText}>删</Text>
-      </Pressable>
-    </View>
-  </Animated.View>
-);
+      {/* 右：上行=价格(+划线原价)+改价；下行=步进器+删除 */}
+      <View style={styles.actionZone}>
+        <View style={styles.priceRow}>
+          {edited ? (
+            <Text style={styles.origPrice} allowFontScaling={false}>
+              {yuan(line.origPrice!)}
+            </Text>
+          ) : null}
+          <Text style={styles.priceText} allowFontScaling={false}>
+            {yuan(line.price)}
+          </Text>
+          <Pressable
+            style={({ pressed }) => [
+              styles.editBtn,
+              edited && styles.editBtnOn,
+              pressed && styles.editBtnPressed,
+            ]}
+            onPress={onEdit}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="改价"
+          >
+            <Ionicons
+              name={edited ? "pricetag" : "pricetag-outline"}
+              size={13}
+              color={edited ? "#fff" : colors.primary}
+            />
+          </Pressable>
+        </View>
+        <View style={styles.stepper}>
+          <Pressable
+            style={[
+              cashierStyles.stepperBtn,
+              styles.stepSm,
+              line.quantity <= 1 && cashierStyles.disabled,
+            ]}
+            disabled={line.quantity <= 1}
+            onPress={onDec}
+            hitSlop={7}
+            accessibilityRole="button"
+            accessibilityLabel="减少数量"
+          >
+            <Ionicons name="remove" size={15} color={colors.primary} />
+          </Pressable>
+          <Text style={styles.qty}>{line.quantity}</Text>
+          <Pressable
+            style={[cashierStyles.stepperBtn, styles.stepSm]}
+            onPress={onInc}
+            hitSlop={7}
+            accessibilityRole="button"
+            accessibilityLabel="增加数量"
+          >
+            <Ionicons name="add" size={15} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            style={styles.removeBtn}
+            onPress={onRemove}
+            hitSlop={7}
+            accessibilityRole="button"
+            accessibilityLabel="删除该行"
+          >
+            <Ionicons name="trash-outline" size={13} color={colors.danger} />
+          </Pressable>
+        </View>
+      </View>
+    </Animated.View>
+  );
+};
 
 const CartRow = memo(CartRowBase);
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: space.lg },
-  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  empty: { textAlign: "center", color: colors.textMuted, fontSize: font.body },
+  container: { flex: 1, paddingHorizontal: space.lg, paddingTop: space.sm },
+  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingBottom: 24 },
+  emptyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#EEF2FA",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  emptyTitle: { fontSize: 15, fontWeight: "700", color: "#6B7280" },
+  emptySub: { fontSize: 12, color: "#9AA6B8" },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: space.md,
+    paddingVertical: space.sm + 2,
+    paddingHorizontal: space.md,
+    marginBottom: space.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: space.sm,
+  },
+  mainZone: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    flex: 1,
+    maxWidth: 210,
+    minWidth: 0,
   },
   thumb: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    backgroundColor: "#EEF2FA",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  thumbText: {
+    fontSize: font.body + 2,
+    fontWeight: "800",
+    color: "#101E3C",
+  },
+  infoStack: {
+    flex: 1,
+    minWidth: 0,
+    maxHeight: 56,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 3,
+  },
+  name: { fontSize: 14, fontWeight: "600", color: colors.text, width: "100%", textAlign: "center" },
+  meta: { fontSize: 11, color: colors.textMuted },
+  actionZone: {
+    flexShrink: 0,
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    alignSelf: "stretch",
+    gap: 6,
+  },
+  priceRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  priceText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#101E3C",
+  },
+  origPrice: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.textMuted,
+    textDecorationLine: "line-through",
+  },
+  editBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
   },
-  thumbText: {
-    fontSize: font.title,
-    fontWeight: "800",
-    color: colors.primary,
-  },
-  info: { flex: 1 },
-  name: { fontSize: font.body, fontWeight: "600", color: colors.text },
-  meta: { fontSize: font.caption, color: colors.textMuted, marginTop: 2 },
-  editHint: { color: colors.primary, fontSize: font.caption },
-  stepper: { flexDirection: "row", alignItems: "center", gap: space.xs },
-  stepSm: { width: touch.minSize, height: touch.minSize },
-  qty: { minWidth: 28, textAlign: "center", fontSize: font.body, fontWeight: "700" },
+  editBtnPressed: { backgroundColor: "#DDE7FB" },
+  editBtnOn: { backgroundColor: colors.danger },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 3 },
+  stepSm: { width: 32, height: 32, borderRadius: 10 },
+  qty: { minWidth: 18, textAlign: "center", fontSize: 14, fontWeight: "700" },
   removeBtn: {
-    width: touch.minSize,
-    height: touch.minSize,
-    borderRadius: radius.md,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     backgroundColor: colors.dangerSoft,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: space.xs,
+    marginLeft: 4,
   },
-  removeText: { color: colors.danger, fontSize: font.body },
 });
