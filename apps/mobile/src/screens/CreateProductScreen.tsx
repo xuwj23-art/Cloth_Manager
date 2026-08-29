@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,7 +14,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import {
   CreateProductInput,
@@ -36,6 +35,8 @@ import { BackButton } from "../components/BackButton";
 import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space, touch } from "../theme/tokens";
+import { isPickerCancelled, pickProductImage } from "../utils/image-pick";
+import { makeReveal } from "../utils/kb";
 import { Chip } from "./create-product/Chip";
 import { PhotoSlots, type PhotoKey } from "./create-product/PhotoSlots";
 import { PhotoSourceSheet } from "./create-product/PhotoSourceSheet";
@@ -165,21 +166,16 @@ export function CreateProductScreen() {
 
   async function pickFrom(key: PhotoKey, fromCamera: boolean) {
     setError(null);
-    const perm = fromCamera
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setError("需要相册/相机权限");
+    let uri: string;
+    try {
+      uri = await pickProductImage(fromCamera);
+    } catch (e) {
+      if (!isPickerCancelled(e)) setError(fromCamera ? "无法使用相机" : "无法访问相册");
       return;
     }
-    const result = fromCamera
-      ? await ImagePicker.launchCameraAsync({ quality: 0.6 })
-      : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (result.canceled || !result.assets?.[0]) return;
-
     setUploadingKey(key);
     try {
-      const path = await uploadImage(result.assets[0].uri);
+      const path = await uploadImage(uri);
       setPhotos((p) => ({ ...p, [key]: path }));
     } catch (e) {
       setError(`图片上传失败：${(e as Error).message}`);
@@ -331,6 +327,31 @@ export function CreateProductScreen() {
   const saveDisabled = submitting || salePrice.trim() === "" || !photosFull;
   const entryDisabled = !photosFull || !!uploadingKey;
 
+  // 键盘避让：数字输入框聚焦时滚入可视区（Android resize 后 ScrollView 不自动跟随焦点）
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollYRef = useRef(0);
+  const costRef = useRef<TextInput>(null);
+  const saleRef = useRef<TextInput>(null);
+  const stockRef = useRef<TextInput>(null);
+  const costReveal = () =>
+    makeReveal(
+      scrollRef,
+      () => scrollYRef.current,
+      () => costRef.current,
+    )();
+  const saleReveal = () =>
+    makeReveal(
+      scrollRef,
+      () => scrollYRef.current,
+      () => saleRef.current,
+    )();
+  const stockReveal = () =>
+    makeReveal(
+      scrollRef,
+      () => scrollYRef.current,
+      () => stockRef.current,
+    )();
+
   return (
     <KeyboardAvoidingView
       style={styles.screen}
@@ -344,7 +365,12 @@ export function CreateProductScreen() {
         </View>
 
         <ScrollView
+          ref={scrollRef}
           style={styles.scroll}
+          onScroll={(e) => {
+            scrollYRef.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
@@ -367,6 +393,8 @@ export function CreateProductScreen() {
                     进价(元)
                   </Text>
                   <TextInput
+                    ref={costRef}
+                    onFocus={costReveal}
                     style={styles.input}
                     keyboardType="decimal-pad"
                     placeholder="选填"
@@ -386,6 +414,8 @@ export function CreateProductScreen() {
                   售价(元)
                 </Text>
                 <TextInput
+                  ref={saleRef}
+                  onFocus={saleReveal}
                   style={styles.input}
                   keyboardType="decimal-pad"
                   placeholder="必填"
@@ -399,6 +429,8 @@ export function CreateProductScreen() {
                   库存
                 </Text>
                 <TextInput
+                  ref={stockRef}
+                  onFocus={stockReveal}
                   style={styles.input}
                   keyboardType="number-pad"
                   placeholder="1"

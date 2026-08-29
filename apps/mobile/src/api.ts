@@ -9,6 +9,7 @@ import type {
   EditSaleOrderInput,
   LoginInput,
   MonthlySalesReport,
+  RangeSalesReport,
   Product,
   ProductScope,
   ProductWithSkus,
@@ -306,6 +307,11 @@ export function getSalesByDay(date: string): Promise<SaleOrderDetail[]> {
   return request(`/sales/by-day?date=${encodeURIComponent(date)}`);
 }
 
+/** 任意时间段报表（合计+店员+流水，含端点）：from/to=YYYY-MM-DD，最长 62 天 */
+export function getSalesRange(from: string, to: string): Promise<RangeSalesReport> {
+  return request(`/sales/range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+}
+
 /** 上传图片，返回相对路径（如 /uploads/xxx.jpg） */
 export async function uploadImage(localUri: string): Promise<string> {
   const form = new FormData();
@@ -330,7 +336,10 @@ export async function uploadImage(localUri: string): Promise<string> {
     },
     60_000,
   );
-  if (!res.ok) throw new Error(`上传失败 HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`上传失败 HTTP ${res.status} ${body.slice(0, 120)}`);
+  }
   const data = (await res.json()) as { url: string };
   return data.url;
 }
