@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { OperatorSalesStat, SaleOrderDetail } from "@cloth-scan/shared";
 import { colors, font, radius, space } from "../../theme/tokens";
@@ -204,6 +204,9 @@ export function HeroCard({
   isCurrent: boolean;
   onBackToCurrent: () => void;
 }) {
+  // 极窄屏（<340dp，如系统显示大小=最大）三列统计值缩字号，避免金额被省略号截断
+  const { width } = useWindowDimensions();
+  const statFontSize = width < 340 ? 14 : 18;
   const margin = revenue > 0 ? Math.round((profit / revenue) * 100) : 0;
   return (
     <View style={heroStyles.card}>
@@ -235,7 +238,11 @@ export function HeroCard({
       <View style={heroStyles.statsRow}>
         <View style={heroStyles.stat}>
           <Text style={heroStyles.statLabel}>毛利</Text>
-          <Text style={heroStyles.statValueGold} numberOfLines={1} allowFontScaling={false}>
+          <Text
+            style={[heroStyles.statValueGold, { fontSize: statFontSize }]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
             {yuanStat(profit)}
           </Text>
           <Text style={heroStyles.statSub}>毛利率 {margin}%</Text>
@@ -244,7 +251,11 @@ export function HeroCard({
         <View style={heroStyles.stat}>
           <Text style={heroStyles.statLabel}>订单</Text>
           <View style={heroStyles.valueRow}>
-            <Text style={heroStyles.statValue} numberOfLines={1} allowFontScaling={false}>
+            <Text
+              style={[heroStyles.statValue, { fontSize: statFontSize }]}
+              numberOfLines={1}
+              allowFontScaling={false}
+            >
               {orders}
             </Text>
             <Text style={heroStyles.statUnit}> 单</Text>
@@ -255,7 +266,11 @@ export function HeroCard({
         <View style={heroStyles.stat}>
           <Text style={heroStyles.statLabel}>销量</Text>
           <View style={heroStyles.valueRow}>
-            <Text style={heroStyles.statValue} numberOfLines={1} allowFontScaling={false}>
+            <Text
+              style={[heroStyles.statValue, { fontSize: statFontSize }]}
+              numberOfLines={1}
+              allowFontScaling={false}
+            >
               {quantity}
             </Text>
             <Text style={heroStyles.statUnit}> 件</Text>
