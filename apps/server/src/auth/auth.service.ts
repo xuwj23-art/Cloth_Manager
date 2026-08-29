@@ -41,11 +41,12 @@ function loginLockRemaining(phone: string): number {
   return LOGIN_WINDOW_MS - (now - fails[0]!);
 }
 
-function recordLoginFailure(phone: string): void {
+function recordLoginFailure(phone: string): number {
   if (loginFailures.size > LOGIN_MAP_CAP) loginFailures.clear();
-  const fails = loginFailures.get(phone) ?? [];
+  const fails = (loginFailures.get(phone) ?? []).filter((t) => Date.now() - t < LOGIN_WINDOW_MS);
   fails.push(Date.now());
   loginFailures.set(phone, fails);
+  return fails.length;
 }
 
 @Injectable()
@@ -55,7 +56,11 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  private toAuthResponse(user: User): AuthResponse {
+  private async toAuthResponse(user: User): Promise<AuthResponse> {
+    const shop = await this.prisma.shop.findUnique({
+      where: { id: user.shopId },
+      select: { name: true },
+    });
     const payload: JwtPayload = {
       sub: user.id,
       shopId: user.shopId,
@@ -66,6 +71,7 @@ export class AuthService {
       user: {
         id: user.id,
         shopId: user.shopId,
+        shopName: shop?.name ?? "",
         name: user.name,
         phone: user.phone,
         role: user.role,
@@ -114,6 +120,8 @@ export class AuthService {
       throw e;
     }
 
+    // 建号前的试错（账号不存在也计失败次数）不该把新账号锁在门外
+    loginFailures.delete(input.phone);
     return this.toAuthResponse(user);
   }
 
@@ -130,8 +138,12 @@ export class AuthService {
       where: { phone: input.phone },
     });
     if (!user || !(await bcrypt.compare(input.password, user.passwordHash))) {
-      recordLoginFailure(input.phone);
-      throw new UnauthorizedException("手机号或密码错误");
+      const fails = recordLoginFailure(input.phone);
+      const left = Math.max(0, LOGIN_MAX_FAILURES - fails);
+      // 提前告知剩余机会，避免用户在不知情时攒满 5 次被锁 15 分钟
+      throw new UnauthorizedException(
+        left > 0 ? `手机号或密码错误，还可尝试 ${left} 次` : "手机号或密码错误",
+      );
     }
     loginFailures.delete(input.phone); // 成功登录清零计数
     return this.toAuthResponse(user);
@@ -164,6 +176,8 @@ export class AuthService {
       }
       throw e;
     }
+    // 建号前的试错不该把新店员锁在门外（常见：老板还没建完号，店员已在登录页试了几次）
+    loginFailures.delete(input.phone);
     return this.toAuthResponse(user);
   }
 
@@ -211,9 +225,10 @@ export class AuthService {
     }
     const passwordHash = await bcrypt.hash(input.newPassword, 10);
     await this.prisma.user.update({
-      where: { id: userId },
+      where: { id: user.id },
       data: { passwordHash },
     });
+    loginFailures.delete(user.phone); // 改密成功清掉旧密码时代的失败计数
     // 注意：JWT 无撤销机制，已签发 token 在过期前仍有效；
     // 设备级吊销待 tokenEpoch 方案（安全审查 P1-3）再收口。
     return { ok: true };
@@ -236,21 +251,16 @@ export class AuthService {
     }
     const passwordHash = await bcrypt.hash(input.newPassword, 10);
     await this.prisma.user.update({
-      where: { id: targetId },
+      where: { id: target.id },
       data: { passwordHash },
     });
+    loginFailures.delete(target.phone); // 重置后清失败计数，店员拿到新密码即可立即登录
     return { ok: true };
   }
 
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();
-    return {
-      id: user.id,
-      shopId: user.shopId,
-      name: user.name,
-      phone: user.phone,
-      role: user.role,
-    };
+    return (await this.toAuthResponse(user)).user;
   }
 }

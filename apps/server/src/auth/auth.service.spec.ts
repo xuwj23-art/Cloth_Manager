@@ -12,7 +12,10 @@ import type { PrismaService } from "../prisma/prisma.service";
 
 function makePrisma(overrides: Partial<Record<string, any>> = {}) {
   const tx = {
-    shop: { create: vi.fn().mockResolvedValue({ id: "shop-1" }) },
+    shop: {
+      create: vi.fn().mockResolvedValue({ id: "shop-1" }),
+      findUnique: vi.fn().mockResolvedValue({ name: "测试店" }),
+    },
     user: {
       create: vi.fn().mockImplementation(({ data }: any) => ({
         id: "user-1",

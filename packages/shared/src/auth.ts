@@ -56,6 +56,7 @@ export interface ShopMember {
 export const AuthUser = z.object({
   id: z.string().uuid(),
   shopId: z.string().uuid(),
+  shopName: z.string(),
   name: z.string(),
   phone: z.string(),
   role: UserRole,

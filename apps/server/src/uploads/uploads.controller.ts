@@ -7,11 +7,11 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { diskStorage } from "multer";
+import { memoryStorage } from "multer";
 import { extname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { unlink, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import sharp from "sharp";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../auth/roles.guard";
@@ -38,13 +38,7 @@ export class UploadsController {
   @Post()
   @UseInterceptors(
     FileInterceptor("file", {
-      storage: diskStorage({
-        destination: UPLOADS_DIR,
-        filename: (_req, file, cb) => {
-          const ext = extname(file.originalname).toLowerCase() || ".jpg";
-          cb(null, `${randomUUID()}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 8 * 1024 * 1024 }, // 8MB
       fileFilter: (_req, file, cb) => {
         const ext = extname(file.originalname).toLowerCase();
@@ -60,34 +54,27 @@ export class UploadsController {
 
     // 统一压缩：主图(JPEG q72) + 缩略图(JPEG q70)，去 EXIF、自动转正。
     // 2 万件每件一张时，原始可能十几 G；压缩后约 100~200KB/张，整体仅几个 G。
-    const orig = join(UPLOADS_DIR, file.filename);
-    const base = file.filename.replace(/\.[^.]+$/, "");
+    const base = randomUUID();
     const mainName = `${base}.jpg`;
     const thumbName = `${base}.thumb.jpg`;
 
     try {
-      const mainBuf = await sharp(orig, { limitInputPixels: MAX_INPUT_PIXELS })
+      const mainBuf = await sharp(file.buffer, { limitInputPixels: MAX_INPUT_PIXELS })
         .rotate()
         .resize(MAIN_MAX, MAIN_MAX, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 72 })
         .toBuffer();
       await writeFile(join(UPLOADS_DIR, mainName), mainBuf);
 
-      const thumbBuf = await sharp(orig, { limitInputPixels: MAX_INPUT_PIXELS })
+      const thumbBuf = await sharp(file.buffer, { limitInputPixels: MAX_INPUT_PIXELS })
         .rotate()
         .resize(THUMB_MAX, THUMB_MAX, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 70 })
         .toBuffer();
       await writeFile(join(UPLOADS_DIR, thumbName), thumbBuf);
-
-      // 删除原始未压缩文件（扩展名不同才需删，避免删掉刚写入的 .jpg）
-      if (mainName !== file.filename) {
-        await unlink(orig).catch(() => undefined);
-      }
     } catch {
       // 压缩失败（含超像素上限/非法图片数据）：删除原始文件并拒绝，
       // 不能把未经校验/重编码的内容经 /uploads/ 公开服务。
-      await unlink(orig).catch(() => undefined);
       throw new BadRequestException("图片处理失败，请换一张图片重试");
     }
 
