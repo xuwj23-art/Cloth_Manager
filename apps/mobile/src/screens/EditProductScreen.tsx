@@ -33,7 +33,7 @@ import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space, touch } from "../theme/tokens";
 import { isPickerCancelled, pickProductImage } from "../utils/image-pick";
-import { makeReveal } from "../utils/kb";
+import { makeReveal, useKeyboardHeight, useKeyboardReveal } from "../utils/kb";
 import { yuan } from "../utils/format";
 import { Chip } from "./create-product/Chip";
 import { PhotoSlots, type PhotoKey } from "./create-product/PhotoSlots";
@@ -131,12 +131,26 @@ export function EditProductScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
   const fieldRefs = useRef<Record<string, TextInput | null>>({});
-  const fieldReveal = (key: string) =>
+  const activeFieldRef = useRef<string | null>(null);
+  const fieldReveal = (key: string) => {
+    activeFieldRef.current = key;
     makeReveal(
       scrollRef,
       () => scrollYRef.current,
       () => fieldRefs.current[key] ?? null,
-    );
+    )();
+  };
+  // 键盘展开时给内容底部补位：末尾字段（库存）已到滚动尽头，无补位则 scrollTo 无余量
+  const kbPad = useKeyboardHeight();
+  // 真机可靠路径：键盘完全展开后按活动字段补位（onFocus 那次只对快机型有效）
+  useKeyboardReveal(
+    scrollRef,
+    () => scrollYRef.current,
+    () => {
+      const k = activeFieldRef.current;
+      return k ? (fieldRefs.current[k] ?? null) : null;
+    },
+  );
 
   function hydrate(p: ProductWithSkus) {
     setName(p.name);
@@ -377,7 +391,7 @@ export function EditProductScreen() {
           scrollYRef.current = e.nativeEvent.contentOffset.y;
         }}
         scrollEventThrottle={16}
-        contentContainerStyle={styles.body}
+        contentContainerStyle={[styles.body, { paddingBottom: 40 + kbPad }]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>

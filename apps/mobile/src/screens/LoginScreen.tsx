@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Keyboard } from "react-native";
+import { useKeyboardHeight } from "../utils/kb";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  ScrollView,
   Pressable,
   StyleSheet,
   Text,
@@ -45,10 +46,24 @@ export function LoginScreen() {
     }
   }
 
+  const kbPad = useKeyboardHeight();
+  const scrollRef = useRef<ScrollView>(null);
+  // 键盘展开时滚到底：登录/注册按钮在短表单底部，仅加 paddingBottom 不会自动滚动
+  useEffect(() => {
+    const sub = Keyboard.addListener("keyboardDidShow", () => {
+      [60, 300].forEach((delay) =>
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), delay),
+      );
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { paddingTop: topPad }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <ScrollView
+      ref={scrollRef}
+      style={styles.scroll}
+      contentContainerStyle={[styles.container, { paddingTop: topPad, paddingBottom: 24 + kbPad }]}
+      keyboardShouldPersistTaps="handled"
     >
       <View style={styles.hero}>
         <BrandLockup variant="login" />
@@ -125,13 +140,13 @@ export function LoginScreen() {
       >
         <Text style={styles.switchText}>{mode === "login" ? "注册门店" : "返回登录"}</Text>
       </Pressable>
-    </KeyboardAvoidingView>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroll: { flex: 1, backgroundColor: colors.bg },
   container: {
-    flex: 1,
     backgroundColor: colors.bg,
     justifyContent: "flex-start",
     paddingHorizontal: 24,

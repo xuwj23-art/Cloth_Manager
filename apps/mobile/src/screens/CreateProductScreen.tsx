@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -36,7 +36,7 @@ import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space, touch } from "../theme/tokens";
 import { isPickerCancelled, pickProductImage } from "../utils/image-pick";
-import { makeReveal } from "../utils/kb";
+import { makeReveal, useKeyboardHeight, useKeyboardReveal } from "../utils/kb";
 import { Chip } from "./create-product/Chip";
 import { PhotoSlots, type PhotoKey } from "./create-product/PhotoSlots";
 import { PhotoSourceSheet } from "./create-product/PhotoSourceSheet";
@@ -333,6 +333,10 @@ export function CreateProductScreen() {
   const costRef = useRef<TextInput>(null);
   const saleRef = useRef<TextInput>(null);
   const stockRef = useRef<TextInput>(null);
+  const activeRef = useRef<TextInput | null>(null);
+  const markActive = (ref: MutableRefObject<TextInput | null>) => () => {
+    activeRef.current = ref.current;
+  };
   const costReveal = () =>
     makeReveal(
       scrollRef,
@@ -351,6 +355,14 @@ export function CreateProductScreen() {
       () => scrollYRef.current,
       () => stockRef.current,
     )();
+
+  const kbPad = useKeyboardHeight();
+  // 真机可靠路径：键盘完全展开后按活动字段补位
+  useKeyboardReveal(
+    scrollRef,
+    () => scrollYRef.current,
+    () => activeRef.current,
+  );
 
   return (
     <KeyboardAvoidingView
@@ -371,7 +383,7 @@ export function CreateProductScreen() {
             scrollYRef.current = e.nativeEvent.contentOffset.y;
           }}
           scrollEventThrottle={16}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: 24 + kbPad }]}
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.card}>
@@ -394,7 +406,10 @@ export function CreateProductScreen() {
                   </Text>
                   <TextInput
                     ref={costRef}
-                    onFocus={costReveal}
+                    onFocus={() => {
+                      markActive(costRef)();
+                      costReveal();
+                    }}
                     style={styles.input}
                     keyboardType="decimal-pad"
                     placeholder="选填"
@@ -415,7 +430,10 @@ export function CreateProductScreen() {
                 </Text>
                 <TextInput
                   ref={saleRef}
-                  onFocus={saleReveal}
+                  onFocus={() => {
+                    markActive(saleRef)();
+                    saleReveal();
+                  }}
                   style={styles.input}
                   keyboardType="decimal-pad"
                   placeholder="必填"
@@ -430,7 +448,10 @@ export function CreateProductScreen() {
                 </Text>
                 <TextInput
                   ref={stockRef}
-                  onFocus={stockReveal}
+                  onFocus={() => {
+                    markActive(stockRef)();
+                    stockReveal();
+                  }}
                   style={styles.input}
                   keyboardType="number-pad"
                   placeholder="1"
