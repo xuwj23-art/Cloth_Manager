@@ -1,8 +1,10 @@
 import * as SecureStore from "expo-secure-store";
+import type { AuthUser } from "@cloth-scan/shared";
 
 const TOKEN_KEY = "cloth_scan_token";
 const SALE_ALERTS_KEY = "cloth_scan_sale_alerts_on";
 const LAST_PRINTER_KEY = "cloth_scan_last_printer";
+const CACHED_USER_KEY = "cloth_scan_cached_user";
 
 export async function loadToken(): Promise<string | null> {
   try {
@@ -69,5 +71,41 @@ export async function setLastPrinter(p: LastPrinter): Promise<void> {
     await SecureStore.setItemAsync(LAST_PRINTER_KEY, JSON.stringify(p));
   } catch {
     // 持久化失败不影响本次会话生效
+  }
+}
+
+/**
+ * 缓存的用户身份（登录/校验成功后写入）。
+ * 启动时先用它秒进主界面，/auth/me 在后台校验——网络不佳或离线时
+ * 不再卡转圈、也不再被甩回登录页（token 仍在，仅界面缺身份）。
+ */
+let cachedUserCache: AuthUser | null | undefined;
+
+export async function loadCachedUser(): Promise<AuthUser | null> {
+  if (cachedUserCache !== undefined) return cachedUserCache;
+  try {
+    const raw = await SecureStore.getItemAsync(CACHED_USER_KEY);
+    cachedUserCache = raw ? (JSON.parse(raw) as AuthUser) : null;
+  } catch {
+    cachedUserCache = null;
+  }
+  return cachedUserCache;
+}
+
+export async function saveCachedUser(u: AuthUser): Promise<void> {
+  cachedUserCache = u;
+  try {
+    await SecureStore.setItemAsync(CACHED_USER_KEY, JSON.stringify(u));
+  } catch {
+    // 持久化失败不影响本次会话生效
+  }
+}
+
+export async function clearCachedUser(): Promise<void> {
+  cachedUserCache = null;
+  try {
+    await SecureStore.deleteItemAsync(CACHED_USER_KEY);
+  } catch {
+    // 忽略
   }
 }
