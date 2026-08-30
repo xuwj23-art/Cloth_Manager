@@ -14,6 +14,11 @@ type CtNativeModule = {
   queryStatus: () => boolean;
   printLabels: (job: CtPrintJob) => Promise<boolean>;
   isLocationEnabled?: () => boolean;
+  /** 原生声明了 Events("onConnect")，JS 代理上即有 addListener */
+  addListener?: (
+    event: string,
+    cb: (payload: { port: number; reason: number }) => void,
+  ) => { remove: () => void };
 };
 
 /**
@@ -109,8 +114,22 @@ export interface ConnectResult {
 }
 
 /**
+ * 订阅厂商 SDK 的连接回调（原生 onConnect 事件，含断线通知）。
+ * reason：256=BLE 成功 257=SPP 成功 258=USB 成功 4=断开连接 其余=失败码。
+ * 返回取消订阅函数。
+ */
+export function onCtConnectEvent(cb: (reason: number) => void): () => void {
+  const sub = Native?.addListener?.("onConnect", (e) => {
+    if (typeof e?.reason === "number") cb(e.reason);
+  });
+  return () => sub?.remove();
+}
+
+/**
  * 自动连接：先试 SPP（经典蓝牙），失败再回退 BLE。
+ * - 会话已建立时直接返回成功（514 语义：已连接，勿重复连接），不拆可用会话；
  * - 连接前先 disconnect，避免「重复连接(514)」与状态残留导致的崩溃；
+ * - SDK 返回 514 也按「已连接」处理（isConnected 标志与实际会话可能短暂不一致）；
  * - 两条路径都失败时，抛出带中文建议的错误。
  */
 export async function connectPrinterAuto(mac: string): Promise<ConnectResult> {
@@ -121,6 +140,9 @@ export async function connectPrinterAuto(mac: string): Promise<ConnectResult> {
       "蓝牙/位置权限未授予。请到「系统设置→应用→本应用→权限」里允许「附近的设备」和「位置」后重试",
     );
   }
+
+  // 已有可用会话：直接返回，绝不先 disconnect 拆掉还能打的连接
+  if (Native.isConnected()) return { port: "SPP", code: 514 };
 
   try {
     Native.disconnect();
@@ -134,6 +156,8 @@ export async function connectPrinterAuto(mac: string): Promise<ConnectResult> {
     return { port: "SPP", code };
   } catch (e) {
     sppErr = (e as Error).message ?? "";
+    // 514 = 已连接未断开进行重复连接（官方手册语义）：会话已在，按成功处理
+    if (/代码=514/.test(sppErr)) return { port: "SPP", code: 514 };
   }
 
   // SPP 失败 → 回退 BLE
@@ -147,6 +171,7 @@ export async function connectPrinterAuto(mac: string): Promise<ConnectResult> {
     return { port: "BLE", code };
   } catch (e) {
     const bleErr = (e as Error).message ?? "";
+    if (/代码=514/.test(bleErr)) return { port: "BLE", code: 514 };
     // 优先用更有指导性的那条
     const primary = /代码=516/.test(sppErr) ? sppErr : bleErr || sppErr;
     throw new Error(explainConnectError(primary));

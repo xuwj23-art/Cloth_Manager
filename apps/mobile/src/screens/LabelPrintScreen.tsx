@@ -23,6 +23,7 @@ import {
   isLocationEnabled,
   isPrinterAvailable,
   isPrinterConnected,
+  onCtConnectEvent,
   printJob,
 } from "../printer/ctPrinter";
 import { buildCtPrintJob, totalLabelCount } from "../printer/labelLayout";
@@ -503,11 +504,27 @@ export function LabelPrintScreen() {
       setConnect({ mac: dev.mac, name: dev.name, phase: "success" });
       return true;
     } catch {
+      // 重连失败：底栏必须同步回落到「未连接」，避免「已连接 + 设备列表」同屏
+      setConnected(false);
       setConnect(null);
       haptic("error");
       return false;
     }
   }
+
+  // 断线即时感知：订阅 SDK onConnect 回调（原生在 sendEvent 后才过滤 reason=4，
+  // 断线事件实际已发到 JS，此前只是没人听）。reason=4 立即把底栏打成「未连接」，
+  // 成功码同步置「已连接」——不再依赖 2.5s 轮询兜底。
+  useEffect(() => {
+    if (!isPrinterAvailable) return;
+    return onCtConnectEvent((reason) => {
+      if (reason === 4) {
+        setConnected(false);
+      } else if (reason === 256 || reason === 257 || reason === 258) {
+        setConnected(true);
+      }
+    });
+  }, []);
 
   // 掉线感知：页面存续期间轮询 SDK 真实连接状态，底栏不再停留在过期的「已连接」。
   // 连接过程中跳过（此时 isConnected 短暂为 false 属正常，避免误刷成「未连接」）。
