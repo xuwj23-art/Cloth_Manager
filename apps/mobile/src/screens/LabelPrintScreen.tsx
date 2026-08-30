@@ -512,19 +512,22 @@ export function LabelPrintScreen() {
     }
   }
 
-  // 断线即时感知：订阅 SDK onConnect 回调（原生在 sendEvent 后才过滤 reason=4，
-  // 断线事件实际已发到 JS，此前只是没人听）。reason=4 立即把底栏打成「未连接」，
-  // 成功码同步置「已连接」——不再依赖 2.5s 轮询兜底。
+  // 断线即时感知：订阅 SDK onConnect 回调（原生在 sendEvent 之后才过滤 reason=4，
+  // 断线事件实际已发到 JS，此前只是没人听）。reason=4 打成「未连接」、成功码置「已连接」，
+  // 2.5s 轮询保留作兜底（事件依赖厂商回调可靠性）。
+  // 连接过程中 SDK 会因前置 disconnect 打出 reason=4（与原生注释同款语义），忽略之，
+  // 避免「刚连上又被迟到的 4 刷成未连接」；非连接期的 4 才视为真断线。
   useEffect(() => {
     if (!isPrinterAvailable) return;
+    const connecting = connect?.phase === "connecting";
     return onCtConnectEvent((reason) => {
       if (reason === 4) {
-        setConnected(false);
+        if (!connecting) setConnected(false);
       } else if (reason === 256 || reason === 257 || reason === 258) {
         setConnected(true);
       }
     });
-  }, []);
+  }, [connect?.phase]);
 
   // 掉线感知：页面存续期间轮询 SDK 真实连接状态，底栏不再停留在过期的「已连接」。
   // 连接过程中跳过（此时 isConnected 短暂为 false 属正常，避免误刷成「未连接」）。
@@ -550,6 +553,9 @@ export function LabelPrintScreen() {
 
   async function handleBtPrint() {
     if (!isPrinterConnected()) {
+      // 真实状态是未连接：无论底栏此前显示什么（过期状态），先打成「未连接」，
+      // 保证后续任何路径（重连/设备列表）都不出现「底栏已连接 + 弹选择设备」。
+      setConnected(false);
       // 掉线：优先静默重连「上次成功连接」的打印机，失败才转设备列表
       const last = await getLastPrinter();
       if (last && (await tryReconnect(last))) {
