@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 
 const TOKEN_KEY = "cloth_scan_token";
 const SALE_ALERTS_KEY = "cloth_scan_sale_alerts_on";
+const LAST_PRINTER_KEY = "cloth_scan_last_printer";
 
 export async function loadToken(): Promise<string | null> {
   try {
@@ -38,6 +39,34 @@ export async function setSaleAlertsOn(on: boolean): Promise<void> {
   saleAlertsCache = on;
   try {
     await SecureStore.setItemAsync(SALE_ALERTS_KEY, on ? "1" : "0");
+  } catch {
+    // 持久化失败不影响本次会话生效
+  }
+}
+
+/** 上次成功连接的蓝牙打印机（打印页掉线自动重连用） */
+export interface LastPrinter {
+  name: string;
+  mac: string;
+}
+
+let lastPrinterCache: LastPrinter | null | undefined;
+
+export async function getLastPrinter(): Promise<LastPrinter | null> {
+  if (lastPrinterCache !== undefined) return lastPrinterCache;
+  try {
+    const raw = await SecureStore.getItemAsync(LAST_PRINTER_KEY);
+    lastPrinterCache = raw ? (JSON.parse(raw) as LastPrinter) : null;
+  } catch {
+    lastPrinterCache = null;
+  }
+  return lastPrinterCache;
+}
+
+export async function setLastPrinter(p: LastPrinter): Promise<void> {
+  lastPrinterCache = p;
+  try {
+    await SecureStore.setItemAsync(LAST_PRINTER_KEY, JSON.stringify(p));
   } catch {
     // 持久化失败不影响本次会话生效
   }

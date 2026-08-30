@@ -30,6 +30,7 @@ import type { CtBondedDevice } from "../../modules/ct-printer/src/CtPrinter.type
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { BackButton } from "../components/BackButton";
 import { useDialog } from "../dialog-context";
+import { getLastPrinter, setLastPrinter } from "../storage";
 import { colors, font, radius, space } from "../theme/tokens";
 import { yuan } from "../utils/format";
 
@@ -472,6 +473,7 @@ export function LabelPrintScreen() {
     try {
       await connectPrinterAuto(dev.mac);
       setConnected(true);
+      await setLastPrinter({ name: dev.name, mac: dev.mac });
       haptic("success");
       setConnect({ mac: dev.mac, name: dev.name, phase: "success" });
     } catch (e) {
@@ -486,6 +488,39 @@ export function LabelPrintScreen() {
     }
   }
 
+  /**
+   * 静默重连指定打印机（点「蓝牙打印」时发现掉线的自动路径）。
+   * 连接中有雷达弹窗反馈；失败时静默收起弹窗（由调用方决定后续，如转设备列表）。
+   */
+  async function tryReconnect(dev: { name: string; mac: string }): Promise<boolean> {
+    haptic("light");
+    setConnect({ mac: dev.mac, name: dev.name, phase: "connecting" });
+    try {
+      await connectPrinterAuto(dev.mac);
+      setConnected(true);
+      await setLastPrinter(dev);
+      haptic("success");
+      setConnect({ mac: dev.mac, name: dev.name, phase: "success" });
+      return true;
+    } catch {
+      setConnect(null);
+      haptic("error");
+      return false;
+    }
+  }
+
+  // 掉线感知：页面存续期间轮询 SDK 真实连接状态，底栏不再停留在过期的「已连接」。
+  // 连接过程中跳过（此时 isConnected 短暂为 false 属正常，避免误刷成「未连接」）。
+  useEffect(() => {
+    if (!isPrinterAvailable) return;
+    const id = setInterval(() => {
+      if (connect?.phase === "connecting") return;
+      const live = isPrinterConnected();
+      setConnected((prev) => (prev === live ? prev : live));
+    }, 2500);
+    return () => clearInterval(id);
+  }, [connect?.phase]);
+
   // success 短驻展示后自动收起二级弹窗与设备列表
   useEffect(() => {
     if (connect?.phase !== "success") return;
@@ -498,8 +533,14 @@ export function LabelPrintScreen() {
 
   async function handleBtPrint() {
     if (!isPrinterConnected()) {
-      await openBluetooth();
-      return;
+      // 掉线：优先静默重连「上次成功连接」的打印机，失败才转设备列表
+      const last = await getLastPrinter();
+      if (last && (await tryReconnect(last))) {
+        // 重连成功，继续打印
+      } else {
+        await openBluetooth();
+        return;
+      }
     }
     const job = buildCtPrintJob(product, qty, {
       size: { widthMm: size.w, heightMm: size.h },
