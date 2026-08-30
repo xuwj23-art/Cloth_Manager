@@ -168,15 +168,16 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.4 环境变量
 
-| 变量                   | 必填   | 说明                                                |
-| ---------------------- | ------ | --------------------------------------------------- |
-| `DATABASE_URL`         | ✅     | PG 连接串（本地 docker 端口 55432）                 |
-| `JWT_SECRET`           | ✅     | 生产必须改随机长串                                  |
-| `REGISTER_CODE`        | 生产✅ | 注册邀请码；**未设置=关闭注册**。本地测注册需手动加 |
-| `PORT`                 | ✗      | 默认 3000                                           |
-| `DB_PASSWORD`          | 生产✅ | 仅 `docker-compose.prod.yml` 用（根目录 `.env`）    |
-| `DASHSCOPE_API_KEY`    | ✗      | 阿里云百炼。不配则「AI 入库」返回 503，服务仍启动   |
-| `GARMENT_VISION_MODEL` | ✗      | 默认 `qwen3-vl-plus`                                |
+| 变量                   | 必填   | 说明                                                                                                                                                |
+| ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`         | ✅     | PG 连接串（本地 docker 端口 55432）                                                                                                                 |
+| `JWT_SECRET`           | ✅     | 生产必须改随机长串                                                                                                                                  |
+| `REGISTER_CODE`        | 生产✅ | 注册邀请码；**未设置=关闭注册**。本地测注册需手动加                                                                                                 |
+| `PORT`                 | ✗      | 默认 3000                                                                                                                                           |
+| `DB_PASSWORD`          | 生产✅ | 仅 `docker-compose.prod.yml` 用（根目录 `.env`）                                                                                                    |
+| `DASHSCOPE_API_KEY`    | ✗      | 阿里云百炼。不配则「AI 入库」返回 503，服务仍启动                                                                                                   |
+| `GARMENT_VISION_MODEL` | ✗      | 默认 `qwen3-vl-plus`                                                                                                                                |
+| `PASSWORD_CIPHER_KEY`  | 生产✅ | 「查看我的密码」AES 密钥（64 位 hex）。须在 `docker-compose.prod.yml` 的 `environment` 透传（已入白名单）；不配则该功能降级（不写副本、查询无记录） |
 
 ### 6.5 迁移
 
