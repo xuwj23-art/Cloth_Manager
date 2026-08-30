@@ -10,6 +10,8 @@ export interface CartLine {
   price: number; // 成交单价（分）
   /** 进车时的吊牌价（分）；改价后保留，用于展示划线原价 */
   origPrice?: number;
+  /** 商品主图路径（/uploads/…，可空）。购物车缩略图与预览弹层用 */
+  image?: string | null;
   quantity: number;
   stock: number; // 可售库存（用于上限保护）
 }
@@ -23,6 +25,8 @@ export interface ScannedSku {
   size: string;
   price: number;
   stock: number;
+  /** 商品主图路径（/uploads/…，可空） */
+  image?: string | null;
 }
 
 /**
@@ -39,7 +43,12 @@ export function addToCartQty(lines: CartLine[], sku: ScannedSku, qty: number): C
     const line = lines[idx]!;
     const nextQty = Math.min(line.quantity + safeQty, Math.max(sku.stock, 0));
     const copy = lines.slice();
-    copy[idx] = { ...line, quantity: nextQty, stock: sku.stock };
+    copy[idx] = {
+      ...line,
+      quantity: nextQty,
+      stock: sku.stock,
+      image: sku.image ?? line.image ?? null,
+    };
     return copy;
   }
   if (sku.stock <= 0) return lines; // 无库存不加入
@@ -53,6 +62,7 @@ export function addToCartQty(lines: CartLine[], sku: ScannedSku, qty: number): C
       size: sku.size,
       price: sku.price,
       origPrice: sku.price,
+      image: sku.image ?? null,
       quantity: Math.min(safeQty, sku.stock),
       stock: sku.stock,
     },

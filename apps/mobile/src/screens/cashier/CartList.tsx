@@ -1,12 +1,14 @@
-import { memo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { memo, useState } from "react";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import type { CartLine } from "@cloth-scan/shared";
+import { thumbUrl } from "../../api";
 import { colors, font, radius, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
 import { cashierStyles, yuan } from "./ui";
+import { ImagePreviewModal } from "./ImagePreviewModal";
 
 const staggerMs = 30; // motion.staggerMs
 
@@ -21,6 +23,7 @@ export function CartList() {
   const setQty = useCashierStore((s) => s.setQty);
   const removeLine = useCashierStore((s) => s.removeLine);
   const startEditPrice = useCashierStore((s) => s.startEditPrice);
+  const [previewLine, setPreviewLine] = useState<CartLine | null>(null);
 
   if (cart.length === 0) {
     return (
@@ -47,9 +50,11 @@ export function CartList() {
             onDec={() => setQty(item.skuId, item.quantity - 1)}
             onRemove={() => removeLine(item.skuId)}
             onEdit={() => startEditPrice(item.skuId)}
+            onPreview={item.image ? () => setPreviewLine(item) : undefined}
           />
         )}
       />
+      <ImagePreviewModal line={previewLine} onClose={() => setPreviewLine(null)} />
     </View>
   );
 }
@@ -61,17 +66,32 @@ interface CartRowProps {
   onDec: () => void;
   onRemove: () => void;
   onEdit: () => void;
+  /** 有图时点击缩略图打开预览；无图不传（占位字不可点） */
+  onPreview?: () => void;
 }
 
-const CartRowBase = ({ line, index, onInc, onDec, onRemove, onEdit }: CartRowProps) => {
+const CartRowBase = ({ line, index, onInc, onDec, onRemove, onEdit, onPreview }: CartRowProps) => {
   const edited = line.origPrice != null && line.origPrice !== line.price;
+  const thumb = thumbUrl(line.image ?? null);
   return (
     <Animated.View entering={FadeIn.delay(index * staggerMs).duration(150)} style={styles.row}>
-      {/* 左：缩略字徽 + 中部「名称/规格」两行居中 */}
+      {/* 左：商品缩略图（无图回退首字占位）+ 中部「名称/规格」两行居中 */}
       <View style={styles.mainZone}>
-        <View style={styles.thumb}>
-          <Text style={styles.thumbText}>{line.productName.slice(0, 1)}</Text>
-        </View>
+        {thumb ? (
+          <Pressable
+            style={styles.thumbBtn}
+            onPress={onPreview}
+            hitSlop={6}
+            accessibilityRole="imagebutton"
+            accessibilityLabel="查看商品图片"
+          >
+            <Image source={{ uri: thumb }} style={styles.thumbImg} resizeMode="cover" />
+          </Pressable>
+        ) : (
+          <View style={styles.thumb}>
+            <Text style={styles.thumbText}>{line.productName.slice(0, 1)}</Text>
+          </View>
+        )}
         <View style={styles.infoStack}>
           <Text style={styles.name} numberOfLines={1} adjustsFontSizeToFit allowFontScaling={false}>
             {line.productName}
@@ -196,6 +216,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexShrink: 0,
   },
+  thumbBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    overflow: "hidden",
+    flexShrink: 0,
+    backgroundColor: "#EEF2FA",
+  },
+  thumbImg: { width: "100%", height: "100%" },
   thumbText: {
     fontSize: font.body + 2,
     fontWeight: "800",

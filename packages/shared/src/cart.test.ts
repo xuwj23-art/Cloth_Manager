@@ -232,4 +232,22 @@ describe("cart 纯函数", () => {
     const zeroInput = cartToSaleInput(cart, "op-zero", 0);
     expect(zeroInput.orderDiscountCents).toBeUndefined();
   });
+
+  it("缩略图路径随行携带：新行带图、重扫可刷新图、无图保留旧图", () => {
+    const sku: ScannedSku = { ...skuA, image: "/uploads/a.jpg" };
+    const lines = addToCartQty([], sku, 1);
+    expect(lines[0]!.image).toBe("/uploads/a.jpg");
+
+    // 重扫同款且无图信息（旧缓存）：保留旧行的图
+    const keep = addToCartQty(lines, { ...skuA }, 1);
+    expect(keep[0]!.image).toBe("/uploads/a.jpg");
+
+    // 重扫且服务端换了新图：更新
+    const updated = addToCartQty(lines, { ...skuA, image: "/uploads/b.jpg" }, 1);
+    expect(updated[0]!.image).toBe("/uploads/b.jpg");
+
+    // 无图商品：image 为 null，UI 回退占位字
+    const noImg = addToCartQty([], { ...skuA, image: null }, 1);
+    expect(noImg[0]!.image).toBeNull();
+  });
 });

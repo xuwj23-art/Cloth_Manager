@@ -99,6 +99,7 @@ export const useCashierStore = create<CashierState>((set, get) => ({
       size: pendingSku.size,
       price: pendingSku.salePrice,
       stock: pendingSku.stock,
+      image: pendingSku.coverImage ?? null,
     };
     // 加车动作 → 清除整单优惠（原 applyCart 语义）
     set({
