@@ -1,10 +1,10 @@
-import { Keyboard, type ScrollView, type TextInput } from "react-native";
+import { Keyboard, TextInput } from "react-native";
+import type { ScrollView } from "react-native";
 
 /**
- * Android 软键盘避让补位：窗口 resize 后 RN ScrollView 不会自动滚到焦点输入框，
- * 底部字段（如库存）会被键盘整行遮住。聚焦时测量输入框屏幕坐标，
- * 若底边低于键盘上沿则按超出量滚动（立即一次 + 键盘动画完成后重试一次）。
- * currentY 由调用方通过 onScroll 维护。
+ * Android 软键盘避让补位：RN ScrollView 不会自动滚到焦点输入框，
+ * 底部字段（如库存）会被键盘整行遮住。测量输入框屏幕坐标，
+ * 若底边低于键盘上沿则按超出量滚动。currentY 由调用方通过 onScroll 维护。
  */
 export function revealAboveKeyboard(
   scroller: ScrollView | null,
@@ -27,36 +27,30 @@ export function revealAboveKeyboard(
 import { useEffect, useState } from "react";
 
 /**
- * 聚焦回调：立即补位一次（模拟器/快机型够用）。
- * 真机上键盘展开动画 + 窗口 resize 完成时机不定，单靠这一下不可靠——
- * 请配合 useKeyboardReveal 使用。
- */
-export function makeReveal(
-  scroller: { current: ScrollView | null },
-  getScrollY: () => number,
-  getInput: () => TextInput | null,
-): () => void {
-  return () => revealAboveKeyboard(scroller.current, getInput(), getScrollY());
-}
-
-/**
- * 键盘事件驱动的补位（真机可靠路径）：
- * keyboardDidShow 在键盘完全展开、adjustResize 窗口收缩后才触发，
- * 此时 measureInWindow 拿到的是最终坐标；再做 0/250/550ms 三级重试，
- * 兜住慢动画机型（部分华为/荣耀输入法动画 >300ms）。
- * getInput 需返回「当前聚焦」的输入框：调用方在 onFocus 里记录活动字段。
+ * 表单键盘避让（全量、免接线）。
+ *
+ * keyboardDidShow 后用 TextInput.State.currentlyFocusedInput() 直接拿到
+ * 「此刻真正聚焦」的输入框——不依赖任何 onFocus 手工登记，天然覆盖
+ * 品名/材质/品类/价格/库存等全部字段，也杜绝「点了 A 字段却按 B 字段
+ * （上次残留的活动字段）计算、整页被强制滚到底」的陈旧目标问题。
+ * 0/250/550ms 三级重试兜住慢机型键盘动画（部分华为/荣耀 >300ms）。
+ *
+ * 前提：字段所在 ScrollView 的 contentContainerStyle 加了
+ * useKeyboardHeight() 的 paddingBottom——末尾字段在滚动尽头，
+ * 没有余量 scrollTo 无从滚动（真机「避让无效」的第一根因）。
  */
 export function useKeyboardReveal(
   scroller: { current: ScrollView | null },
   getScrollY: () => number,
-  getInput: () => TextInput | null,
 ): void {
   useEffect(() => {
     const sub = Keyboard.addListener("keyboardDidShow", () => {
-      const run = () => revealAboveKeyboard(scroller.current, getInput(), getScrollY());
+      const run = () => {
+        const focused = TextInput.State.currentlyFocusedInput() as TextInput | null;
+        revealAboveKeyboard(scroller.current, focused, getScrollY());
+      };
       [0, 250, 550].forEach((delay) => setTimeout(run, delay));
     });
-    // 引用由调用方以 ref 持有，挂载时监听一次即可
     return () => sub.remove();
   }, []);
 }

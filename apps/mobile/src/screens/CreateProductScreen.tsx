@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -36,7 +36,7 @@ import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space, touch } from "../theme/tokens";
 import { isPickerCancelled, pickProductImage } from "../utils/image-pick";
-import { makeReveal, useKeyboardHeight, useKeyboardReveal } from "../utils/kb";
+import { useKeyboardHeight, useKeyboardReveal } from "../utils/kb";
 import { Chip } from "./create-product/Chip";
 import { PhotoSlots, type PhotoKey } from "./create-product/PhotoSlots";
 import { PhotoSourceSheet } from "./create-product/PhotoSourceSheet";
@@ -330,39 +330,9 @@ export function CreateProductScreen() {
   // 键盘避让：数字输入框聚焦时滚入可视区（Android resize 后 ScrollView 不自动跟随焦点）
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
-  const costRef = useRef<TextInput>(null);
-  const saleRef = useRef<TextInput>(null);
-  const stockRef = useRef<TextInput>(null);
-  const activeRef = useRef<TextInput | null>(null);
-  const markActive = (ref: MutableRefObject<TextInput | null>) => () => {
-    activeRef.current = ref.current;
-  };
-  const costReveal = () =>
-    makeReveal(
-      scrollRef,
-      () => scrollYRef.current,
-      () => costRef.current,
-    )();
-  const saleReveal = () =>
-    makeReveal(
-      scrollRef,
-      () => scrollYRef.current,
-      () => saleRef.current,
-    )();
-  const stockReveal = () =>
-    makeReveal(
-      scrollRef,
-      () => scrollYRef.current,
-      () => stockRef.current,
-    )();
-
   const kbPad = useKeyboardHeight();
-  // 真机可靠路径：键盘完全展开后按活动字段补位
-  useKeyboardReveal(
-    scrollRef,
-    () => scrollYRef.current,
-    () => activeRef.current,
-  );
+  // 全量键盘避让：keyboardDidShow 后按「此刻聚焦」的输入框补位（免逐字段接线，无陈旧目标）
+  useKeyboardReveal(scrollRef, () => scrollYRef.current);
 
   return (
     <KeyboardAvoidingView
@@ -405,11 +375,6 @@ export function CreateProductScreen() {
                     进价(元)
                   </Text>
                   <TextInput
-                    ref={costRef}
-                    onFocus={() => {
-                      markActive(costRef)();
-                      costReveal();
-                    }}
                     style={styles.input}
                     keyboardType="decimal-pad"
                     placeholder="选填"
@@ -429,11 +394,6 @@ export function CreateProductScreen() {
                   售价(元)
                 </Text>
                 <TextInput
-                  ref={saleRef}
-                  onFocus={() => {
-                    markActive(saleRef)();
-                    saleReveal();
-                  }}
                   style={styles.input}
                   keyboardType="decimal-pad"
                   placeholder="必填"
@@ -447,11 +407,6 @@ export function CreateProductScreen() {
                   库存
                 </Text>
                 <TextInput
-                  ref={stockRef}
-                  onFocus={() => {
-                    markActive(stockRef)();
-                    stockReveal();
-                  }}
                   style={styles.input}
                   keyboardType="number-pad"
                   placeholder="1"

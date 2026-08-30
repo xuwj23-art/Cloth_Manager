@@ -33,7 +33,7 @@ import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space, touch } from "../theme/tokens";
 import { isPickerCancelled, pickProductImage } from "../utils/image-pick";
-import { makeReveal, useKeyboardHeight, useKeyboardReveal } from "../utils/kb";
+import { useKeyboardHeight, useKeyboardReveal } from "../utils/kb";
 import { yuan } from "../utils/format";
 import { Chip } from "./create-product/Chip";
 import { PhotoSlots, type PhotoKey } from "./create-product/PhotoSlots";
@@ -130,27 +130,11 @@ export function EditProductScreen() {
   // 键盘避让：滚动位置追踪 + 各 SKU 数字输入框聚焦时滚入可视区
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
-  const fieldRefs = useRef<Record<string, TextInput | null>>({});
-  const activeFieldRef = useRef<string | null>(null);
-  const fieldReveal = (key: string) => {
-    activeFieldRef.current = key;
-    makeReveal(
-      scrollRef,
-      () => scrollYRef.current,
-      () => fieldRefs.current[key] ?? null,
-    )();
-  };
   // 键盘展开时给内容底部补位：末尾字段（库存）已到滚动尽头，无补位则 scrollTo 无余量
   const kbPad = useKeyboardHeight();
-  // 真机可靠路径：键盘完全展开后按活动字段补位（onFocus 那次只对快机型有效）
-  useKeyboardReveal(
-    scrollRef,
-    () => scrollYRef.current,
-    () => {
-      const k = activeFieldRef.current;
-      return k ? (fieldRefs.current[k] ?? null) : null;
-    },
-  );
+  // 全量键盘避让：keyboardDidShow 后按「此刻聚焦」的输入框补位，
+  // 无需逐字段 onFocus 登记（材质/品类/品名等历史漏网字段一并覆盖，且无陈旧目标）
+  useKeyboardReveal(scrollRef, () => scrollYRef.current);
 
   function hydrate(p: ProductWithSkus) {
     setName(p.name);
@@ -511,10 +495,6 @@ export function EditProductScreen() {
                 </Text>
                 <Text style={styles.fieldLabel}>颜色</Text>
                 <TextInput
-                  ref={(r) => {
-                    fieldRefs.current[`${s.id}:color`] = r;
-                  }}
-                  onFocus={() => fieldReveal(`${s.id}:color`)}
                   style={styles.input}
                   value={s.color}
                   onChangeText={(t) => patchSku(s.id, { color: t })}
@@ -532,10 +512,6 @@ export function EditProductScreen() {
                 </View>
                 <Text style={[styles.fieldLabel, { marginTop: 8 }]}>尺码</Text>
                 <TextInput
-                  ref={(r) => {
-                    fieldRefs.current[`${s.id}:size`] = r;
-                  }}
-                  onFocus={() => fieldReveal(`${s.id}:size`)}
                   style={styles.input}
                   value={s.size}
                   onChangeText={(t) => patchSku(s.id, { size: t })}
@@ -557,10 +533,6 @@ export function EditProductScreen() {
                       进价(元)
                     </Text>
                     <TextInput
-                      ref={(r) => {
-                        fieldRefs.current[`${s.id}:cost`] = r;
-                      }}
-                      onFocus={() => fieldReveal(`${s.id}:cost`)}
                       style={styles.fieldInput}
                       keyboardType="decimal-pad"
                       value={s.costPrice}
@@ -572,10 +544,6 @@ export function EditProductScreen() {
                       售价(元)
                     </Text>
                     <TextInput
-                      ref={(r) => {
-                        fieldRefs.current[`${s.id}:sale`] = r;
-                      }}
-                      onFocus={() => fieldReveal(`${s.id}:sale`)}
                       style={styles.fieldInput}
                       keyboardType="decimal-pad"
                       value={s.salePrice}
@@ -587,10 +555,6 @@ export function EditProductScreen() {
                       库存
                     </Text>
                     <TextInput
-                      ref={(r) => {
-                        fieldRefs.current[`${s.id}:stock`] = r;
-                      }}
-                      onFocus={() => fieldReveal(`${s.id}:stock`)}
                       style={styles.fieldInput}
                       keyboardType="number-pad"
                       value={s.stock}
