@@ -135,7 +135,7 @@ export function UpdateSheet({ visible, onClose }: { visible: boolean; onClose: (
       const res = await dl.downloadAsync();
       if (!res) throw new Error("下载未完成，请重试");
       setPhase({ kind: "apk-install", manifest: m });
-      await launchInstaller(res.uri);
+      await launchInstaller();
     } catch (e) {
       setPhase({
         kind: "error",
@@ -144,11 +144,17 @@ export function UpdateSheet({ visible, onClose }: { visible: boolean; onClose: (
     }
   }, []);
 
-  const launchInstaller = useCallback(async (uri?: string) => {
-    const target = uri ?? APK_CACHE_PATH;
+  const launchInstaller = useCallback(async () => {
+    // Android 7+ 禁止 file:// URI 直接进 Intent（FileUriExposedException），
+    // 借用 expo-file-system 自带 FileProvider（authority 见其模块内 AndroidManifest，
+    // cache-path 名为 cached_expo_files、覆盖 cache 根目录——APK 正好下载在那里）
+    // 转成 content:// 再拉起系统安装器。
+    const fileName = APK_CACHE_PATH.split("/").pop();
+    const pkg = Constants.expoConfig?.android?.package ?? "com.clothscan.app";
+    const contentUri = `content://${pkg}.FileSystemFileProvider/cached_expo_files/${fileName}`;
     try {
       await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
-        data: target,
+        data: contentUri,
         type: "application/vnd.android.package-archive",
         // 1 = Intent.FLAG_GRANT_READ_URI_PERMISSION：授权安装器读取缓存目录里的 APK
         flags: 1,
