@@ -46,6 +46,8 @@ model User {
   name         String
   phone        String   @unique
   passwordHash String
+  /// 「查看我的密码」可逆副本（AES-256-GCM，见 auth/password-cipher.ts）；旧密码无副本为 null
+  passwordCipher String?
   role         UserRole @default(staff)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

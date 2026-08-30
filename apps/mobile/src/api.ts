@@ -179,6 +179,11 @@ export function apiUpdateShopName(input: UpdateShopNameInput): Promise<AuthUser>
   return request("/auth/shop", { method: "PATCH", body: JSON.stringify(input) });
 }
 
+/** 查看自己的密码（店员设置页眼睛图标）。null=密码设置于该功能上线前，无记录。 */
+export function apiGetMyPassword(): Promise<{ password: string | null }> {
+  return request("/auth/me/password");
+}
+
 /** 应用内更新检查：下载页当前生效版本元数据（公开接口，不在 /api/v1 前缀下） */
 export interface ApkManifest {
   /** 生效版本号；裸 app.apk 旧包为 null（App 应忽略 APK 通道仅查 OTA） */

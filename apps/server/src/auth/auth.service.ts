@@ -24,6 +24,7 @@ import type {
 } from "@cloth-scan/shared";
 import type { User } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { decryptPassword, encryptPassword } from "./password-cipher";
 
 /**
  * 登录失败限速（内存滑动窗口）：15 分钟内同一手机号连续失败 5 次即锁定。
@@ -112,6 +113,7 @@ export class AuthService {
             name: input.name,
             phone: input.phone,
             passwordHash,
+            passwordCipher: encryptPassword(input.password),
             role: "owner",
           },
         });
@@ -169,6 +171,7 @@ export class AuthService {
           name: input.name,
           phone: input.phone,
           passwordHash,
+          passwordCipher: encryptPassword(input.password),
           role: "staff",
         },
       });
@@ -229,7 +232,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(input.newPassword, 10);
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash },
+      data: { passwordHash, passwordCipher: encryptPassword(input.newPassword) },
     });
     loginFailures.delete(user.phone); // 改密成功清掉旧密码时代的失败计数
     // 注意：JWT 无撤销机制，已签发 token 在过期前仍有效；
@@ -255,7 +258,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(input.newPassword, 10);
     await this.prisma.user.update({
       where: { id: target.id },
-      data: { passwordHash },
+      data: { passwordHash, passwordCipher: encryptPassword(input.newPassword) },
     });
     loginFailures.delete(target.phone); // 重置后清失败计数，店员拿到新密码即可立即登录
     return { ok: true };
@@ -265,6 +268,13 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();
     return (await this.toAuthResponse(user)).user;
+  }
+
+  /** 查看自己的密码（设置页眼睛图标）：返回可逆副本明文；旧密码无副本/未配置密钥返回 null */
+  async getMyPassword(userId: string): Promise<{ password: string | null }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+    return { password: decryptPassword(user.passwordCipher) };
   }
 
   /** 修改自己的名字（店主/店员均可）。返回刷新后的用户信息供前端即时更新会话。 */

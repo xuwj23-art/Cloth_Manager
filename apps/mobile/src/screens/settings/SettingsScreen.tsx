@@ -15,7 +15,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { apiUpdateMyName, apiUpdateShopName } from "../../api";
+import { apiGetMyPassword, apiUpdateMyName, apiUpdateShopName } from "../../api";
 import { useAuth } from "../../auth-context";
 import { BackButton } from "../../components/BackButton";
 import { useDialog } from "../../dialog-context";
@@ -47,10 +47,42 @@ export function SettingsScreen() {
   const [updateSheet, setUpdateSheet] = useState(false);
   const [alertsOn, setAlertsOn] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
+  // 店员密码回显：首次点眼睛时向服务端取可逆记录（无记录=密码设置于该功能上线前）
+  const [pwdVisible, setPwdVisible] = useState(false);
+  const [pwdText, setPwdText] = useState<string | null>(null);
+  const [pwdLoading, setPwdLoading] = useState(false);
 
   useEffect(() => {
     void getSaleAlertsOn().then(setAlertsOn);
   }, []);
+
+  async function togglePasswordEye() {
+    if (pwdVisible) {
+      setPwdVisible(false);
+      return;
+    }
+    if (pwdText === null && !pwdLoading) {
+      setPwdLoading(true);
+      try {
+        const res = await apiGetMyPassword();
+        if (res.password === null) {
+          await notice(
+            "该密码设置于早期版本，无记录",
+            "请联系店主在「店员管理」重置一次，之后可随时查看",
+          );
+          return;
+        }
+        setPwdText(res.password);
+        setPwdVisible(true);
+      } catch (e) {
+        await notice("获取失败", (e as Error).message);
+      } finally {
+        setPwdLoading(false);
+      }
+      return;
+    }
+    setPwdVisible(true);
+  }
 
   async function toggleAlerts(v: boolean) {
     setAlertsOn(v);
@@ -151,20 +183,32 @@ export function SettingsScreen() {
               onPress={() => setShopSheet(true)}
             />
           ) : (
-            <Row
-              icon="lock-closed-outline"
-              label="密码"
-              value="由店主管理"
-              hint="如需修改，请联系店主在「店员管理」中重置"
-            />
+            <View style={styles.row}>
+              <View style={styles.iconBox}>
+                <Ionicons name="lock-closed-outline" size={19} color={colors.primary} />
+              </View>
+              <View style={styles.rowMain}>
+                <Text style={styles.rowLabel}>密码</Text>
+              </View>
+              <Text style={styles.rowValue} numberOfLines={1}>
+                {pwdLoading ? "……" : pwdVisible && pwdText !== null ? pwdText : "••••••"}
+              </Text>
+              <Pressable
+                onPress={() => void togglePasswordEye()}
+                hitSlop={8}
+                disabled={pwdLoading}
+                accessibilityRole="button"
+                accessibilityLabel={pwdVisible ? "隐藏密码" : "显示密码"}
+              >
+                <Ionicons
+                  name={pwdVisible ? "eye-off-outline" : "eye-outline"}
+                  size={21}
+                  color={colors.textMuted}
+                />
+              </Pressable>
+            </View>
           )}
-          <Row
-            icon="phone-portrait-outline"
-            label="手机号"
-            value={user.phone}
-            last
-            hint="登录账号，不可修改"
-          />
+          <Row icon="phone-portrait-outline" label="手机号" value={user.phone} last />
         </View>
 
         {/* 应用设置 */}
@@ -177,7 +221,6 @@ export function SettingsScreen() {
               </View>
               <View style={styles.rowMain}>
                 <Text style={styles.rowLabel}>结账提醒</Text>
-                <Text style={styles.rowHint}>店员开单时提醒（声音 + 通知）</Text>
               </View>
               <Switch
                 value={alertsOn}

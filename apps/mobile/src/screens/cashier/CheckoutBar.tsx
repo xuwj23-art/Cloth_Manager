@@ -1,4 +1,5 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, font, radius, space } from "../../theme/tokens";
 import {
@@ -29,12 +30,19 @@ export function CheckoutBar({
   const finalTotal = useCashierStore(selectFinalCents);
   const count = useCashierStore(selectCount);
   const discounted = useCashierStore(selectDiscounted);
+  const insets = useSafeAreaInsets();
 
   const empty = cart.length === 0;
   const disabled = empty || submitting;
 
   return (
-    <View style={styles.footer}>
+    <View
+      style={[
+        styles.footer,
+        // 手势/三键导航条会压住固定 padding：叠加安全区并加少量余量，内容整体上移避让
+        { paddingBottom: Math.max(insets.bottom + space.sm, space.md + 4) },
+      ]}
+    >
       {/* 左：金额块（全屏唯一金额展示位） */}
       <View style={styles.amount}>
         <View style={styles.priceRow}>
@@ -98,7 +106,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: space.lg,
     paddingVertical: space.md,
-    paddingBottom: space.md + 4,
     paddingHorizontal: space.lg,
     borderTopWidth: 1,
     borderTopColor: colors.border,

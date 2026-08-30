@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
-    paddingTop: 14,
+    paddingTop: 22,
     zIndex: 999,
     elevation: 999,
   },

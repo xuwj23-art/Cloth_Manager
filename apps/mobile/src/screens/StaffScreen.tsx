@@ -88,10 +88,6 @@ export function StaffScreen() {
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.explainer}>
-          添加店员账号后，店员可扫码收银、开单与商品建档；进价与销售报表仅店主可见。点击店员可重置密码或删除。
-        </Text>
-
         <Text style={styles.sectionLabel}>店主</Text>
         <View style={styles.card}>
           {owner ? <MemberRow name={owner.name} sub={owner.phone} staticRow /> : null}
@@ -454,12 +450,6 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   body: { padding: space.xl, paddingBottom: space.xxl, gap: space.md },
 
-  explainer: {
-    fontSize: font.caption,
-    color: colors.textMuted,
-    lineHeight: 20,
-    paddingHorizontal: space.xs,
-  },
   sectionLabel: {
     fontSize: font.caption,
     fontWeight: "700",

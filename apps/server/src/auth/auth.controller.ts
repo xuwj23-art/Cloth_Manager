@@ -46,6 +46,13 @@ export class AuthController {
     return this.auth.updateMyName(user.id, body);
   }
 
+  /** 查看自己的密码（店员设置页眼睛图标）：无记录返回 null（旧密码或未配置密钥） */
+  @Get("me/password")
+  @UseGuards(JwtAuthGuard)
+  getMyPassword(@CurrentUser() user: RequestUser) {
+    return this.auth.getMyPassword(user.id);
+  }
+
   /** 修改注册店铺名（仅店主）：改后登录/凭证里的 shopName 即时刷新 */
   @Patch("shop")
   @UseGuards(JwtAuthGuard, RolesGuard)
