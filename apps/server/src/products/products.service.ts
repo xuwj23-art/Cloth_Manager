@@ -316,6 +316,7 @@ export class ProductsService {
       }
 
       let stockChanged = false;
+      let skuChanged = false;
       for (const s of input.skus ?? []) {
         const existing = freshById.get(s.id);
         if (!existing) {
@@ -343,11 +344,15 @@ export class ProductsService {
         }
         if (Object.keys(data).length > 0) {
           await tx.sku.update({ where: { id: s.id }, data });
+          skuChanged = true;
         }
       }
 
       if (stockChanged) {
         await this.recomputeArchive(tx, id);
+      }
+      if (skuChanged) {
+        await this.touchProducts(tx, [id]);
       }
       return tx.product.findUnique({ where: { id }, include: { skus: true } });
     });
@@ -392,14 +397,27 @@ export class ProductsService {
       p?.deletedAt instanceof Date ? p.deletedAt.toISOString() : (p?.deletedAt ?? null);
 
     const newArchivedAt = shouldArchive({ totalStock, archivedAt, deletedAt });
-    if (newArchivedAt !== archivedAt) {
-      await tx.product.update({
-        where: { id: productId },
-        data: {
-          archivedAt: newArchivedAt === null ? null : new Date(newArchivedAt),
-        },
-      });
-    }
+    // 无论归档态是否翻转都回写一次：SKU 库存/价格变化必须反映到 product.updatedAt，
+    // 否则 /products/sync 的增量（按 updatedAt 过滤）永远带不出，多端库存会漂移。
+    await tx.product.update({
+      where: { id: productId },
+      data: {
+        ...(newArchivedAt !== archivedAt
+          ? { archivedAt: newArchivedAt === null ? null : new Date(newArchivedAt) }
+          : {}),
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  /** SKU 级变更（价格/颜色/尺码等不触发 recomputeArchive 的场景）后回写 updatedAt */
+  async touchProducts(tx: Prisma.TransactionClient, productIds: Iterable<string>): Promise<void> {
+    const ids = [...new Set(productIds)];
+    if (ids.length === 0) return;
+    await tx.product.updateMany({
+      where: { id: { in: ids } },
+      data: { updatedAt: new Date() },
+    });
   }
 
   /** 扫码匹配：通过 QR/条码查 SKU 及其所属款（店铺端核心，仅限本门店） */

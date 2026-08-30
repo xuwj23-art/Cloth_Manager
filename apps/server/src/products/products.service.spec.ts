@@ -8,6 +8,7 @@ function makeUpdatePrisma(product: any, aggStock: number) {
   const tx = {
     product: {
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       findUnique: vi.fn().mockResolvedValue({ archivedAt: null }),
     },
     sku: {
@@ -126,6 +127,11 @@ describe("ProductsService.updateProduct", () => {
       }),
     );
     expect(prisma.__tx.stockMovement.create).not.toHaveBeenCalled();
+    // 回归：SKU 级变更必须回写 product.updatedAt，否则 /products/sync 增量带不出（多端库存漂移）
+    expect(prisma.__tx.product.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["p1"] } },
+      data: { updatedAt: expect.any(Date) },
+    });
   });
 
   it("盘点改库存为 0：写 adjust 流水并自动归档", async () => {
