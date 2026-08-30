@@ -59,6 +59,27 @@ export class DownloadController {
     this.streamApk(res, file);
   }
 
+  /**
+   * 应用内更新检查（公开 JSON）：当前生效版本的元数据。
+   * App 端与本地 version 比较决定 OTA / APK 更新路径；version 为 null（裸 app.apk 旧包）
+   * 时 App 应忽略 APK 通道、仅走 OTA。
+   */
+  @Get("manifest")
+  manifest(@Req() req: Request) {
+    const active = this.apks.resolveActive();
+    const base = `${req.protocol}://${req.get("host")}`;
+    if (!active) {
+      return { version: null as string | null, file: "", sizeBytes: 0, note: "", url: "" };
+    }
+    return {
+      version: active.version,
+      file: active.file,
+      sizeBytes: active.sizeBytes,
+      note: active.note,
+      url: `${base}/download/apk/${active.file}`,
+    };
+  }
+
   /** 流式发送 APK（几乎不占内存）；文件不存在时 404 */
   private streamApk(res: Response, file: string): void {
     const s = this.apks.statFile(file);

@@ -15,7 +15,9 @@ import type {
   ProductWithSkus,
   RecognizeGarmentResult,
   RegisterInput,
+  UpdateMyNameInput,
   UpdateProductInput,
+  UpdateShopNameInput,
   SaleOrderDetail,
   SaleOrderWithItems,
   SalesRange,
@@ -165,6 +167,32 @@ export function apiResetStaffPassword(id: string, newPassword: string): Promise<
     method: "PATCH",
     body: JSON.stringify({ newPassword }),
   });
+}
+
+/** 修改自己的名字（店主/店员均可，设置页）。返回刷新后的用户信息。 */
+export function apiUpdateMyName(input: UpdateMyNameInput): Promise<AuthUser> {
+  return request("/auth/me", { method: "PATCH", body: JSON.stringify(input) });
+}
+
+/** 修改注册店铺名（仅店主，设置页）。返回刷新后的用户信息（含新店名）。 */
+export function apiUpdateShopName(input: UpdateShopNameInput): Promise<AuthUser> {
+  return request("/auth/shop", { method: "PATCH", body: JSON.stringify(input) });
+}
+
+/** 应用内更新检查：下载页当前生效版本元数据（公开接口，不在 /api/v1 前缀下） */
+export interface ApkManifest {
+  /** 生效版本号；裸 app.apk 旧包为 null（App 应忽略 APK 通道仅查 OTA） */
+  version: string | null;
+  file: string;
+  sizeBytes: number;
+  note: string;
+  url: string;
+}
+
+export async function getApkManifest(timeoutMs = 8_000): Promise<ApkManifest> {
+  const res = await fetchWithTimeout(`${API_HOST}/download/manifest`, { method: "GET" }, timeoutMs);
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return (await res.json()) as ApkManifest;
 }
 
 /* ------------------------------- 业务 ------------------------------- */

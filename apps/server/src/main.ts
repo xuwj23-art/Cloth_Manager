@@ -16,9 +16,9 @@ async function bootstrap() {
     cors: true,
   });
   // download 页要做对外公开链接，排除在 /api/v1 前缀外（变成 /download、
-  // /download/app.apk、/download/apk/<版本文件名>）
+  // /download/app.apk、/download/apk/<版本文件名>、/download/manifest 应用内更新检查）
   app.setGlobalPrefix(API_PREFIX.replace(/^\//, ""), {
-    exclude: ["download", "download/app.apk", "download/apk/:file"],
+    exclude: ["download", "download/app.apk", "download/apk/:file", "download/manifest"],
   });
 
   // 上传的图片以静态资源对外提供：/uploads/<filename>

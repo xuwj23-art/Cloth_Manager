@@ -292,4 +292,83 @@ describe("AuthService", () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
+
+  describe("updateMyName", () => {
+    it("改名成功：写库并返回含新名字的用户信息", async () => {
+      const update = vi.fn().mockImplementation(({ data }: any) => ({
+        id: "u1",
+        shopId: "shop-1",
+        name: data.name,
+        phone: "13800000000",
+        passwordHash: "x",
+        role: "staff",
+      }));
+      const prisma = makePrisma({
+        user: { findUnique: vi.fn(), update },
+        shop: { findUnique: vi.fn().mockResolvedValue({ name: "测试店" }) },
+      });
+      const service = new AuthService(prisma, jwt);
+      const res = await service.updateMyName("u1", { name: "新名字" });
+      expect(update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { name: "新名字" } });
+      expect(res.name).toBe("新名字");
+      expect(res.shopName).toBe("测试店");
+    });
+
+    it("用户不存在（已被删）：抛 UnauthorizedException", async () => {
+      const update = vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error("not found"), { code: "P2025" });
+      });
+      const prisma = makePrisma({ user: { findUnique: vi.fn(), update } });
+      const service = new AuthService(prisma, jwt);
+      await expect(service.updateMyName("gone", { name: "x" })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe("updateShopName", () => {
+    it("店主改店名：shop 写库并返回刷新后的用户信息（新 shopName）", async () => {
+      const shopUpdate = vi.fn().mockResolvedValue({ id: "shop-1", name: "新店名" });
+      const prisma = makePrisma({
+        user: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValue({
+              id: "u1",
+              shopId: "shop-1",
+              role: "owner",
+              name: "张三",
+              phone: "13800000000",
+              passwordHash: "x",
+            }),
+        },
+        shop: { findUnique: vi.fn().mockResolvedValue({ name: "新店名" }), update: shopUpdate },
+      });
+      const service = new AuthService(prisma, jwt);
+      const res = await service.updateShopName("shop-1", { shopName: "新店名" });
+      expect(shopUpdate).toHaveBeenCalledWith({
+        where: { id: "shop-1" },
+        data: { name: "新店名" },
+      });
+      expect(res.shopName).toBe("新店名");
+    });
+
+    it("门店不存在：抛 NotFoundException", async () => {
+      const prisma = makePrisma({
+        user: {
+          findFirst: vi.fn().mockResolvedValue({ id: "u1", shopId: "shop-x", role: "owner" }),
+        },
+        shop: {
+          findUnique: vi.fn().mockResolvedValue({ name: "旧名" }),
+          update: vi.fn().mockImplementation(() => {
+            throw Object.assign(new Error("not found"), { code: "P2025" });
+          }),
+        },
+      });
+      const service = new AuthService(prisma, jwt);
+      await expect(service.updateShopName("shop-x", { shopName: "y" })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
 });

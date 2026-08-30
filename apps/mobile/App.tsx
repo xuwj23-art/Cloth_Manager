@@ -5,26 +5,42 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Asset } from "expo-asset";
 import { useFonts } from "expo-font";
-import { NavigationContainer } from "@react-navigation/native";
+import { createNavigationContainerRef, NavigationContainer } from "@react-navigation/native";
 import { AuthProvider, useAuth } from "./src/auth-context";
 import { DialogProvider } from "./src/dialog-context";
 import { useOwnerSaleAlerts } from "./src/notify/saleAlerts";
+import { SaleToastProvider } from "./src/notify/SaleToast";
 import { SyncProvider } from "./src/sync/sync-context";
-import { RootNavigator } from "./src/navigation/RootNavigator";
+import { RootNavigator, type RootStackParamList } from "./src/navigation/RootNavigator";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { colors, font, radius, touch } from "./src/theme/tokens";
 
-function AuthedApp() {
-  const { user } = useAuth();
-  // 老板：新结账弹窗 + 铃声 + 通知栏提醒
-  useOwnerSaleAlerts(user?.role === "owner", user?.id ?? null);
+/** 全局导航 ref：让 Toast 卡片等 NavigationContainer 外的组件也能跳转 */
+export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-  // React Navigation 接管全部切屏：9 屏幕映射为路由，参数经 route.params 传递，
-  // 返回栈由 Stack 管理，状态不再提升到顶层。
+/** 老板机「新结账」提醒：轮询 + 前台 Toast 卡片 / 后台系统通知（设置页开关总闸） */
+function SaleAlertsGate() {
+  const { user } = useAuth();
+  useOwnerSaleAlerts(user?.role === "owner", user?.id ?? null);
+  return null;
+}
+
+function AuthedApp() {
+  // React Navigation 接管全部切屏：屏幕映射为路由，参数经 route.params 传递，
+  // 返回栈由 Stack 管理；SaleToastProvider 挂最外层，老板任何页面都能收到顶部提醒卡。
   return (
-    <NavigationContainer>
-      <RootNavigator />
-    </NavigationContainer>
+    <SaleToastProvider
+      onTapOrder={() => {
+        if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Sales") {
+          navigationRef.navigate("Sales");
+        }
+      }}
+    >
+      <SaleAlertsGate />
+      <NavigationContainer ref={navigationRef}>
+        <RootNavigator />
+      </NavigationContainer>
+    </SaleToastProvider>
   );
 }
 

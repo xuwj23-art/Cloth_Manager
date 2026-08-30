@@ -9,6 +9,7 @@ import { LabelPrintScreen } from "../screens/LabelPrintScreen";
 import { ProductsScreen } from "../screens/ProductsScreen";
 import { SaleDetailScreen } from "../screens/SaleDetailScreen";
 import { SalesScreen } from "../screens/SalesScreen";
+import { SettingsScreen } from "../screens/settings/SettingsScreen";
 import { StaffScreen } from "../screens/StaffScreen";
 import { SyncErrorsScreen } from "../screens/SyncErrorsScreen";
 
@@ -27,6 +28,7 @@ export type RootStackParamList = {
   Sales: undefined;
   SaleDetail: { orderId: string };
   Staff: undefined;
+  Settings: undefined;
   LabelPrint: { product: ProductWithSkus };
   SyncErrors: undefined;
 };
@@ -85,6 +87,7 @@ export function RootNavigator() {
         options={{ title: "单据详情" }}
       />
       <Stack.Screen name="Staff" component={StaffScreen} options={{ title: "店员管理" }} />
+      <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: "设置" }} />
       <Stack.Screen
         name="SyncErrors"
         component={SyncErrorsScreen}

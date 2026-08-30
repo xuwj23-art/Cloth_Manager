@@ -143,7 +143,7 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const tileWidth = (windowWidth - space.xl * 2 - 12) / 2;
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { online, syncing, pendingCount, syncNow } = useSync();
   const isOwner = user?.role === "owner";
   const [today, setToday] = useState<{
@@ -183,13 +183,13 @@ export function HomeScreen() {
       <View style={styles.header}>
         <BrandLockup variant="header" />
         <Pressable
-          onPress={logout}
+          onPress={() => navigation.navigate("Settings")}
           hitSlop={8}
           style={styles.logoutBtn}
           accessibilityRole="button"
-          accessibilityLabel="退出"
+          accessibilityLabel="设置"
         >
-          <Ionicons name="log-out-outline" size={24} color={colors.text} />
+          <Ionicons name="settings-outline" size={24} color={colors.text} />
         </Pressable>
       </View>
 
@@ -270,6 +270,9 @@ export function HomeScreen() {
               <Text style={styles.avatarText}>{(user?.name ?? "?").slice(0, 1)}</Text>
             </View>
             <View style={styles.idCol}>
+              <Text style={styles.userName} numberOfLines={1}>
+                {user?.name ?? "未登录"}
+              </Text>
               <View
                 style={[styles.rolePill, isOwner ? styles.rolePillOwner : styles.rolePillStaff]}
               >
@@ -282,9 +285,6 @@ export function HomeScreen() {
                   {roleLabel}
                 </Text>
               </View>
-              <Text style={styles.userName} numberOfLines={1}>
-                {user?.name ?? "未登录"}
-              </Text>
             </View>
           </View>
           <SyncChip

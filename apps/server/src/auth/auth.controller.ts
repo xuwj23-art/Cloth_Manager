@@ -5,6 +5,8 @@ import {
   LoginInput,
   RegisterInput,
   ResetStaffPasswordInput,
+  UpdateMyNameInput,
+  UpdateShopNameInput,
 } from "@cloth-scan/shared";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { AuthService } from "./auth.service";
@@ -32,6 +34,27 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: RequestUser) {
     return this.auth.getMe(user.id);
+  }
+
+  /** 修改自己的名字（店主/店员均可，设置页入口） */
+  @Patch("me")
+  @UseGuards(JwtAuthGuard)
+  updateMyName(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(UpdateMyNameInput)) body: UpdateMyNameInput,
+  ) {
+    return this.auth.updateMyName(user.id, body);
+  }
+
+  /** 修改注册店铺名（仅店主）：改后登录/凭证里的 shopName 即时刷新 */
+  @Patch("shop")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("owner")
+  updateShopName(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(UpdateShopNameInput)) body: UpdateShopNameInput,
+  ) {
+    return this.auth.updateShopName(user.shopId, body);
   }
 
   /** 仅老板可查看门店成员 */

@@ -123,15 +123,15 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.1 模块职责（`src/app.module.ts`）
 
-| 模块        | 职责                                                                                                                                                                          |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prisma/`   | PrismaClient 单例                                                                                                                                                             |
-| `auth/`     | 注册（需邀请码）/登录/JWT/`me`/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles`                                                                              |
-| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据、建档识图（`recognize-garment`）                                                          |
-| `sales/`    | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单                                                                                                                      |
-| `uploads/`  | 图片上传 + sharp 压缩主图/缩略图（仅 owner）                                                                                                                                  |
-| `download/` | 公开 APK 下载页 `/download`：多版本可选（`app-x.y.z.apk` 文件驱动 + `current.json` 定生效版），`app.apk` 固定链接永远指生效版，`apk/:file` 指定版本下载（文件名白名单防穿越） |
-| `health/`   | `GET /api/v1/health`                                                                                                                                                          |
+| 模块        | 职责                                                                                                                                                                                                             |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prisma/`   | PrismaClient 单例                                                                                                                                                                                                |
+| `auth/`     | 注册（需邀请码）/登录/JWT/`me`/改自己名字/改店名/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles`                                                                                               |
+| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据、建档识图（`recognize-garment`）                                                                                             |
+| `sales/`    | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单                                                                                                                                                         |
+| `uploads/`  | 图片上传 + sharp 压缩主图/缩略图（仅 owner）                                                                                                                                                                     |
+| `download/` | 公开 APK 下载页 `/download`：多版本可选（`app-x.y.z.apk` 文件驱动 + `current.json` 定生效版），`app.apk` 固定链接永远指生效版，`apk/:file` 指定版本下载（文件名白名单防穿越）；`manifest` JSON 供 App 内更新检查 |
+| `health/`   | `GET /api/v1/health`                                                                                                                                                                                             |
 
 ### 6.2 数据模型（`prisma/schema.prisma`）
 
@@ -188,7 +188,8 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 | 方法 路径                                                             | 角色                       |
 | --------------------------------------------------------------------- | -------------------------- |
 | POST `/auth/register`（需 inviteCode）/ `/auth/login`                 | 公开                       |
-| GET `/auth/me`                                                        | 登录                       |
+| GET `/auth/me`、PATCH `/auth/me`（改自己名字，返回刷新后用户）        | 登录                       |
+| PATCH `/auth/shop`（改注册店铺名，全店生效）                          | owner                      |
 | GET/POST/DELETE `/auth/staff`、PATCH `/auth/staff/:id/password`       | owner                      |
 | PATCH `/auth/password`（改自己的密码，需原密码）                      | owner                      |
 | POST `/products`、POST `/uploads`、POST `/products/recognize-garment` | 登录（店员建档进价强制 0） |
@@ -198,6 +199,7 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 | GET/PATCH/DELETE 其余 `/sales*`                                       | owner                      |
 | GET `/health`                                                         | 公开                       |
 | GET `/download`、`/download/app.apk`、`/download/apk/:file`           | 公开（无前缀）             |
+| GET `/download/manifest`（应用内更新检查：版本+体积+说明，无前缀）    | 公开（无前缀）             |
 
 ---
 
@@ -207,15 +209,19 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 React Navigation（`@react-navigation/native` + native-stack，`src/navigation/RootNavigator.tsx`）；`AuthProvider` 决定登录态、登录后包 `SyncProvider`；列表屏用 `useFocusEffect` 在返回时刷新。
 
-| 屏幕                                                           | 职责                                                     |
-| -------------------------------------------------------------- | -------------------------------------------------------- |
-| `LoginScreen`                                                  | 登录 / 注册门店                                          |
-| `HomeScreen`                                                   | 入口（logo + 收银台）、今日营业额；底栏同步与「名·身份」 |
-| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗                           |
-| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类    |
-| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                              |
-| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                   |
-| `StaffScreen`                                                  | 店员管理（owner）                                        |
+| 屏幕                                                           | 职责                                                                                                                         |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `LoginScreen`                                                  | 登录 / 注册门店                                                                                                              |
+| `HomeScreen`                                                   | 入口（logo + 收银台）、今日营业额；底栏同步与「名·身份」                                                                     |
+| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗                                                                                               |
+| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类                                                                        |
+| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                                                                                                  |
+| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                                                                                       |
+| `StaffScreen`                                                  | 店员管理（owner，1.5.0 重构：店主分组静态行 + 操作收纳弹层 + 底部添加 CTA）                                                  |
+| `SettingsScreen`（`settings/`）                                | 设置中心（1.5.0）：双角色账号管理 + 结账提醒开关 + 版本号 + 应用内更新（`UpdateSheet`：OTA 自动重启 / APK 断点下载拉起安装） |
+| `SyncErrorsScreen`                                             | 同步失败单据处理                                                                                                             |
+
+全局挂载（`App.tsx`）：`SaleToastProvider` + `SaleAlertsGate`——老板机「新结账」提醒（前台顶部滑入卡片，退后台走系统通知；设置页开关总闸，状态存 SecureStore）。
 
 ### 7.2 网络 & 后端地址
 
@@ -239,14 +245,15 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 ### 7.5 EAS / app.json 要点
 
-- **当前版本 `1.4.0`**（`app.json` `version`，Android `versionCode=7`）。
+- **当前版本 `1.5.0`**（`app.json` `version`，Android `versionCode=8`）。
 - `runtimeVersion.policy = "appVersion"`；`updates.url` 指向 Expo（owner `wesleysho`，projectId `3b8070f8-...`）。
   - ⚠️ 改 `version` 会同时改 `runtimeVersion`，旧包收不到新 runtime 的 OTA；升版后须 `expo prebuild -p android`（同步 `build.gradle` 版本 + `strings.xml` 的 runtime + 重写渠道头）→ 重打包 → 再按新 runtime `eas update`。
 - channel：`development`(devClient APK) / `preview`(APK) / `production`(AAB)。
 - **`targetSdkVersion: 33`**（刻意降级，兼容驰腾蓝牙 SDK 的广播注册，规避 Android 14 行为）。
 - **字体缩放锁定**：`plugins/lock-font-scale.js` 在 MainApplication/MainActivity 注入 `attachBaseContext` 强制 `fontScale=1`（React 19+新架构下 `Text.defaultProps` 已失效）。系统大字号（华为/荣耀长辈模式）不再影响 App 内排版。
 - **选图用 `react-native-image-crop-picker`**（原生依赖）：系统相册分区、uCrop 裁剪/旋转、fixOrientation。改动它或新增原生依赖必须重打 APK，OTA 不生效。
-- 权限：CAMERA、BLUETOOTH_*、LOCATION、POST_NOTIFICATIONS。
+- **应用内更新（1.5.0）**：`expo-updates`（OTA：fetch→3 秒倒计时自动 `reloadAsync`）+ `expo-file-system/legacy` 断点下载 APK + `expo-intent-launcher` 拉起安装器；权限加了 `REQUEST_INSTALL_PACKAGES`。版本数据源 `GET /download/manifest`。
+- 权限：CAMERA、BLUETOOTH_*、LOCATION、POST_NOTIFICATIONS、REQUEST_INSTALL_PACKAGES。
 
 ---
 
@@ -301,6 +308,8 @@ EAS↔本地 APK 签名不同，互换需先卸载旧 App；本地版之间可�
 | scp 传 APK 报 `Permission denied (publickey)` | 服务器只认密钥；需把本机公钥加到服务器 `~/.ssh/authorized_keys`（见 `docs/本地打包环境部署指南-Windows.md` §7）。scp 要在**本机**跑，目标不带 `http://`/`:3000`                                |
 | 提交信息 heredoc 在 PowerShell 失败           | 把信息写临时文件用 `git commit -F 文件`                                                                                                                                                        |
 | 改 schema 不生效                              | 必须新建迁移；生产靠 `prisma migrate deploy`                                                                                                                                                   |
+| 新结账提醒后台收不到                          | Android 退后台/锁屏后 JS 轮询被系统暂停（dev/release 实测一致，2026-08-30），只有前台、退后台瞬间、回前台补发三种时机生效；真后台需远程推送（暂不做）。别以为 setInterval 在后台会跑           |
+| 模拟器 `input text` 打不了中文                | KeyCharacterMap 无 CJK 映射直接 NPE；测试时输入框只能灌 ASCII，或用真机。另：`adb shell` 里的 `/sdcard` 路径要整条命令加引号，否则被 Git Bash 转义                                             |
 
 ---
 

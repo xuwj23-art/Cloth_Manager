@@ -39,9 +39,21 @@ export type ChangePasswordInput = z.infer<typeof ChangePasswordInput>;
 
 /** 店主重置店员密码（无需原密码） */
 export const ResetStaffPasswordInput = z.object({
-  newPassword: z.string().min(6, "新密码至少 6 位").max(64),
+  newPassword: z.string().min(6).max(64),
 });
 export type ResetStaffPasswordInput = z.infer<typeof ResetStaffPasswordInput>;
+
+/** 修改自己的名字（登录态，店主/店员均可，设置页） */
+export const UpdateMyNameInput = z.object({
+  name: z.string().min(1, "请输入姓名").max(20),
+});
+export type UpdateMyNameInput = z.infer<typeof UpdateMyNameInput>;
+
+/** 店主修改注册店铺名（设置页，改名后全店生效） */
+export const UpdateShopNameInput = z.object({
+  shopName: z.string().min(1, "请输入店铺名").max(40),
+});
+export type UpdateShopNameInput = z.infer<typeof UpdateShopNameInput>;
 
 /** 门店成员（店员管理列表项，不含密码） */
 export interface ShopMember {

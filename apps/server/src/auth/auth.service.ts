@@ -11,6 +11,7 @@ import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import type {
   AuthResponse,
+  AuthUser,
   ChangePasswordInput,
   CreateStaffInput,
   JwtPayload,
@@ -18,6 +19,8 @@ import type {
   RegisterInput,
   ResetStaffPasswordInput,
   ShopMember,
+  UpdateMyNameInput,
+  UpdateShopNameInput,
 } from "@cloth-scan/shared";
 import type { User } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -262,5 +265,33 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();
     return (await this.toAuthResponse(user)).user;
+  }
+
+  /** 修改自己的名字（店主/店员均可）。返回刷新后的用户信息供前端即时更新会话。 */
+  async updateMyName(userId: string, input: UpdateMyNameInput): Promise<AuthUser> {
+    let user: User;
+    try {
+      user = await this.prisma.user.update({
+        where: { id: userId },
+        data: { name: input.name },
+      });
+    } catch (e) {
+      if ((e as { code?: string })?.code === "P2025") throw new UnauthorizedException();
+      throw e;
+    }
+    return (await this.toAuthResponse(user)).user;
+  }
+
+  /** 店主修改注册店铺名。返回刷新后的用户信息（含新 shopName）。 */
+  async updateShopName(shopId: string, input: UpdateShopNameInput): Promise<AuthUser> {
+    const owner = await this.prisma.user.findFirst({ where: { shopId, role: "owner" } });
+    if (!owner) throw new UnauthorizedException();
+    try {
+      await this.prisma.shop.update({ where: { id: shopId }, data: { name: input.shopName } });
+    } catch (e) {
+      if ((e as { code?: string })?.code === "P2025") throw new NotFoundException("门店不存在");
+      throw e;
+    }
+    return (await this.toAuthResponse(owner)).user;
   }
 }
