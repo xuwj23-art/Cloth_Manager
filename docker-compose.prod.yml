@@ -53,6 +53,8 @@ services:
       # 建档识图（可选）。不配则 AI 入库返回 503，服务仍启动
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       GARMENT_VISION_MODEL: ${GARMENT_VISION_MODEL:-qwen3-vl-plus}
+      # 「查看我的密码」可逆副本密钥（64 位 hex）。不配则该功能降级（不写副本、查询返回 null）
+      PASSWORD_CIPHER_KEY: ${PASSWORD_CIPHER_KEY:-}
     healthcheck:
       # health 在 db 不可用时返回 503，可被 docker/监控捕获
       test:
