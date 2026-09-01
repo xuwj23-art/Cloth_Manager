@@ -21,7 +21,7 @@
 1. **金额一律用「分」（整数）**：数据库、API、共享类型里的 `costPrice/salePrice/price/cost/subtotal/totalAmount` 全是分。只有 UI 展示时除以 100 显示「元」。新写代码不要引入浮点元。
 2. **库存只通过 `StockMovement` 流水增减**：建档初始库存写 `in`、销售写 `out`、盘点/改单写 `adjust`。不要直接裸改 `Sku.stock` 而不记流水（`stock` 是流水累计的物化结果）。
 3. **`opId` 幂等**：销售开单 / 库存流水带客户端生成的 `opId`（unique）。离线重传同一 `opId` 不得重复扣减。改动开单/同步逻辑时必须保留幂等。
-4. **删除是软删除**：商品用 `deletedAt`（且必须先 `archivedAt` 售罄/下架才能删）、订单删除会回滚库存。**删除商品不删除任何图片**（保留历史账单可看图，这是已确认的策略）。永远不要物理删 Product/Sku，会破坏销售外键与报表。
+4. **删除是软删除**：商品用 `deletedAt`（且必须先 `archivedAt` 售罄/下架才能删）、**SKU（尺码）删除也是软删**（`Sku.deletedAt`，先清零库存写 adjust 流水，目录/扫码/同步一律过滤，报表 join 保留）、订单删除会回滚库存。**删除商品不删除任何图片**（保留历史账单可看图，这是已确认的策略）。永远不要物理删 Product/Sku，会破坏销售外键与报表。
 5. **门店隔离**：几乎所有查询都要带 `shopId`（从 JWT 取，不要信任客户端传入）。新接口默认按当前用户 `shopId` 过滤。
 6. **角色权限**：`owner`（店主）能做一切；`staff`（店员）可登录/查商品/扫码/开单/**建档（无进价）**，不能编辑商品、看进价、改自己的密码。后端用 `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles("owner")` 控制，前端按角色隐藏入口。**权限以后端为准**。
 7. **typecheck/test 无需先 build shared；但 server build 仍需**：server 的 `typecheck`（`tsc -p tsconfig.typecheck.json`）通过 `paths` 直读 `packages/shared/src` 源码，不依赖 `dist`；turbo 的 `typecheck`/`test` 任务也已去掉 `^build` 依赖。所以改完 shared 直接跑 typecheck/test 即可看到新类型。**但 server 运行时（`node dist/main.js`）读 shared 的 `dist`**，所以 `nest build`/部署前必须先 `pnpm --filter @cloth-scan/shared build`（turbo `build` 任务的 `^build` 链保留就是这个原因）。（mobile 经 Metro 直读 shared 源码，无需 build。）
@@ -127,8 +127,8 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `prisma/`   | PrismaClient 单例                                                                                                                                                                                                |
 | `auth/`     | 注册（需邀请码）/登录/JWT/`me`/改自己名字/改店名/店员增删查；`@Global` 导出 `JwtAuthGuard`、`RolesGuard`、`@Roles`                                                                                               |
-| `products/` | 建档、列表（active/archived/all）、编辑、盘点、软归档、软删除、按条码匹配、演示数据、建档识图（`recognize-garment`）                                                                                             |
-| `sales/`    | 开单（事务+幂等+防超卖）、流水、报表、编辑账单、删除整单                                                                                                                                                         |
+| `products/` | 建档、列表（active/archived/all）、编辑（含增删尺码：`addSkus` 生成新 SKU+条码 / `removeSkuIds` 软删并清零库存）、盘点、软归档、软删除、按条码匹配、演示数据、建档识图（`recognize-garment`）                    |
+| `sales/`    | 开单（事务+幂等+防超卖；`orderDiscountCents` 可为负=整单加价，实收=Σsubtotal−discount）、流水、报表、编辑账单、删除整单                                                                                          |
 | `uploads/`  | 图片上传 + sharp 压缩主图/缩略图（仅 owner）                                                                                                                                                                     |
 | `download/` | 公开 APK 下载页 `/download`：多版本可选（`app-x.y.z.apk` 文件驱动 + `current.json` 定生效版），`app.apk` 固定链接永远指生效版，`apk/:file` 指定版本下载（文件名白名单防穿越）；`manifest` JSON 供 App 内更新检查 |
 | `health/`   | `GET /api/v1/health`                                                                                                                                                                                             |
@@ -137,16 +137,16 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 枚举：`UserRole(owner|staff)`、`StockMovementType(in|out|adjust|transfer)`、`SaleOrderStatus(draft|completed|voided)`。
 
-| 模型            | 关键字段                                                                            | 备注                                          |
-| --------------- | ----------------------------------------------------------------------------------- | --------------------------------------------- |
-| `Shop`          | name                                                                                | 多租户根                                      |
-| `User`          | shopId, phone(unique), passwordHash, role                                           | 登录主体                                      |
-| `Category`      | shopId, name                                                                        | 当前业务少用                                  |
-| `Product`       | archivedAt(软归档), deletedAt(软删除), coverImage, images[], material, categoryName | 一个「款」；材质/品类名为芯片中文，不参与 SKU |
-| `Sku`           | barcode(unique=QR内容), costPrice/salePrice(分), stock, version                     | 颜色×尺码的具体单品                           |
-| `StockMovement` | type, quantity(±), opId(unique 幂等), refOrderId                                    | 库存唯一真相来源                              |
-| `SaleOrder`     | status, totalAmount(分), opId(unique)                                               | 一笔销售单                                    |
-| `SaleItem`      | price, cost(进价快照), subtotal                                                     | 报表利润 = Σ(price−cost)                      |
+| 模型            | 关键字段                                                                             | 备注                                          |
+| --------------- | ------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `Shop`          | name                                                                                 | 多租户根                                      |
+| `User`          | shopId, phone(unique), passwordHash, role                                            | 登录主体                                      |
+| `Category`      | shopId, name                                                                         | 当前业务少用                                  |
+| `Product`       | archivedAt(软归档), deletedAt(软删除), coverImage, images[], material, categoryName  | 一个「款」；材质/品类名为芯片中文，不参与 SKU |
+| `Sku`           | barcode(unique=QR内容), costPrice/salePrice(分), stock, version, deletedAt(尺码软删) | 颜色×尺码的具体单品                           |
+| `StockMovement` | type, quantity(±), opId(unique 幂等), refOrderId                                     | 库存唯一真相来源                              |
+| `SaleOrder`     | status, totalAmount(分), opId(unique)                                                | 一笔销售单                                    |
+| `SaleItem`      | price, cost(进价快照), subtotal                                                      | 报表利润 = Σ(price−cost)                      |
 
 ### 6.3 关键业务逻辑去哪找
 
@@ -181,7 +181,7 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 ### 6.5 迁移
 
-按时间顺序：`init` → `product_archive`(archivedAt) → `add_saleitem_cost`(cost) → `product_soft_delete`(deletedAt) → `product_material_category`(material/categoryName)。
+按时间顺序：`init` → `product_archive`(archivedAt) → `add_saleitem_cost`(cost) → `product_soft_delete`(deletedAt) → `product_material_category`(material/categoryName) → `add_password_cipher` → `sku_soft_delete`(Sku.deletedAt，编辑商品增删尺码用)。
 容器启动时自动 `prisma migrate deploy && node dist/main.js`（见 `apps/server/Dockerfile`）。**改 schema 后必须新建迁移**，不要只改 schema 不生成迁移。
 
 ### 6.6 API 路由速查（除 `/download` 外都带 `/api/v1`）
@@ -210,17 +210,17 @@ pnpm --filter @cloth-scan/mobile start       # Expo Go 扫码运行（蓝牙打�
 
 React Navigation（`@react-navigation/native` + native-stack，`src/navigation/RootNavigator.tsx`）；`AuthProvider` 决定登录态、登录后包 `SyncProvider`；列表屏用 `useFocusEffect` 在返回时刷新。
 
-| 屏幕                                                           | 职责                                                                                                                         |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `LoginScreen`                                                  | 登录 / 注册门店                                                                                                              |
-| `HomeScreen`                                                   | 入口（logo + 收银台）、今日营业额；底栏同步与「名·身份」                                                                     |
-| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗                                                                                               |
-| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类                                                                        |
-| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                                                                                                  |
-| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                                                                                       |
-| `StaffScreen`                                                  | 店员管理（owner，1.5.0 重构：店主分组静态行 + 操作收纳弹层 + 底部添加 CTA）                                                  |
-| `SettingsScreen`（`settings/`）                                | 设置中心（1.5.0）：双角色账号管理 + 结账提醒开关 + 版本号 + 应用内更新（`UpdateSheet`：OTA 自动重启 / APK 断点下载拉起安装） |
-| `SyncErrorsScreen`                                             | 同步失败单据处理                                                                                                             |
+| 屏幕                                                           | 职责                                                                                                                                                                        |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LoginScreen`                                                  | 登录 / 注册门店                                                                                                                                                             |
+| `HomeScreen`                                                   | 入口（logo + 收银台）、今日营业额；底栏同步与「名·身份」                                                                                                                    |
+| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗；「会员」勾选切会员价（金色，=salePrice 实价；非会员默认收原价=会员价÷0.7 四舍五入到元）；整单优惠/加价（打折可 >10 折、总价改价可高于原价） |
+| `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类                                                                                                                       |
+| `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                                                                                                                                                 |
+| `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                                                                                                                                      |
+| `StaffScreen`                                                  | 店员管理（owner，1.5.0 重构：店主分组静态行 + 操作收纳弹层 + 底部添加 CTA）                                                                                                 |
+| `SettingsScreen`（`settings/`）                                | 设置中心（1.5.0）：双角色账号管理 + 结账提醒开关 + 版本号 + 应用内更新（`UpdateSheet`：OTA 自动重启 / APK 断点下载拉起安装）                                                |
+| `SyncErrorsScreen`                                             | 同步失败单据处理                                                                                                                                                            |
 
 全局挂载（`App.tsx`）：`SaleToastProvider` + `SaleAlertsGate`——老板机「新结账」提醒（前台顶部滑入卡片，退后台走系统通知；设置页开关总闸，状态存 SecureStore）。
 
@@ -260,7 +260,7 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 ## 8. 共享包 `packages/shared`
 
-前后端共用，改这里同时影响双端（注意 §2 规则 7）。导出：`API_PREFIX`、枚举（`enums.ts`）、鉴权（`auth.ts`）、商品 + `expandSkuMatrix`（`product.ts`）、建档芯片与识图映射（`catalog-presets.ts`：`mapGarmentVision` / `normalizeProductTitle`）、识图 DTO（`garment-vision.ts`）、库存（`inventory.ts`）、销售 DTO/响应（`sale.ts`）、购物车纯函数（`cart.ts`：`addToCart/addToCartQty/setQuantity/setLinePrice/cartToSaleInput`）。购物车与建档逻辑有 vitest 单测。
+前后端共用，改这里同时影响双端（注意 §2 规则 7）。导出：`API_PREFIX`、枚举（`enums.ts`）、鉴权（`auth.ts`）、商品 + `expandSkuMatrix` + 会员价换算 `MEMBER_RATE`/`memberPriceToTagPrice`（原价=会员价÷0.7 四舍五入到元，纯推导不落库）+ `SignedMoney`（整单加价用有符号金额）（`product.ts`）、建档芯片与识图映射（`catalog-presets.ts`：`mapGarmentVision` / `normalizeProductTitle` / `PRESET_SIZE_GROUPS` 三组尺码+均码）、识图 DTO（`garment-vision.ts`）、库存（`inventory.ts`）、销售 DTO/响应（`sale.ts`，`orderDiscountCents` 为 SignedMoney）、购物车纯函数（`cart.ts`：`addToCart/addToCartQty/setQuantity/setLinePrice/cartToSaleInput` + 会员价 `lineMemberPrice/lineBasePrice/rebaseMemberLines`）。购物车与建档逻辑有 vitest 单测。
 
 ---
 
