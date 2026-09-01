@@ -7,6 +7,24 @@ import { z } from "zod";
  */
 export const Money = z.number().int().nonnegative().max(1_000_000_000);
 
+/**
+ * 有符号金额（分）：仅整单优惠 orderDiscountCents 专用。
+ * 正数 = 整单减免，负数 = 整单加价（总价改价可高于原价合计）。
+ */
+export const SignedMoney = z.number().int().min(-1_000_000_000).max(1_000_000_000);
+
+/** 会员折扣率：会员价（=salePrice 实价）= 原价 × MEMBER_RATE */
+export const MEMBER_RATE = 0.7;
+
+/**
+ * 会员价（分）→ 原价（分）：原价 = 会员价 ÷ 0.7，四舍五入到元。
+ * 原价仅用于展示与非会员默认售价（顾客看到原价，打 7 折得会员价），
+ * 纯推导不落库——salePrice 字段本身即会员价（实价）。
+ */
+export function memberPriceToTagPrice(memberCents: number): number {
+  return Math.round(memberCents / MEMBER_RATE / 100) * 100;
+}
+
 /** 单行数量上限：防呆（扫码/键盘误输多位数），远超真实单笔购买量 */
 export const MAX_QTY = 9_999;
 
@@ -96,7 +114,7 @@ export type CreateProductInput = z.infer<typeof CreateProductInput>;
 
 /* ----------------------------- 编辑商品 DTO ----------------------------- */
 
-/** 编辑单个已存在 SKU 的颜色/尺码/价格/库存（不增删 SKU，条码不变） */
+/** 编辑单个已存在 SKU 的颜色/尺码/价格/库存（条码不变；增删 SKU 走 addSkus/removeSkuIds） */
 export const UpdateSkuInput = z.object({
   id: z.string().uuid(),
   color: z.string().min(1).max(40).optional(),
@@ -108,7 +126,7 @@ export const UpdateSkuInput = z.object({
 });
 export type UpdateSkuInput = z.infer<typeof UpdateSkuInput>;
 
-/** 编辑商品款：可改名称、改价、调库存、改颜色尺码（不在此处增删 SKU） */
+/** 编辑商品款：可改名称、改价、调库存、改颜色尺码、增删尺码（软删） */
 export const UpdateProductInput = z.object({
   name: z.string().min(1).max(80).optional(),
   coverImage: z.string().max(512).nullable().optional(),
@@ -116,6 +134,10 @@ export const UpdateProductInput = z.object({
   material: z.string().max(40).nullable().optional(),
   categoryName: z.string().max(40).nullable().optional(),
   skus: z.array(UpdateSkuInput).optional(),
+  /** 新增尺码（生成新 SKU + 条码；initialStock 写 in 流水）。颜色/价格由前端按商品统一值传入 */
+  addSkus: z.array(CreateSkuInput).max(20).optional(),
+  /** 删除尺码的 SKU id（软删；库存清零写 adjust 流水；至少保留一个有效 SKU） */
+  removeSkuIds: z.array(z.string().uuid()).max(20).optional(),
 });
 export type UpdateProductInput = z.infer<typeof UpdateProductInput>;
 
@@ -123,8 +145,9 @@ export type UpdateProductInput = z.infer<typeof UpdateProductInput>;
 export type ProductScope = "active" | "archived" | "all";
 
 /**
- * 批量生成 SKU 组合：选「颜色集合 × 尺码集合」自动展开。
- * 例：colors=["红","蓝"], sizes=["S","M","L"] => 6 个 SKU
+ * 批量生成 SKU 组合。当前建档模型为「单颜色 × 多尺码」：
+ * colors 传单元素数组；每个 SKU 的库存由尺码决定（initialStockBySize）。
+ * 例：colors=["白"], sizes=["S","M"], initialStockBySize={S:2,M:5} => 2 个 SKU
  */
 export function expandSkuMatrix(params: {
   colors: string[];
@@ -132,12 +155,20 @@ export function expandSkuMatrix(params: {
   costPrice: number;
   salePrice: number;
   initialStock?: number;
+  /** 按尺码指定初始库存（所有颜色共享）；未指定的尺码回落 initialStock */
+  initialStockBySize?: Record<string, number>;
 }): CreateSkuInput[] {
-  const { colors, sizes, costPrice, salePrice, initialStock = 0 } = params;
+  const { colors, sizes, costPrice, salePrice, initialStock = 0, initialStockBySize } = params;
   const result: CreateSkuInput[] = [];
   for (const color of colors) {
     for (const size of sizes) {
-      result.push({ color, size, costPrice, salePrice, initialStock });
+      result.push({
+        color,
+        size,
+        costPrice,
+        salePrice,
+        initialStock: initialStockBySize?.[size] ?? initialStock,
+      });
     }
   }
   return result;

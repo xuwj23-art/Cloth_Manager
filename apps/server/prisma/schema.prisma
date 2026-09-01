@@ -96,18 +96,21 @@ model Product {
 }
 
 model Sku {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   productId String
   color     String
   size      String
   // QR 内容 / 条码，全局唯一，是扫码匹配的核心键
-  barcode   String   @unique
-  costPrice Int      @default(0) // 进价（分）
-  salePrice Int      @default(0) // 售价（分）
-  stock     Int      @default(0) // 当前库存（由流水累加维护）
-  version   Int      @default(0) // 乐观锁 / 同步版本
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  barcode   String    @unique
+  costPrice Int       @default(0) // 进价（分）
+  salePrice Int       @default(0) // 售价（分）
+  stock     Int       @default(0) // 当前库存（由流水累加维护）
+  version   Int       @default(0) // 乐观锁 / 同步版本
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  /// SKU（尺码）软删除：编辑商品删除尺码时置位，库存先清零写 adjust 流水。
+  /// 目录/扫码/同步一律过滤；销售报表 join 保留（历史订单仍可展示规格）。
+  deletedAt DateTime?
 
   product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   movements StockMovement[]

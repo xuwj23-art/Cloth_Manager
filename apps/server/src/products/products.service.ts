@@ -178,7 +178,7 @@ export class ProductsService {
     else if (scope === "archived") where.archivedAt = { not: null };
     return this.prisma.product.findMany({
       where,
-      include: { skus: true },
+      include: { skus: { where: { deletedAt: null } } },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -207,7 +207,7 @@ export class ProductsService {
     if (since) productsWhere.updatedAt = { gt: since };
     const products = await this.prisma.product.findMany({
       where: productsWhere,
-      include: { skus: true },
+      include: { skus: { where: { deletedAt: null } } },
     });
 
     // 2) 软删商品的增量：deletedAt 非空 且 updatedAt > since
@@ -223,6 +223,20 @@ export class ProductsService {
       select: { skus: { select: { barcode: true } } },
     });
     const deletedBarcodes = deleted.flatMap((p) => p.skus.map((s) => s.barcode));
+
+    // 2b) SKU 级软删（编辑商品删除尺码）：商品未删但尺码已删，
+    //     客户端缓存同样按 barcode 清理。软删 SKU 的条码全局唯一不复用。
+    if (since) {
+      const deletedSkuRows = await this.prisma.sku.findMany({
+        where: {
+          deletedAt: { not: null },
+          updatedAt: { gt: since },
+          product: { shopId },
+        },
+        select: { barcode: true },
+      });
+      deletedBarcodes.push(...deletedSkuRows.map((s) => s.barcode));
+    }
 
     // 3) serverTime = 当前时间，作为客户端下次请求的 since
     //    注意：取查询结束后的当前时间（而非 since+窗口）确保不会漏掉本次查询期间写入的数据
@@ -254,7 +268,8 @@ export class ProductsService {
     return { ok: true };
   }
 
-  /** 编辑商品：改名/改封面/改价/盘点改库存（库存差额写 adjust 流水），并刷新售罄归档状态 */
+  /** 编辑商品：改名/改封面/改价/盘点改库存（库存差额写 adjust 流水）、
+   *  增删尺码（addSkus 生成新 SKU+条码；removeSkuIds 软删并清零库存），并刷新售罄归档状态 */
   async updateProduct(shopId: string, id: string, input: UpdateProductInput) {
     const product = await this.prisma.product.findUnique({
       where: { id },
@@ -268,8 +283,10 @@ export class ProductsService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      // 事务内重读 SKU，避免与并发开单/编辑竞态导致 adjust 流水 delta 用陈旧库存计算
-      const freshSkus = await tx.sku.findMany({ where: { productId: id } });
+      // 事务内重读 SKU（未软删），避免与并发开单/编辑竞态导致 adjust 流水 delta 用陈旧库存计算
+      const freshSkus = await tx.sku.findMany({
+        where: { productId: id, deletedAt: null },
+      });
       const freshById = new Map(freshSkus.map((k) => [k.id, k]));
 
       const productPatch: Prisma.ProductUpdateInput = {};
@@ -289,12 +306,29 @@ export class ProductsService {
         });
       }
 
-      const planned = new Map(freshSkus.map((k) => [k.id, { color: k.color, size: k.size }]));
+      // 待删除尺码：先从规格规划中剔除，再校验「至少保留一个」
+      const removeIds = new Set(input.removeSkuIds ?? []);
+      for (const rid of removeIds) {
+        if (!freshById.has(rid)) {
+          throw new NotFoundException(`SKU 不存在：${rid}`);
+        }
+      }
+      const remainingCount = freshSkus.length - removeIds.size + (input.addSkus?.length ?? 0);
+      if (remainingCount <= 0) {
+        throw new BadRequestException("至少保留一个尺码");
+      }
+
+      const planned = new Map(
+        freshSkus
+          .filter((k) => !removeIds.has(k.id))
+          .map((k) => [k.id, { color: k.color, size: k.size }]),
+      );
       for (const s of input.skus ?? []) {
         if (!freshById.has(s.id)) {
           throw new NotFoundException(`SKU 不存在：${s.id}`);
         }
-        const next = planned.get(s.id)!;
+        const next = planned.get(s.id);
+        if (!next) continue; // 该 SKU 已在删除名单里，忽略其更新
         if (s.color !== undefined) {
           const color = s.color.trim();
           if (!color) throw new BadRequestException("颜色不能为空");
@@ -314,14 +348,21 @@ export class ProductsService {
         }
         seenSpec.add(key);
       }
+      // 新增尺码的规格也不能与既有尺码重复
+      const addList = input.addSkus ?? [];
+      for (const s of addList) {
+        const key = `${s.color}\u0000${s.size}`;
+        if (seenSpec.has(key)) {
+          throw new BadRequestException(`尺码 ${s.size} 已存在`);
+        }
+        seenSpec.add(key);
+      }
 
       let stockChanged = false;
       let skuChanged = false;
       for (const s of input.skus ?? []) {
         const existing = freshById.get(s.id);
-        if (!existing) {
-          throw new NotFoundException(`SKU 不存在：${s.id}`);
-        }
+        if (!existing || removeIds.has(s.id)) continue;
         const data: Record<string, unknown> = {};
         const spec = planned.get(s.id)!;
         if (s.color !== undefined) data.color = spec.color;
@@ -348,13 +389,74 @@ export class ProductsService {
         }
       }
 
+      // 删除尺码：软删；残留库存清零并写 adjust 流水（否则库存虚高）
+      for (const rid of removeIds) {
+        const existing = freshById.get(rid)!;
+        if (existing.stock > 0) {
+          await tx.stockMovement.create({
+            data: {
+              skuId: rid,
+              type: "adjust",
+              quantity: -existing.stock,
+              opId: randomUUID(),
+            },
+          });
+        }
+        await tx.sku.update({
+          where: { id: rid },
+          data: {
+            stock: 0,
+            deletedAt: new Date(),
+            version: { increment: 1 },
+          },
+        });
+        stockChanged = true;
+        skuChanged = true;
+      }
+
+      // 新增尺码：生成唯一条码建 SKU，initialStock 写 in 流水
+      if (addList.length > 0) {
+        const generated = await this.generateUniqueBarcodes(
+          addList.filter((s) => !s.barcode).length,
+        );
+        let gi = 0;
+        for (const s of addList) {
+          const sku = await tx.sku.create({
+            data: {
+              productId: id,
+              color: s.color,
+              size: s.size,
+              barcode: s.barcode ?? generated[gi++]!,
+              costPrice: s.costPrice,
+              salePrice: s.salePrice,
+              stock: s.initialStock,
+            },
+          });
+          if (s.initialStock > 0) {
+            await tx.stockMovement.create({
+              data: {
+                skuId: sku.id,
+                type: "in",
+                quantity: s.initialStock,
+                opId: randomUUID(),
+              },
+            });
+          }
+        }
+        stockChanged = true;
+        skuChanged = true;
+      }
+
       if (stockChanged) {
         await this.recomputeArchive(tx, id);
       }
       if (skuChanged) {
         await this.touchProducts(tx, [id]);
       }
-      return tx.product.findUnique({ where: { id }, include: { skus: true } });
+      return tx.product.findUnique({
+        where: { id },
+        include: { skus: { where: { deletedAt: null } } },
+      });
     });
   }
 
@@ -370,7 +472,7 @@ export class ProductsService {
     return this.prisma.product.update({
       where: { id },
       data: { archivedAt: archived ? new Date() : null },
-      include: { skus: true },
+      include: { skus: { where: { deletedAt: null } } },
     });
   }
 
@@ -420,13 +522,13 @@ export class ProductsService {
     });
   }
 
-  /** 扫码匹配：通过 QR/条码查 SKU 及其所属款（店铺端核心，仅限本门店） */
+  /** 扫码匹配：通过 QR/条码查 SKU 及其所属款（店铺端核心，仅限本门店；软删尺码不匹配） */
   async findByBarcode(shopId: string, barcode: string) {
     const sku = await this.prisma.sku.findUnique({
       where: { barcode },
       include: { product: true },
     });
-    if (!sku || sku.product.shopId !== shopId || sku.product.deletedAt) {
+    if (!sku || sku.deletedAt || sku.product.shopId !== shopId || sku.product.deletedAt) {
       throw new NotFoundException(`未找到条码对应的商品：${barcode}`);
     }
     return sku;

@@ -24,7 +24,8 @@ const INT32_MAX = 2_147_483_647;
  *  - 门店隔离（product.shopId 关系过滤保留）
  *  - 进价快照（saleItem.cost 保留）
  *  - 售罄归档（products.recomputeArchive 调用保留）
- *  - 整单优惠（orderDiscountCents：各行按原价入库，实收 = Σsubtotal - discount ≥ 0 保留）
+ *  - 整单优惠（orderDiscountCents：各行按原价入库，实收 = Σsubtotal - discount；
+ *    正数=减免且不得使实收为负，负数=整单加价即总价改价高于原价合计）
  *
  * 只读查询见 SalesReportService。
  */
@@ -111,7 +112,8 @@ export class SalesCommandService {
           }
 
           // 整单优惠：各行按原价入库（subtotal 不变），优惠单独记录；
-          // totalAmount 即实收 = Σ各行subtotal - orderDiscountCents。优惠不得使实收为负。
+          // totalAmount 即实收 = Σ各行subtotal - orderDiscountCents。
+          // 正优惠不得使实收为负；负数 = 整单加价（总价改价可高于原价合计），放行。
           const orderDiscountCents = input.orderDiscountCents ?? 0;
           if (orderDiscountCents > total) {
             throw new BadRequestException(
@@ -119,7 +121,7 @@ export class SalesCommandService {
             );
           }
           const paidAmount = total - orderDiscountCents;
-          if (total > INT32_MAX) {
+          if (total > INT32_MAX || paidAmount > INT32_MAX) {
             throw new BadRequestException("整单金额超出系统上限，请分单结算");
           }
 
@@ -359,13 +361,14 @@ export class SalesCommandService {
           await tx.stockMovement.createMany({ data: movementData });
         }
 
-        // 重算实收：各行 subtotal 之和 - 该单已记录的 orderDiscountCents（≥0）
+        // 重算实收：各行 subtotal 之和 - 该单已记录的 orderDiscountCents
         const remaining = await tx.saleItem.findMany({ where: { orderId: id } });
         if (remaining.length === 0) {
           throw new BadRequestException("账单不能为空，请保留至少一件商品，或使用「删除整单」");
         }
         const subtotalSum = remaining.reduce((s, it) => s + it.subtotal, 0);
-        // 编辑不改优惠金额；若改后 subtotal 之和小于已记优惠，夹到 0（不允许实收为负）
+        // 编辑不改优惠金额；正优惠改后若使实收为负则夹到 0。
+        // 负优惠（加价单）实收 = subtotalSum + |disc|，恒为正，无需夹取。
         const disc = order.orderDiscountCents ?? 0;
         const paidAmount = Math.max(0, subtotalSum - disc);
         // 与 createSale 对齐：totalAmount 是 Int4，单行各自合法但多行求和可能越界

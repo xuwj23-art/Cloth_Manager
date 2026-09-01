@@ -6,9 +6,11 @@ import {
   shouldArchive,
   ProductSchema,
   Money,
+  SignedMoney,
   MAX_QTY,
+  memberPriceToTagPrice,
 } from "./product";
-import { SaleItemInput } from "./sale";
+import { SaleItemInput, CreateSaleOrderInput } from "./sale";
 
 describe("Money / 数量上限（防 Int32 溢出与误输）", () => {
   it("Money 拒绝浮点/负数/超大金额", () => {
@@ -25,6 +27,49 @@ describe("Money / 数量上限（防 Int32 溢出与误输）", () => {
   });
 });
 
+describe("SignedMoney / 整单加价（负优惠）", () => {
+  it("SignedMoney 允许负数（=整单加价），拒绝浮点与越界", () => {
+    expect(SignedMoney.safeParse(-500).success).toBe(true);
+    expect(SignedMoney.safeParse(0).success).toBe(true);
+    expect(SignedMoney.safeParse(10.5).success).toBe(false);
+    expect(SignedMoney.safeParse(-1_000_000_001).success).toBe(false);
+    expect(SignedMoney.safeParse(1_000_000_001).success).toBe(false);
+  });
+
+  it("CreateSaleOrderInput 接受负 orderDiscountCents", () => {
+    const parsed = CreateSaleOrderInput.safeParse({
+      opId: "op-1",
+      items: [{ skuId: "00000000-0000-0000-0000-000000000000", quantity: 1, price: 9900 }],
+      orderDiscountCents: -2000,
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
+describe("memberPriceToTagPrice（会员价 → 原价，四舍五入到元）", () => {
+  it("除不尽时四舍五入到元：99 元 → 141 元", () => {
+    expect(memberPriceToTagPrice(9900)).toBe(14100);
+  });
+
+  it("精确整除：70 元 → 100 元", () => {
+    expect(memberPriceToTagPrice(7000)).toBe(10000);
+  });
+
+  it("五入进位：70.5 元 → 100.71 元 → 101 元", () => {
+    expect(memberPriceToTagPrice(7050)).toBe(10100);
+  });
+
+  it("0 → 0", () => {
+    expect(memberPriceToTagPrice(0)).toBe(0);
+  });
+
+  it("结果恒为整元（100 分的整数倍）", () => {
+    for (const cents of [1, 17, 123, 999, 12345, 999900]) {
+      expect(memberPriceToTagPrice(cents) % 100).toBe(0);
+    }
+  });
+});
+
 describe("expandSkuMatrix", () => {
   it("展开颜色 × 尺码 的笛卡尔积", () => {
     const skus = expandSkuMatrix({
@@ -35,6 +80,20 @@ describe("expandSkuMatrix", () => {
     });
     expect(skus).toHaveLength(6);
     expect(skus[0]).toMatchObject({ color: "红", size: "S", initialStock: 0 });
+  });
+
+  it("按尺码指定初始库存（单颜色 × 多尺码建档模型）", () => {
+    const skus = expandSkuMatrix({
+      colors: ["白"],
+      sizes: ["S", "M", "L"],
+      costPrice: 2000,
+      salePrice: 5800,
+      initialStockBySize: { S: 2, M: 5 }, // L 未指定回落 initialStock（默认 0）
+    });
+    expect(skus).toHaveLength(3);
+    expect(skus[0]).toMatchObject({ color: "白", size: "S", initialStock: 2 });
+    expect(skus[1]).toMatchObject({ color: "白", size: "M", initialStock: 5 });
+    expect(skus[2]).toMatchObject({ color: "白", size: "L", initialStock: 0 });
   });
 
   it("生成的 SKU 能通过 CreateProductInput 校验", () => {
@@ -91,6 +150,23 @@ describe("UpdateProductInput", () => {
       ],
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it("支持新增尺码（addSkus）与删除尺码（removeSkuIds）", () => {
+    const parsed = UpdateProductInput.safeParse({
+      addSkus: [{ color: "酒红", size: "XL", costPrice: 4500, salePrice: 9900, initialStock: 2 }],
+      removeSkuIds: ["00000000-0000-0000-0000-000000000000"],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.addSkus?.[0]).toMatchObject({ size: "XL", initialStock: 2 });
+      expect(parsed.data.removeSkuIds).toHaveLength(1);
+    }
+  });
+
+  it("removeSkuIds 拒绝非 uuid", () => {
+    const parsed = UpdateProductInput.safeParse({ removeSkuIds: ["not-a-uuid"] });
+    expect(parsed.success).toBe(false);
   });
 });
 

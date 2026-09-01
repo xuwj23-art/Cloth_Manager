@@ -1,4 +1,5 @@
 import type { CreateSaleOrderInput } from "./sale";
+import { memberPriceToTagPrice } from "./product";
 
 /** 购物车中的一行（一个 SKU） */
 export interface CartLine {
@@ -8,8 +9,10 @@ export interface CartLine {
   color: string;
   size: string;
   price: number; // 成交单价（分）
-  /** 进车时的吊牌价（分）；改价后保留，用于展示划线原价 */
+  /** 进车时的基准价（分）＝当前会员态下的默认价；改价后保留，用于展示划线与「恢复」 */
   origPrice?: number;
+  /** 会员价（分）＝ SKU.salePrice 快照。会员态基准价；缺失时回退 price */
+  memberPrice?: number;
   /** 商品主图路径（/uploads/…，可空）。购物车缩略图与预览弹层用 */
   image?: string | null;
   quantity: number;
@@ -24,6 +27,8 @@ export interface ScannedSku {
   color: string;
   size: string;
   price: number;
+  /** 会员价（分）＝ SKU.salePrice。由收银侧按会员与否决定 price 用会员价还是原价 */
+  memberPrice?: number;
   stock: number;
   /** 商品主图路径（/uploads/…，可空） */
   image?: string | null;
@@ -47,6 +52,8 @@ export function addToCartQty(lines: CartLine[], sku: ScannedSku, qty: number): C
       ...line,
       quantity: nextQty,
       stock: sku.stock,
+      // 会员价是参考信息（非议价结果），重扫时用最新快照刷新
+      memberPrice: sku.memberPrice ?? line.memberPrice,
       image: sku.image ?? line.image ?? null,
     };
     return copy;
@@ -62,6 +69,7 @@ export function addToCartQty(lines: CartLine[], sku: ScannedSku, qty: number): C
       size: sku.size,
       price: sku.price,
       origPrice: sku.price,
+      memberPrice: sku.memberPrice ?? sku.price,
       image: sku.image ?? null,
       quantity: Math.min(safeQty, sku.stock),
       stock: sku.stock,
@@ -94,6 +102,32 @@ export function removeFromCart(lines: CartLine[], skuId: string): CartLine[] {
 export function setLinePrice(lines: CartLine[], skuId: string, price: number): CartLine[] {
   const safe = Math.max(0, Math.round(price));
   return lines.map((l) => (l.skuId === skuId ? { ...l, price: safe } : l));
+}
+
+/** 行的会员价（分）：快照缺失时回退成交价 */
+export function lineMemberPrice(line: CartLine): number {
+  return line.memberPrice ?? line.price;
+}
+
+/** 行的基准价（分）：会员态 = 会员价；非会员态 = 原价（会员价 ÷ 0.7 四舍五入到元） */
+export function lineBasePrice(line: CartLine, isMember: boolean): number {
+  const member = lineMemberPrice(line);
+  return isMember ? member : memberPriceToTagPrice(member);
+}
+
+/**
+ * 切换会员态后重算各行：
+ * - 未手动改价的行（price === 切换前基准）：成交价与基准价都重置为新基准；
+ * - 手动改过价的行：保留成交价，仅把基准价（origPrice）更新为新态基准，
+ *   保证划线展示与「恢复」始终对齐当前会员态。
+ */
+export function rebaseMemberLines(lines: CartLine[], isMember: boolean): CartLine[] {
+  return lines.map((l) => {
+    const toBase = lineBasePrice(l, isMember);
+    const fromBase = lineBasePrice(l, !isMember);
+    if (l.price !== fromBase) return { ...l, origPrice: toBase };
+    return { ...l, price: toBase, origPrice: toBase };
+  });
 }
 
 /** 合计金额（分） */

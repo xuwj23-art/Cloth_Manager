@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Money, MAX_QTY } from "./product";
+import { Money, SignedMoney, MAX_QTY } from "./product";
 import { SaleOrderStatus } from "./enums";
 
 export const SaleItemSchema = z.object({
@@ -18,10 +18,13 @@ export const SaleOrderSchema = z.object({
   shopId: z.string().uuid(),
   operatorId: z.string().uuid().nullable(),
   status: SaleOrderStatus,
-  /** 实收 = Σ各行subtotal - orderDiscountCents（分） */
+  /** 实收 = Σ各行subtotal - orderDiscountCents（分）；orderDiscountCents 为负即整单加价 */
   totalAmount: Money,
-  /** 整单优惠金额（分，默认0）。各行按原价入库，实收 = Σ各行subtotal - orderDiscountCents */
-  orderDiscountCents: Money.default(0),
+  /**
+   * 整单优惠金额（分，默认0，可为负）。各行按原价入库，
+   * 实收 = Σ各行subtotal - orderDiscountCents；负数 = 整单加价（总价改价高于原价合计）
+   */
+  orderDiscountCents: SignedMoney.default(0),
   createdAt: z.string().datetime(),
 });
 export type SaleOrder = z.infer<typeof SaleOrderSchema>;
@@ -46,8 +49,11 @@ export const CreateSaleOrderInput = z.object({
   /** 客户端生成的幂等键，防止重复提交导致重复扣库存 */
   opId: z.string().min(1).max(64),
   items: z.array(SaleItemInput).min(1, "至少需要一件商品"),
-  /** 整单优惠金额（分，可选，留空=0）。各行仍按原价入库，订单实收 = Σ各行subtotal - orderDiscountCents */
-  orderDiscountCents: Money.optional(),
+  /**
+   * 整单优惠金额（分，可选，留空=0，可为负）。各行仍按原价入库，
+   * 订单实收 = Σ各行subtotal - orderDiscountCents；负数 = 整单加价（总价改价高于原价合计）
+   */
+  orderDiscountCents: SignedMoney.optional(),
 });
 export type CreateSaleOrderInput = z.infer<typeof CreateSaleOrderInput>;
 

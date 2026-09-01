@@ -6,7 +6,16 @@
 export const PRESET_COLORS = ["黑", "白", "灰", "红", "蓝", "绿", "黄", "粉", "卡其"] as const;
 /** 印花/多色。手动未选色才用「默认」，识图禁止用默认顶替。 */
 export const SYSTEM_COLORS = ["花色"] as const;
-export const PRESET_SIZES = ["S", "M", "L", "XL", "XXL", "均码"] as const;
+
+/** 尺码预设分组（建档页按组分区展示，组内多选） */
+export const PRESET_SIZE_GROUPS: ReadonlyArray<{ label: string; sizes: string[] }> = [
+  { label: "字母码", sizes: ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"] },
+  { label: "女装码", sizes: ["00", "0", "2", "4", "6", "8", "12", "14", "16", "18"] },
+  { label: "裤装码", sizes: ["32", "34", "36", "38", "40", "42", "44", "46"] },
+];
+
+/** 扁平整单尺码预设（编辑页单选芯片等场景）：三组按序拼接 + 均码 */
+export const PRESET_SIZES = [...PRESET_SIZE_GROUPS.flatMap((g) => g.sizes), "均码"] as const;
 
 /**
  * 材质（单选）。「默认」置顶；其余顺序与历史建档页一致（热门在前）。

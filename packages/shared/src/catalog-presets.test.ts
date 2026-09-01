@@ -6,6 +6,8 @@ import {
   normalizeProductTitle,
   PRESET_CATEGORIES,
   PRESET_MATERIALS,
+  PRESET_SIZE_GROUPS,
+  PRESET_SIZES,
 } from "./catalog-presets";
 
 describe("matchPresetColor", () => {
@@ -124,5 +126,33 @@ describe("预设搬迁完整性", () => {
   it("品类含连衣裙与 T恤", () => {
     expect(PRESET_CATEGORIES[0]).toBe("连衣裙");
     expect(PRESET_CATEGORIES).toContain("T恤");
+  });
+});
+
+describe("尺码预设", () => {
+  it("三组预设：字母码 / 女装码 / 裤装码", () => {
+    expect(PRESET_SIZE_GROUPS).toHaveLength(3);
+    expect(PRESET_SIZE_GROUPS[0]).toEqual({
+      label: "字母码",
+      sizes: ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"],
+    });
+    expect(PRESET_SIZE_GROUPS[1]).toEqual({
+      label: "女装码",
+      sizes: ["00", "0", "2", "4", "6", "8", "12", "14", "16", "18"],
+    });
+    expect(PRESET_SIZE_GROUPS[2]).toEqual({
+      label: "裤装码",
+      sizes: ["32", "34", "36", "38", "40", "42", "44", "46"],
+    });
+  });
+
+  it("扁平 PRESET_SIZES = 三组按序拼接 + 均码收尾，无重复", () => {
+    expect(PRESET_SIZES[PRESET_SIZES.length - 1]).toBe("均码");
+    expect(PRESET_SIZES).toHaveLength(8 + 10 + 8 + 1);
+    expect(new Set(PRESET_SIZES).size).toBe(PRESET_SIZES.length);
+    // 历史存量尺码值仍属预设（编辑页芯片兼容）
+    for (const legacy of ["S", "M", "L", "XL", "XXL", "均码"]) {
+      expect(PRESET_SIZES).toContain(legacy);
+    }
   });
 });

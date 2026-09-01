@@ -183,6 +183,35 @@ describe("SalesCommandService.createSale", () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it("整单加价：负 orderDiscountCents 放行，实收 = Σsubtotal + |加价|", async () => {
+    const prisma = makePrisma({ sku: { ...okSku } }) as any;
+    const service = new SalesCommandService(prisma, productsStub);
+
+    const order = await service.createSale(SHOP, "user-1", {
+      opId: "op-up",
+      items: [{ skuId: "sku-1", quantity: 2 }], // 5900 × 2 = 11800
+      orderDiscountCents: -2000, // 总价改价上浮 20 元
+    });
+
+    expect(order.totalAmount).toBe(11800 + 2000);
+    expect(order.orderDiscountCents).toBe(-2000);
+    // 各行仍按原价入库，加价不摊进行单价
+    expect(order.items[0]).toMatchObject({ price: 5900, subtotal: 11800 });
+  });
+
+  it("正优惠超过原价合计仍拒绝（实收不得为负）", async () => {
+    const prisma = makePrisma({ sku: { ...okSku } }) as any;
+    const service = new SalesCommandService(prisma, productsStub);
+
+    await expect(
+      service.createSale(SHOP, "user-1", {
+        opId: "op-big-disc",
+        items: [{ skuId: "sku-1", quantity: 1 }], // 5900
+        orderDiscountCents: 6000,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 });
 
 describe("SalesCommandService.deleteOrder", () => {

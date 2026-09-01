@@ -15,6 +15,7 @@ function makeUpdatePrisma(product: any, aggStock: number) {
       // updateProduct 事务内重读 SKU（终态/竞态守卫），返回与 product.skus 一致的快照
       findMany: vi.fn().mockResolvedValue(product.skus ?? []),
       update: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockImplementation(({ data }: any) => ({ id: "sku-new", ...data })),
       aggregate: vi.fn().mockResolvedValue({ _sum: { stock: aggStock } }),
     },
     stockMovement: { create: vi.fn().mockResolvedValue({}) },
@@ -217,6 +218,83 @@ describe("ProductsService.updateProduct", () => {
         skus: [{ id: "s2", color: "黑", size: "均码" }],
       }),
     ).rejects.toThrow("同一商品下颜色和尺码不能重复");
+  });
+
+  it("删除尺码：清零库存写 adjust 流水并软删（deletedAt 置位）", async () => {
+    const prisma = makeUpdatePrisma(
+      {
+        ...baseProduct,
+        skus: [
+          { id: "s1", stock: 5, salePrice: 5900, costPrice: 2000, color: "黑", size: "M" },
+          { id: "s2", stock: 3, salePrice: 5900, costPrice: 2000, color: "黑", size: "L" },
+        ],
+      },
+      8,
+    ) as any;
+    const service = new ProductsService(prisma);
+
+    await service.updateProduct(SHOP, "p1", { removeSkuIds: ["s1"] });
+
+    expect(prisma.__tx.stockMovement.create).toHaveBeenCalledWith({
+      data: { skuId: "s1", type: "adjust", quantity: -5, opId: expect.any(String) },
+    });
+    expect(prisma.__tx.sku.update).toHaveBeenCalledWith({
+      where: { id: "s1" },
+      data: { stock: 0, deletedAt: expect.any(Date), version: { increment: 1 } },
+    });
+  });
+
+  it("删除全部尺码：拒绝（至少保留一个）", async () => {
+    const prisma = makeUpdatePrisma({ ...baseProduct }, 5) as any;
+    const service = new ProductsService(prisma);
+
+    await expect(service.updateProduct(SHOP, "p1", { removeSkuIds: ["s1"] })).rejects.toThrow(
+      "至少保留一个尺码",
+    );
+  });
+
+  it("新增尺码：生成条码建 SKU 并写 in 流水", async () => {
+    const prisma = makeUpdatePrisma(
+      {
+        ...baseProduct,
+        skus: [{ id: "s1", stock: 5, salePrice: 5900, costPrice: 2000, color: "黑", size: "M" }],
+      },
+      5,
+    ) as any;
+    // generateUniqueBarcodes 走根 prisma.sku.findMany 查重（返回空 = 条码未占用）
+    prisma.sku = { findMany: vi.fn().mockResolvedValue([]) };
+    const service = new ProductsService(prisma);
+
+    await service.updateProduct(SHOP, "p1", {
+      addSkus: [{ color: "黑", size: "XL", costPrice: 2000, salePrice: 5900, initialStock: 2 }],
+    });
+
+    expect(prisma.__tx.sku.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          productId: "p1",
+          color: "黑",
+          size: "XL",
+          stock: 2,
+          barcode: expect.stringMatching(/^\d{10}$/),
+        }),
+      }),
+    );
+    expect(prisma.__tx.stockMovement.create).toHaveBeenCalledWith({
+      data: { skuId: "sku-new", type: "in", quantity: 2, opId: expect.any(String) },
+    });
+  });
+
+  it("新增尺码与既有尺码重复则拒绝", async () => {
+    const prisma = makeUpdatePrisma({ ...baseProduct }, 5) as any;
+    prisma.sku = { findMany: vi.fn().mockResolvedValue([]) };
+    const service = new ProductsService(prisma);
+
+    await expect(
+      service.updateProduct(SHOP, "p1", {
+        addSkus: [{ color: "黑", size: "均码", costPrice: 0, salePrice: 5900, initialStock: 1 }],
+      }),
+    ).rejects.toThrow("尺码 均码 已存在");
   });
 });
 
