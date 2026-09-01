@@ -33,7 +33,6 @@ import { BackButton } from "../components/BackButton";
 import { useDialog } from "../dialog-context";
 import { getLastPrinter, setLastPrinter } from "../storage";
 import { colors, font, radius, space } from "../theme/tokens";
-import { yuan } from "../utils/format";
 
 type LabelPrintNav = NativeStackNavigationProp<RootStackParamList, "LabelPrint">;
 type LabelPrintRoute = RouteProp<RootStackParamList, "LabelPrint">;
@@ -643,10 +642,9 @@ export function LabelPrintScreen() {
               <Text style={styles.name} numberOfLines={1}>
                 {product.name}
               </Text>
-              <Text style={styles.spec}>
-                {sku.color}/{sku.size} · 库存 {sku.stock}
-              </Text>
-              <Text style={styles.price}>{yuan(sku.salePrice)}</Text>
+              {/* 规格「颜色 · 尺码」蓝色小字；二维码本身不含价格，卡片只做分拣预览 */}
+              <Text style={styles.spec}>{`${sku.color} · ${sku.size}`}</Text>
+              <Text style={styles.stock}>库存 {sku.stock}</Text>
             </View>
             <View style={styles.stepper}>
               <Pressable
@@ -861,10 +859,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#fff",
   },
-  cardInfo: { flex: 1, gap: 2 },
-  name: { fontSize: 15, fontWeight: "700", color: "#111" },
-  spec: { fontSize: 13, color: "#6b7280" },
-  price: { fontSize: 15, fontWeight: "800", color: "#111" },
+  /** 中间信息列：三行文本（名称/规格/库存）整体水平居中 */
+  cardInfo: { flex: 1, gap: 2, alignItems: "center" },
+  name: { fontSize: 15, fontWeight: "700", color: "#111", textAlign: "center" },
+  /** 规格「颜色 · 尺码」：主题蓝、小号（不过分放大，与名称区分即可） */
+  spec: { fontSize: 14, fontWeight: "700", color: colors.primary, textAlign: "center" },
+  stock: { fontSize: 13, color: "#6b7280", textAlign: "center" },
   stepper: { flexDirection: "row", alignItems: "center", gap: 8 },
   stepBtn: {
     width: 32,

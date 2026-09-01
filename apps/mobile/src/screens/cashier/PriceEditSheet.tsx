@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
+import { lineMemberPrice, memberPriceToTagPrice } from "@cloth-scan/shared";
 import { colors, font, radius, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
 import { cashierStyles, yuan } from "./ui";
@@ -22,8 +23,11 @@ export function PriceEditSheet() {
   const [error, setError] = useState<string | null>(null);
 
   const line = editingSkuId ? (cart.find((l) => l.skuId === editingSkuId) ?? null) : null;
-  /** 该行已改过价：左下钮从「取消」换成「恢复原价」，对齐整单优惠的清除交互 */
+  /** 该行已改过价：左下钮从「取消」换成「恢复基准价」，对齐整单优惠的清除交互。
+   *  origPrice 在切换会员态时由 rebaseMemberLines 刷新，恒等于当前态基准价。 */
   const hasEdit = !!(line?.origPrice != null && line.origPrice !== line.price);
+  const memberCents = line ? lineMemberPrice(line) : 0;
+  const tagCents = memberPriceToTagPrice(memberCents);
 
   // 打开或切换目标行时回填当前价（元）。仅依赖 open/行 id，避免改价过程中被 value 变化打断。
   useEffect(() => {
@@ -74,9 +78,9 @@ export function PriceEditSheet() {
             />
           </View>
           <Text style={cashierStyles.hint}>
-            {hasEdit
-              ? `吊牌价 ${yuan(line.origPrice!)} · 当前 ${yuan(line.price)} / 件`
-              : `当前 ${yuan(line.price)} / 件`}
+            {line
+              ? `会员价 ${yuan(memberCents)} · 原价 ${yuan(tagCents)} · 当前 ${yuan(line.price)} / 件`
+              : ""}
           </Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
 

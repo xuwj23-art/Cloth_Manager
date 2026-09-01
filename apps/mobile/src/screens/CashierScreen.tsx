@@ -65,7 +65,7 @@ export function CashierScreen() {
   const navigation = useNavigation<CashierNav>();
   const { confirm, notice } = useDialog();
   const [permission, requestPermission] = useCameraPermissions();
-  const { online, pendingCount, syncNow, refreshPending } = useSync();
+  const { syncNow, refreshPending } = useSync();
   const [torch, setTorch] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -76,6 +76,8 @@ export function CashierScreen() {
   const showNotFound = useCashierStore((s) => s.showNotFound);
   const setSheet = useCashierStore((s) => s.setSheet);
   const resetAfterCheckout = useCashierStore((s) => s.resetAfterCheckout);
+  const isMember = useCashierStore((s) => s.isMember);
+  const toggleMember = useCashierStore((s) => s.toggleMember);
 
   // 同码短窗去重：摄像头对同一吊牌会连续触发多次识别
   const lastScanRef = useRef({ code: "", at: 0 });
@@ -146,17 +148,19 @@ export function CashierScreen() {
 
   // ---- 结算 ----
   function checkout() {
-    const { cart, orderDiscountCents } = useCashierStore.getState();
+    const { cart, orderDiscountCents, isMember } = useCashierStore.getState();
     if (cart.length === 0 || submitting) return;
     const orig = cartTotalCents(cart);
     const fin = Math.max(0, orig - orderDiscountCents);
     const cnt = cartItemCount(cart);
     const priceLine =
-      fin < orig
-        ? `合计 ${yuan(fin)}（原价 ${yuan(orig)} · 整单优惠 ${yuan(orig - fin)}）`
-        : `合计 ${yuan(orig)}`;
+      orderDiscountCents > 0
+        ? `合计 ${yuan(fin)}（原价 ${yuan(orig)} · 整单优惠 ${yuan(orderDiscountCents)}）`
+        : orderDiscountCents < 0
+          ? `合计 ${yuan(fin)}（原价合计 ${yuan(orig)} · 整单加价 ${yuan(-orderDiscountCents)}）`
+          : `合计 ${yuan(orig)}`;
     void confirm({
-      title: "确认收款",
+      title: isMember ? "确认收款（会员价）" : "确认收款",
       message: `${cnt} 件 · ${priceLine}`,
       confirmLabel: "收款",
       cancelLabel: "取消",
@@ -202,13 +206,22 @@ export function CashierScreen() {
       <View style={styles.topbar}>
         <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>扫码收银</Text>
-        <View style={styles.net}>
-          <View style={[styles.netDot, online ? styles.online : styles.offline]} />
-          <Text style={[styles.netText, online ? styles.online : styles.offline]}>
-            {online ? "在线" : "离线"}
-            {pendingCount > 0 ? ` · ${pendingCount}` : ""}
-          </Text>
-        </View>
+        {/* 会员开关：非会员收原价，勾选后全场按会员价（金色）收款 */}
+        <Pressable
+          style={[styles.memberToggle, isMember && styles.memberToggleOn]}
+          onPress={toggleMember}
+          accessibilityRole="button"
+          accessibilityLabel={isMember ? "取消会员价" : "按会员价收款"}
+          accessibilityState={{ checked: isMember }}
+          hitSlop={6}
+        >
+          <Ionicons
+            name={isMember ? "medal" : "medal-outline"}
+            size={14}
+            color={isMember ? "#fff" : colors.gold}
+          />
+          <Text style={[styles.memberToggleText, isMember && styles.memberToggleTextOn]}>会员</Text>
+        </Pressable>
       </View>
 
       <View style={styles.cameraWrap}>
@@ -285,12 +298,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
   },
   title: { fontSize: font.title, fontWeight: "800", color: colors.text },
-  link: { color: colors.primary, fontSize: font.body },
-  net: { flexDirection: "row", alignItems: "center", gap: 5 },
-  netText: { fontSize: font.caption - 1, fontWeight: "600" },
-  netDot: { width: 7, height: 7, borderRadius: 4 },
-  online: { color: colors.online, backgroundColor: colors.online },
-  offline: { color: colors.warn, backgroundColor: colors.warn },
+  /** 顶栏会员开关：默认仅金描边（无填充），选中金底白字 */
+  memberToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: colors.gold,
+  },
+  memberToggleOn: { backgroundColor: colors.gold },
+  memberToggleText: { fontSize: 13, fontWeight: "800", color: colors.gold },
+  memberToggleTextOn: { color: "#fff" },
   cameraWrap: {
     height: 232,
     backgroundColor: "#000",

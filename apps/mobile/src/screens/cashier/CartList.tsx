@@ -3,7 +3,7 @@ import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
-import type { CartLine } from "@cloth-scan/shared";
+import { lineMemberPrice, memberPriceToTagPrice, type CartLine } from "@cloth-scan/shared";
 import { thumbUrl } from "../../api";
 import { colors, font, radius, space } from "../../theme/tokens";
 import { useCashierStore } from "./store";
@@ -23,6 +23,7 @@ export function CartList() {
   const setQty = useCashierStore((s) => s.setQty);
   const removeLine = useCashierStore((s) => s.removeLine);
   const startEditPrice = useCashierStore((s) => s.startEditPrice);
+  const isMember = useCashierStore((s) => s.isMember);
   const [previewLine, setPreviewLine] = useState<CartLine | null>(null);
 
   if (cart.length === 0) {
@@ -46,6 +47,7 @@ export function CartList() {
           <CartRow
             line={item}
             index={index}
+            isMember={isMember}
             onInc={() => setQty(item.skuId, item.quantity + 1)}
             onDec={() => setQty(item.skuId, item.quantity - 1)}
             onRemove={() => removeLine(item.skuId)}
@@ -54,7 +56,11 @@ export function CartList() {
           />
         )}
       />
-      <ImagePreviewModal line={previewLine} onClose={() => setPreviewLine(null)} />
+      <ImagePreviewModal
+        line={previewLine}
+        isMember={isMember}
+        onClose={() => setPreviewLine(null)}
+      />
     </View>
   );
 }
@@ -62,6 +68,7 @@ export function CartList() {
 interface CartRowProps {
   line: CartLine;
   index: number;
+  isMember: boolean;
   onInc: () => void;
   onDec: () => void;
   onRemove: () => void;
@@ -70,8 +77,19 @@ interface CartRowProps {
   onPreview?: () => void;
 }
 
-const CartRowBase = ({ line, index, onInc, onDec, onRemove, onEdit, onPreview }: CartRowProps) => {
+const CartRowBase = ({
+  line,
+  index,
+  isMember,
+  onInc,
+  onDec,
+  onRemove,
+  onEdit,
+  onPreview,
+}: CartRowProps) => {
   const edited = line.origPrice != null && line.origPrice !== line.price;
+  /** 原价（吊牌价）= 会员价 ÷ 0.7 取整到元；会员态划线展示 */
+  const tagPrice = memberPriceToTagPrice(lineMemberPrice(line));
   const thumb = thumbUrl(line.image ?? null);
   return (
     <Animated.View entering={FadeIn.delay(index * staggerMs).duration(150)} style={styles.row}>
@@ -102,17 +120,24 @@ const CartRowBase = ({ line, index, onInc, onDec, onRemove, onEdit, onPreview }:
         </View>
       </View>
 
-      {/* 右：上行=价格(+划线原价)+改价；下行=步进器+删除 */}
+      {/* 右：上行=价格两行（新价上/划线原价下，居中）+改价钮；下行=步进器+删除。
+          价格竖排固定宽度，改价后不再横向扩张挤占中间商品名区。 */}
       <View style={styles.actionZone}>
-        <View style={styles.priceRow}>
-          {edited ? (
-            <Text style={styles.origPrice} allowFontScaling={false}>
-              {yuan(line.origPrice!)}
+        <View style={styles.priceEditRow}>
+          <View style={styles.priceStack}>
+            <Text
+              style={[styles.priceText, isMember && styles.priceTextGold]}
+              allowFontScaling={false}
+            >
+              {yuan(line.price)}
             </Text>
-          ) : null}
-          <Text style={styles.priceText} allowFontScaling={false}>
-            {yuan(line.price)}
-          </Text>
+            {/* 会员态恒显划线原价（原价=会员价÷0.7）；非会员仅改价后显示进车基准价 */}
+            {isMember || edited ? (
+              <Text style={styles.origPrice} allowFontScaling={false}>
+                {yuan(isMember ? tagPrice : line.origPrice!)}
+              </Text>
+            ) : null}
+          </View>
           <Pressable
             style={({ pressed }) => [
               styles.editBtn,
@@ -247,17 +272,22 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     gap: 6,
   },
-  priceRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  priceEditRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  /** 价格两行竖排：新价在上、划线原价在下，均左右居中；定宽防横向挤占名称区 */
+  priceStack: { alignItems: "center", minWidth: 78 },
   priceText: {
     fontSize: 15,
     fontWeight: "800",
     color: "#101E3C",
   },
+  /** 会员态成交价金色 */
+  priceTextGold: { color: colors.gold },
   origPrice: {
     fontSize: 11,
     fontWeight: "600",
     color: colors.textMuted,
     textDecorationLine: "line-through",
+    marginTop: 1,
   },
   editBtn: {
     width: 30,

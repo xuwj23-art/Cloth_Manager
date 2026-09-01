@@ -30,10 +30,13 @@ export function CheckoutBar({
   const finalTotal = useCashierStore(selectFinalCents);
   const count = useCashierStore(selectCount);
   const discounted = useCashierStore(selectDiscounted);
+  const isMember = useCashierStore((s) => s.isMember);
+  const orderDiscountCents = useCashierStore((s) => s.orderDiscountCents);
   const insets = useSafeAreaInsets();
 
   const empty = cart.length === 0;
   const disabled = empty || submitting;
+  const surcharge = orderDiscountCents < 0; // 整单加价（总价改价高于原价合计）
 
   return (
     <View
@@ -43,20 +46,29 @@ export function CheckoutBar({
         { paddingBottom: Math.max(insets.bottom + space.sm, space.md + 4) },
       ]}
     >
-      {/* 左：金额块（全屏唯一金额展示位） */}
+      {/* 左：金额块（全屏唯一金额展示位）；会员开关在顶栏 */}
       <View style={styles.amount}>
         <View style={styles.priceRow}>
-          <Text style={styles.total} numberOfLines={1} allowFontScaling={false}>
+          <Text
+            style={[styles.total, isMember && styles.totalGold]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
             {yuan(discounted ? finalTotal : total)}
           </Text>
-          {discounted ? (
+          {discounted && !surcharge ? (
             <Text style={styles.orig} numberOfLines={1}>
               {yuan(total)}
             </Text>
           ) : null}
         </View>
         <Text style={styles.meta} numberOfLines={1}>
-          {count} 件{discounted ? ` · 已省 ${yuan(total - finalTotal)}` : ""}
+          {count} 件
+          {discounted
+            ? surcharge
+              ? ` · 加价 ${yuan(-orderDiscountCents)}`
+              : ` · 已省 ${yuan(orderDiscountCents)}`
+            : ""}
         </Text>
       </View>
 
@@ -114,6 +126,8 @@ const styles = StyleSheet.create({
   amount: { flex: 1, gap: 1, minWidth: 0 },
   priceRow: { flexDirection: "row", alignItems: "baseline", gap: space.sm },
   total: { fontSize: 26, fontWeight: "800", color: "#101E3C" },
+  /** 会员态总价金色（品牌金，同吊牌 logo） */
+  totalGold: { color: colors.gold },
   orig: {
     fontSize: font.caption,
     color: colors.textMuted,

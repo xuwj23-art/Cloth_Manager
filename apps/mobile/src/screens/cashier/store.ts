@@ -3,6 +3,8 @@ import {
   addToCartQty,
   cartItemCount,
   cartTotalCents,
+  memberPriceToTagPrice,
+  rebaseMemberLines,
   removeFromCart,
   setLinePrice,
   setQuantity,
@@ -34,11 +36,17 @@ export interface CashierState {
   /** 正在改价的购物车行 skuId */
   editingSkuId: string | null;
   /**
-   * 整单优惠金额（分，≥0）。第 2 波 Task 4 改为订单级字段：
+   * 整单优惠金额（分，可为负）。第 2 波 Task 4 改为订单级字段：
    * 各行 price 保持原价，优惠单独记录，结算时随 cartToSaleInput 提交。
-   * 任意改车动作（加车/改量/删行/改价）都会重置为 0（原 applyCart 语义）。
+   * 正数 = 减免，负数 = 整单加价（总价改价高于原价合计）。
+   * 任意改车动作（加车/改量/删行/改价/切会员）都会重置为 0（原 applyCart 语义）。
    */
   orderDiscountCents: number;
+  /**
+   * 会员态：true = 按「会员价」（salePrice 实价）收银，购物车价格金色展示；
+   * false = 按「原价」（会员价÷0.7 四舍五入到元）收银。结算后复位 false。
+   */
+  isMember: boolean;
   /** 顶部提示文案 */
   hint: string;
 
@@ -62,10 +70,13 @@ export interface CashierState {
   /** 打开改价 Sheet */
   startEditPrice: (skuId: string) => void;
   /**
-   * 设置整单优惠（分）。传 0 即清除。
-   * 由 DiscountSheet 计算：orderDiscountCents = max(0, 原价合计 - 目标总价)。
+   * 设置整单优惠（分，可为负）。传 0 即清除。
+   * 由 DiscountSheet 计算：orderDiscountCents = 原价合计 - 目标总价
+   * （目标高于原价合计时为负 = 整单加价）。
    */
   setOrderDiscount: (cents: number) => void;
+  /** 切换会员/非会员：未改价行按新基准价重算，已改价行保留，清整单优惠 */
+  toggleMember: () => void;
   /** 设置顶部提示 */
   setHint: (h: string) => void;
   /** 关闭所有 Sheet（确认卡/NotFound），复位 pending */
@@ -84,20 +95,25 @@ export const useCashierStore = create<CashierState>((set, get) => ({
   notFoundBarcode: null,
   editingSkuId: null,
   orderDiscountCents: 0,
+  isMember: false,
   hint: DEFAULT_HINT,
 
   addPending: (sku) => set({ pendingSku: sku, pendingQty: 1, activeSheet: "confirm" }),
 
   confirmAdd: () => {
-    const { pendingSku, pendingQty } = get();
+    const { pendingSku, pendingQty, isMember } = get();
     if (!pendingSku) return;
+    // 会员价 = salePrice（实价）；非会员默认收原价（会员价 ÷ 0.7 取整到元）
+    const memberPrice = pendingSku.salePrice;
+    const basePrice = isMember ? memberPrice : memberPriceToTagPrice(memberPrice);
     const scanned: ScannedSku = {
       skuId: pendingSku.skuId,
       barcode: pendingSku.barcode,
       productName: pendingSku.productName,
       color: pendingSku.color,
       size: pendingSku.size,
-      price: pendingSku.salePrice,
+      price: basePrice,
+      memberPrice,
       stock: pendingSku.stock,
       image: pendingSku.coverImage ?? null,
     };
@@ -140,7 +156,20 @@ export const useCashierStore = create<CashierState>((set, get) => ({
 
   startEditPrice: (skuId) => set({ editingSkuId: skuId, activeSheet: "priceEdit" }),
 
-  setOrderDiscount: (cents) => set({ orderDiscountCents: Math.max(0, Math.round(cents)) }),
+  setOrderDiscount: (cents) => set({ orderDiscountCents: Math.round(cents) }),
+
+  toggleMember: () =>
+    set((s) => {
+      const isMember = !s.isMember;
+      return {
+        isMember,
+        // 未手动改价的行按新基准价重算；改价行保留成交价、仅刷新基准（origPrice）
+        cart: rebaseMemberLines(s.cart, isMember),
+        // 总价基准变了，已设的整单优惠/加价金额不再可信，清空防错
+        orderDiscountCents: 0,
+        // 不改顶部提示：hint 保持扫码引导文案
+      };
+    }),
 
   setHint: (h) => set({ hint: h }),
 
@@ -156,6 +185,8 @@ export const useCashierStore = create<CashierState>((set, get) => ({
     set({
       cart: [],
       orderDiscountCents: 0,
+      // 下一单默认非会员，防止忘切换导致按会员价误收
+      isMember: false,
       hint: DEFAULT_HINT,
     }),
 }));
@@ -165,12 +196,12 @@ export const useCashierStore = create<CashierState>((set, get) => ({
 /** 原价合计（分） */
 export const selectTotalCents = (s: CashierState): number => cartTotalCents(s.cart);
 
-/** 实收合计（分）= 原价 - 整单优惠，夹在 ≥0 */
+/** 实收合计（分）= 原价合计 - 整单优惠（负优惠即上浮），夹在 ≥0 */
 export const selectFinalCents = (s: CashierState): number =>
   Math.max(0, cartTotalCents(s.cart) - s.orderDiscountCents);
 
 /** 件数 */
 export const selectCount = (s: CashierState): number => cartItemCount(s.cart);
 
-/** 是否有整单优惠 */
-export const selectDiscounted = (s: CashierState): boolean => s.orderDiscountCents > 0;
+/** 是否设置了整单优惠或加价 */
+export const selectDiscounted = (s: CashierState): boolean => s.orderDiscountCents !== 0;

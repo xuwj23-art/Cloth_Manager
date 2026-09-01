@@ -1,25 +1,29 @@
 import { Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type { CartLine } from "@cloth-scan/shared";
+import { lineMemberPrice, memberPriceToTagPrice, type CartLine } from "@cloth-scan/shared";
 import { imageUrl } from "../../api";
 import { colors, radius, space } from "../../theme/tokens";
 import { yuan } from "./ui";
 
 /**
  * 购物车缩略图预览弹层（仅展示）：白色圆角长矩形居中，
- * 主体为商品正面图，底部一行名称 + 颜色/尺码 + 价格。
+ * 主体为商品正面图，底部一行名称 + 颜色/尺码 + 价格（原价/会员价双档）。
  * 点击遮罩或卡片任意处关闭。
  */
 export function ImagePreviewModal({
   line,
+  isMember,
   onClose,
 }: {
   line: CartLine | null;
+  isMember: boolean;
   onClose: () => void;
 }) {
   if (!line) return null;
   const edited = line.origPrice != null && line.origPrice !== line.price;
   const uri = imageUrl(line.image ?? null);
+  const memberPrice = lineMemberPrice(line);
+  const tagPrice = memberPriceToTagPrice(memberPrice);
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -41,14 +45,37 @@ export function ImagePreviewModal({
               {line.color}/{line.size}
             </Text>
             <View style={styles.priceRow}>
-              {edited ? (
-                <Text style={styles.orig} numberOfLines={1} allowFontScaling={false}>
-                  {yuan(line.origPrice!)}
-                </Text>
-              ) : null}
-              <Text style={styles.price} numberOfLines={1} allowFontScaling={false}>
-                {yuan(line.price)}
-              </Text>
+              {isMember ? (
+                <>
+                  <Text style={styles.orig} numberOfLines={1} allowFontScaling={false}>
+                    {yuan(tagPrice)}
+                  </Text>
+                  <Text
+                    style={[styles.price, styles.priceGold]}
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                  >
+                    {yuan(line.price)}
+                  </Text>
+                  <Text style={styles.memberTag} allowFontScaling={false}>
+                    会员价
+                  </Text>
+                </>
+              ) : (
+                <>
+                  {edited ? (
+                    <Text style={styles.orig} numberOfLines={1} allowFontScaling={false}>
+                      {yuan(line.origPrice!)}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.price} numberOfLines={1} allowFontScaling={false}>
+                    {yuan(line.price)}
+                  </Text>
+                  <Text style={styles.memberTag} numberOfLines={1} allowFontScaling={false}>
+                    会员{yuan(memberPrice)}
+                  </Text>
+                </>
+              )}
               <Text style={styles.unit} allowFontScaling={false}>
                 / 件
               </Text>
@@ -99,5 +126,7 @@ const styles = StyleSheet.create({
     textDecorationLine: "line-through",
   },
   price: { fontSize: 16, fontWeight: "800", color: "#101E3C" },
+  priceGold: { color: colors.gold },
+  memberTag: { fontSize: 11, fontWeight: "700", color: colors.gold },
   unit: { fontSize: 11, color: colors.textMuted },
 });

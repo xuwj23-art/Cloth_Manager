@@ -10,21 +10,24 @@ import {
   Text,
   TextInput,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import {
   CreateProductInput,
   expandSkuMatrix,
   HOT_CATEGORY_COUNT,
   HOT_MATERIAL_COUNT,
+  memberPriceToTagPrice,
   normalizeProductTitle,
   PRESET_CATEGORIES,
   PRESET_COLORS,
   PRESET_MATERIALS,
-  PRESET_SIZES,
+  PRESET_SIZE_GROUPS,
   SYSTEM_COLORS,
   VISION_ERROR_MESSAGES,
   type RecognizeGarmentResult,
@@ -35,6 +38,7 @@ import { BackButton } from "../components/BackButton";
 import { useDialog } from "../dialog-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { colors, font, radius, space, touch } from "../theme/tokens";
+import { yuan } from "../utils/format";
 import { isPickerCancelled, pickProductImage } from "../utils/image-pick";
 import { useKeyboardHeight, useKeyboardReveal } from "../utils/kb";
 import { Chip } from "./create-product/Chip";
@@ -84,17 +88,23 @@ export function CreateProductScreen() {
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
 
-  const [colorsSel, setColorsSel] = useState<string[]>([]);
-  const [sizes, setSizes] = useState<string[]>(["均码"]);
+  // 建档模型：单颜色（商品级）× 多尺码；颜色/进价/会员价全商品统一，仅尺码库存各异
+  const [colorSel, setColorSel] = useState("");
   const [customColor, setCustomColor] = useState("");
-  const [customSize, setCustomSize] = useState("");
+  const [sizes, setSizes] = useState<string[]>(["均码"]);
+  /** 各尺码初始库存（输入原始文本，默认 "1"；提交时统一校验） */
+  const [sizeQty, setSizeQty] = useState<Record<string, string>>({ 均码: "1" });
 
   const [costPrice, setCostPrice] = useState("");
   const [salePrice, setSalePrice] = useState("");
-  const [initialStock, setInitialStock] = useState("1");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 提交校验错误：红色提示显示在对应卡片底部，并自动滚动到该卡片 */
+  const [fieldErr, setFieldErr] = useState<{
+    field: "photos" | "name" | "price" | "sizes";
+    msg: string;
+  } | null>(null);
 
   const [recognizing, setRecognizing] = useState(false);
   const [overlayText, setOverlayText] = useState("正在识别正面图…");
@@ -106,9 +116,13 @@ export function CreateProductScreen() {
   } | null>(null);
 
   const photosFull = Boolean(photos.front && photos.back && photos.detail);
-  const effColors = colorsSel.length ? colorsSel : ["默认"];
-  const effSizes = sizes.length ? sizes : ["均码"];
-  const skuCount = effColors.length * effSizes.length;
+  /** 商品唯一颜色；未选回落「默认」 */
+  const effColor = colorSel.trim() || "默认";
+  /** 已勾选的尺码即全部尺码（减到 0 会自动取消勾选，不再回落「均码」） */
+  const effSizes = sizes;
+  const sizeCount = effSizes.length;
+  const sizeQtyOf = (s: string) => sizeQty[s] ?? "1";
+  const totalStock = effSizes.reduce((sum, s) => sum + (Number(sizeQtyOf(s)) || 0), 0);
 
   function composeName(nextMaterial: string, nextCategory: string) {
     const m = nextMaterial === "默认" ? "" : nextMaterial;
@@ -126,19 +140,28 @@ export function CreateProductScreen() {
     if (!nameTouched) setName(composeName(material, next));
   }
 
-  function toggle(list: string[], setList: (v: string[]) => void, value: string) {
-    setList(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
+  /** 勾选/取消尺码：新勾选的尺码初始化库存输入为 1 */
+  function toggleSize(s: string) {
+    setSizes((list) => (list.includes(s) ? list.filter((x) => x !== s) : [...list, s]));
+    setSizeQty((m) => (m[s] ? m : { ...m, [s]: "1" }));
+    setFieldErr(null);
   }
 
-  function addCustom(
-    raw: string,
-    list: string[],
-    setList: (v: string[]) => void,
-    clear: () => void,
-  ) {
-    const v = raw.trim();
-    if (v && !list.includes(v)) setList([...list, v]);
-    clear();
+  /** 尺码库存输入：只留数字，最长 4 位 */
+  function setQtyRaw(s: string, raw: string) {
+    const digits = raw.replace(/[^0-9]/g, "").slice(0, 4);
+    setSizeQty((m) => ({ ...m, [s]: digits }));
+  }
+
+  /** 步进调整：减到 0 视为不要该尺码，直接取消勾选（库存行一并收起） */
+  function bumpQty(s: string, delta: number) {
+    const cur = Number(sizeQtyOf(s)) || 0;
+    const next = Math.max(0, Math.min(9_999, cur + delta));
+    if (next <= 0) {
+      setSizes((list) => list.filter((x) => x !== s));
+      return;
+    }
+    setQtyRaw(s, String(next));
   }
 
   function addCustomMaterial() {
@@ -158,6 +181,14 @@ export function CreateProductScreen() {
     }
     setCustomCategory("");
     selectCategory(v);
+  }
+
+  /** 自定义颜色：直接选中为商品唯一颜色 */
+  function addCustomColor() {
+    const v = customColor.trim();
+    if (!v) return;
+    setColorSel(v.slice(0, 6));
+    setCustomColor("");
   }
 
   function pickImage(key: PhotoKey) {
@@ -234,46 +265,71 @@ export function CreateProductScreen() {
     ) {
       setExtraCategories((p) => [...p, draft.category]);
     }
-    setColorsSel(draft.colors);
+    // 单颜色模型：识图多色候选取第一个
+    setColorSel(draft.colors[0] ?? "");
     setFromVision(true);
     setMode("manual");
     setReviewOpen(false);
   }
 
   const preview = useMemo(() => {
-    const specText = `${effColors.join("/")} × ${effSizes.join("/")}`;
     const shown = name.trim() || composeName(material, category) || "（待填写名称）";
-    return `「${shown}」· ${skuCount} 个规格（${specText}）`;
-  }, [skuCount, effColors, effSizes, name, material, category]);
+    return `「${shown}」· ${effColor} · ${sizeCount} 个尺码 共 ${totalStock} 件`;
+  }, [effColor, sizeCount, totalStock, name, material, category]);
 
   async function submit() {
     setError(null);
+    setFieldErr(null);
+
+    /** 校验失败：错误显示在对应卡片底部并自动滚过去（用户不必翻页找原因） */
+    const fail = (field: "photos" | "name" | "price" | "sizes", msg: string) => {
+      setFieldErr({ field, msg });
+      const y = cardYRef.current[field] ?? 0;
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 72), animated: true });
+    };
+
     if (!photos.front || !photos.back || !photos.detail) {
-      return setError("请拍完三张图");
+      return fail("photos", "请拍完三张图");
     }
     const cost = !isOwner ? 0 : costPrice.trim() === "" ? 0 : toCents(costPrice);
-    const sale = toCents(salePrice);
-    const stock = initialStock.trim() === "" ? 0 : Number(initialStock);
+    const sale = salePrice.trim() === "" ? NaN : toCents(salePrice);
 
-    if (Number.isNaN(sale)) return setError("请填写有效的售价");
-    if (Number.isNaN(cost) || cost < 0) return setError("进价格式有误");
-    if (!Number.isInteger(stock) || stock < 0) return setError("库存需为非负整数");
+    if (Number.isNaN(sale)) return fail("price", "请填写有效的会员价");
+    if (Number.isNaN(cost) || cost < 0) return fail("price", "进价格式有误");
+
+    if (effSizes.length === 0) {
+      return fail("sizes", "请至少勾选一个尺码并为各尺码填写库存");
+    }
+
+    // 逐尺码库存：全部非负整数，且至少入库 1 件
+    const stockBySize: Record<string, number> = {};
+    for (const s of effSizes) {
+      const n = Number(sizeQtyOf(s));
+      if (!Number.isInteger(n) || n < 0) {
+        return fail("sizes", `尺码 ${s} 的库存需为非负整数`);
+      }
+      stockBySize[s] = n;
+    }
+    if (Object.values(stockBySize).reduce((a, b) => a + b, 0) <= 0) {
+      return fail("sizes", "至少入库 1 件，请为各尺码填写库存");
+    }
 
     const autoName = name.trim() || composeName(material, category);
     if (!autoName) {
-      return setError("请填写商品名称或选择品类");
+      return fail("name", "请填写商品名称或选择品类");
     }
-    const finalName = normalizeProductTitle(autoName, effColors[0] ?? "默认", category);
+    const finalName = normalizeProductTitle(autoName, effColor, category);
     if (finalName.length < 5) {
-      return setError("请填写商品名称或选择品类");
+      return fail("name", "请填写商品名称或选择品类");
     }
 
+    // 单颜色 × 多尺码：颜色/进价/会员价全商品统一，各尺码库存独立
     const skus = expandSkuMatrix({
-      colors: effColors,
+      colors: [effColor],
       sizes: effSizes,
       costPrice: cost,
       salePrice: sale,
-      initialStock: stock,
+      initialStockBySize: stockBySize,
     });
 
     const images = [photos.front, photos.back, photos.detail];
@@ -321,14 +377,37 @@ export function CreateProductScreen() {
     return base;
   })();
 
-  const colorChips = [...new Set([...PRESET_COLORS, ...SYSTEM_COLORS, ...colorsSel])];
-  const sizeChips = [...new Set(["均码", ...PRESET_SIZES.filter((s) => s !== "均码"), ...sizes])];
+  // 单颜色模型：预设 + 已选的自定义值（不再多选展开）
+  const colorChips = [
+    ...new Set([
+      ...PRESET_COLORS,
+      ...SYSTEM_COLORS,
+      ...(colorSel &&
+      !(PRESET_COLORS as readonly string[]).includes(colorSel) &&
+      !(SYSTEM_COLORS as readonly string[]).includes(colorSel)
+        ? [colorSel]
+        : []),
+    ]),
+  ];
+  // 会员价输入实时推导原价（÷0.7 四舍五入到元）；空输入/非法输入显示 —
+  // （toCents("") 会因 Number("")===0 返回 0，须先排除空串）
+  const saleCents = salePrice.trim() === "" ? NaN : toCents(salePrice);
+  const tagPriceText = Number.isNaN(saleCents)
+    ? "原价 —"
+    : `原价 ${yuan(memberPriceToTagPrice(saleCents))}`;
 
   const saveDisabled = submitting || salePrice.trim() === "" || !photosFull;
   const entryDisabled = !photosFull || !!uploadingKey;
 
   // 键盘避让：数字输入框聚焦时滚入可视区（Android resize 后 ScrollView 不自动跟随焦点）
   const scrollRef = useRef<ScrollView>(null);
+  // 各卡片在滚动区内的 y 坐标（onLayout 记录），供校验失败时自动滚动定位
+  const cardYRef = useRef<Record<string, number>>({});
+  const recordCardY =
+    (key: string) =>
+    ({ nativeEvent }: LayoutChangeEvent): void => {
+      cardYRef.current[key] = nativeEvent.layout.y;
+    };
   const scrollYRef = useRef(0);
   const kbPad = useKeyboardHeight();
   // 全量键盘避让：keyboardDidShow 后按「此刻聚焦」的输入框补位（免逐字段接线，无陈旧目标）
@@ -356,13 +435,16 @@ export function CreateProductScreen() {
           contentContainerStyle={[styles.content, { paddingBottom: 24 + kbPad }]}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.card}>
+          <View style={styles.card} onLayout={recordCardY("photos")}>
             <Text style={styles.sectionTitle}>商品照片</Text>
             <PhotoSlots photos={photos} uploadingKey={uploadingKey} onPressSlot={pickImage} />
+            {fieldErr?.field === "photos" ? (
+              <Text style={styles.fieldErrText}>{fieldErr.msg}</Text>
+            ) : null}
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>价格与库存</Text>
+          <View style={styles.card} onLayout={recordCardY("price")}>
+            <Text style={styles.sectionTitle}>价格</Text>
             <View style={styles.row}>
               {isOwner ? (
                 <View style={styles.priceCol}>
@@ -391,7 +473,7 @@ export function CreateProductScreen() {
                   adjustsFontSizeToFit
                   minimumFontScale={0.75}
                 >
-                  售价(元)
+                  会员价(元)
                 </Text>
                 <TextInput
                   style={styles.input}
@@ -399,26 +481,23 @@ export function CreateProductScreen() {
                   placeholder="必填"
                   placeholderTextColor={colors.textMuted}
                   value={salePrice}
-                  onChangeText={setSalePrice}
+                  onChangeText={(t) => {
+                    setSalePrice(t);
+                    if (fieldErr?.field === "price") setFieldErr(null);
+                  }}
                 />
-              </View>
-              <View style={styles.priceCol}>
-                <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
-                  库存
+                {/* 原价只读自动推导：原价 = 会员价 ÷ 0.7（四舍五入到元），顾客看原价、会员打 7 折 */}
+                <Text style={styles.tagPriceHint} numberOfLines={1}>
+                  {tagPriceText}
                 </Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="number-pad"
-                  placeholder="1"
-                  placeholderTextColor={colors.textMuted}
-                  value={initialStock}
-                  onChangeText={setInitialStock}
-                />
               </View>
             </View>
+            {fieldErr?.field === "price" ? (
+              <Text style={styles.fieldErrText}>{fieldErr.msg}</Text>
+            ) : null}
           </View>
 
-          <View style={styles.card}>
+          <View style={styles.card} onLayout={recordCardY("sizes")}>
             <View style={styles.pickerHeader}>
               <Text style={styles.sectionTitle}>材质</Text>
               {PRESET_MATERIALS.length > HOT_MATERIAL_COUNT ? (
@@ -448,39 +527,84 @@ export function CreateProductScreen() {
 
             <View style={styles.pickerHeader}>
               <Text style={styles.sectionTitle}>尺码</Text>
+              <Text style={styles.sizeTotal}>共 {totalStock} 件</Text>
             </View>
+            {/* 均码置顶（默认选中）+ 三组预设分区；尺码仅从预设中选，不再支持自定义 */}
             <View style={styles.chips}>
-              {sizeChips.map((s) => (
-                <Chip
-                  key={s}
-                  label={s}
-                  active={sizes.includes(s)}
-                  onPress={() => toggle(sizes, setSizes, s)}
-                />
-              ))}
-            </View>
-            <View style={styles.addRow}>
-              <TextInput
-                style={[styles.input, styles.flex1, styles.mini]}
-                placeholder="自定义尺码"
-                placeholderTextColor={colors.textMuted}
-                value={customSize}
-                onChangeText={setCustomSize}
-                onSubmitEditing={() =>
-                  addCustom(customSize, sizes, setSizes, () => setCustomSize(""))
-                }
+              <Chip
+                key="均码"
+                label="均码"
+                active={sizes.includes("均码")}
+                onPress={() => toggleSize("均码")}
               />
-              <Pressable
-                style={styles.miniAdd}
-                onPress={() => addCustom(customSize, sizes, setSizes, () => setCustomSize(""))}
-              >
-                <Text style={styles.miniAddText}>+</Text>
-              </Pressable>
             </View>
+            {PRESET_SIZE_GROUPS.map((g) => (
+              <View key={g.label}>
+                <Text style={styles.sizeGroupLabel}>{g.label}</Text>
+                <View style={styles.chips}>
+                  {g.sizes.map((s) => (
+                    <Chip
+                      key={s}
+                      label={s}
+                      active={sizes.includes(s)}
+                      onPress={() => toggleSize(s)}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))}
+
+            {/* 已选尺码逐码填库存：一行 = 尺码 + 数量步进；减到 0 自动取消勾选 */}
+            {effSizes.length > 0 ? (
+              <View style={styles.sizeQtyList}>
+                {effSizes.map((s) => (
+                  <View key={s} style={styles.sizeQtyRow}>
+                    <Text style={styles.sizeQtyLabel} numberOfLines={1}>
+                      {s}
+                    </Text>
+                    <View style={styles.qtyStepper}>
+                      <Pressable
+                        style={styles.qtyBtn}
+                        onPress={() => bumpQty(s, -1)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`减少 ${s} 库存`}
+                        hitSlop={6}
+                      >
+                        <Ionicons name="remove" size={15} color={colors.primary} />
+                      </Pressable>
+                      <TextInput
+                        style={styles.qtyInput}
+                        keyboardType="number-pad"
+                        value={sizeQtyOf(s)}
+                        onChangeText={(t) => setQtyRaw(s, t)}
+                        onBlur={() => {
+                          // 手动清零/置空同减到 0：视为不要该尺码，取消勾选
+                          if ((Number(sizeQtyOf(s)) || 0) <= 0) {
+                            setSizes((list) => list.filter((x) => x !== s));
+                          }
+                        }}
+                      />
+                      <Pressable
+                        style={styles.qtyBtn}
+                        onPress={() => bumpQty(s, 1)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`增加 ${s} 库存`}
+                        hitSlop={6}
+                      >
+                        <Ionicons name="add" size={15} color={colors.primary} />
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {fieldErr?.field === "sizes" ? (
+              <Text style={styles.fieldErrText}>{fieldErr.msg}</Text>
+            ) : null}
           </View>
 
           {mode === "manual" ? (
-            <View style={styles.card}>
+            <View style={styles.card} onLayout={recordCardY("name")}>
               <Text style={styles.sectionTitle}>名称</Text>
               <TextInput
                 style={styles.input}
@@ -490,9 +614,13 @@ export function CreateProductScreen() {
                 onChangeText={(t) => {
                   setNameTouched(true);
                   setName(t);
+                  if (fieldErr?.field === "name") setFieldErr(null);
                 }}
                 maxLength={60}
               />
+              {fieldErr?.field === "name" ? (
+                <Text style={styles.fieldErrText}>{fieldErr.msg}</Text>
+              ) : null}
 
               <View style={styles.pickerHeader}>
                 <Text style={styles.sectionTitle}>品类</Text>
@@ -526,14 +654,14 @@ export function CreateProductScreen() {
                 </Pressable>
               </View>
 
-              <Text style={[styles.sectionTitle, { marginTop: space.md }]}>颜色</Text>
+              <Text style={[styles.sectionTitle, { marginTop: space.md }]}>颜色（单选）</Text>
               <View style={styles.chips}>
                 {colorChips.map((c) => (
                   <Chip
                     key={c}
                     label={c}
-                    active={colorsSel.includes(c)}
-                    onPress={() => toggle(colorsSel, setColorsSel, c)}
+                    active={colorSel === c}
+                    onPress={() => setColorSel(colorSel === c ? "" : c)}
                   />
                 ))}
               </View>
@@ -544,16 +672,9 @@ export function CreateProductScreen() {
                   placeholderTextColor={colors.textMuted}
                   value={customColor}
                   onChangeText={setCustomColor}
-                  onSubmitEditing={() =>
-                    addCustom(customColor, colorsSel, setColorsSel, () => setCustomColor(""))
-                  }
+                  onSubmitEditing={addCustomColor}
                 />
-                <Pressable
-                  style={styles.miniAdd}
-                  onPress={() =>
-                    addCustom(customColor, colorsSel, setColorsSel, () => setCustomColor(""))
-                  }
-                >
+                <Pressable style={styles.miniAdd} onPress={addCustomColor}>
                   <Text style={styles.miniAddText}>+</Text>
                 </Pressable>
               </View>
@@ -706,6 +827,69 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: space.sm,
     fontWeight: "600",
+    includeFontPadding: false,
+  },
+  /** 会员价输入框下方的只读原价（自动推导 ÷0.7） */
+  tagPriceHint: {
+    fontSize: font.caption,
+    lineHeight: 16,
+    color: colors.gold,
+    fontWeight: "700",
+    marginTop: 4,
+    includeFontPadding: false,
+  },
+  /** 尺码分组小标题（字母码/女装码/裤装码/自定义） */
+  sizeGroupLabel: {
+    fontSize: font.caption,
+    color: colors.textMuted,
+    fontWeight: "700",
+    marginTop: space.sm,
+  },
+  /** 尺码区标题右侧的总件数 */
+  sizeTotal: { fontSize: font.caption, fontWeight: "800", color: colors.primary },
+  /** 校验失败的就近红色提示（卡片底部） */
+  fieldErrText: {
+    fontSize: font.caption + 1,
+    fontWeight: "700",
+    color: colors.danger,
+    marginTop: 8,
+  },
+  /** 已选尺码的逐码库存清单 */
+  sizeQtyList: {
+    marginTop: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: space.sm,
+    gap: 8,
+  },
+  sizeQtyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 40,
+  },
+  sizeQtyLabel: { fontSize: font.body + 1, fontWeight: "800", color: colors.text, flexShrink: 1 },
+  qtyStepper: { flexDirection: "row", alignItems: "center", gap: 6 },
+  qtyBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qtyInput: {
+    width: 64,
+    height: 36,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg,
+    textAlign: "center",
+    fontSize: font.body,
+    fontWeight: "700",
+    color: colors.text,
+    paddingVertical: 0,
     includeFontPadding: false,
   },
   input: {

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -15,13 +16,15 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   HOT_CATEGORY_COUNT,
   HOT_MATERIAL_COUNT,
+  memberPriceToTagPrice,
   PRESET_CATEGORIES,
   PRESET_COLORS,
   PRESET_MATERIALS,
-  PRESET_SIZES,
+  PRESET_SIZE_GROUPS,
   SYSTEM_COLORS,
   TITLE_MAX,
   TITLE_MIN,
+  type CreateSkuInput,
   type ProductWithSkus,
   type UpdateSkuInput,
 } from "@cloth-scan/shared";
@@ -68,24 +71,33 @@ function initialPhotos(product: {
   };
 }
 
+/**
+ * SKU 编辑行（单颜色模型）：颜色/进价/会员价为商品级统一字段，行内只有尺码+库存。
+ * isNew 行为本次编辑新增的尺码（保存时走 addSkus）；删除的既有行记入 removeIds（软删）。
+ */
 interface SkuDraft {
   id: string;
-  color: string;
   size: string;
-  costPrice: string;
-  salePrice: string;
   stock: string;
+  isNew?: boolean;
 }
 
 function skuDrafts(product: ProductWithSkus): SkuDraft[] {
   return product.skus.map((s) => ({
     id: s.id,
-    color: s.color,
     size: s.size,
-    costPrice: centsToYuan(s.costPrice),
-    salePrice: centsToYuan(s.salePrice),
     stock: String(s.stock),
   }));
+}
+
+/** 商品级统一字段的初始值：取第一个 SKU（颜色/进价/会员价全商品一致） */
+function productLevelDefaults(p: ProductWithSkus) {
+  const first = p.skus[0];
+  return {
+    color: first?.color ?? "",
+    costPrice: first ? centsToYuan(first.costPrice) : "",
+    salePrice: first ? centsToYuan(first.salePrice) : "",
+  };
 }
 
 const COLOR_PRESETS: string[] = [...PRESET_COLORS, ...SYSTEM_COLORS];
@@ -124,6 +136,24 @@ export function EditProductScreen() {
   const [materialsExpanded, setMaterialsExpanded] = useState(false);
   const [categoriesExpanded, setCategoriesExpanded] = useState(false);
   const [skus, setSkus] = useState<SkuDraft[]>(() => skuDrafts(savedRef.current));
+  /** 本次编辑删除的既有 SKU id（保存时软删） */
+  const [removeIds, setRemoveIds] = useState<string[]>([]);
+  /** 尺码编辑弹层：pick = 当前选中尺码（保存/取消/删除） */
+  const [editPicker, setEditPicker] = useState<{
+    draftId: string;
+    pick: string;
+    err?: string;
+  } | null>(null);
+  /** 新增尺码弹层：pick = 选中尺码，qty = 初始库存 */
+  const [addPicker, setAddPicker] = useState<{ pick: string; qty: string; err?: string } | null>(
+    null,
+  );
+  // 商品级统一字段：单颜色 + 统一进价/会员价
+  const defaults = useMemo(() => productLevelDefaults(savedRef.current), []);
+  const [colorSel, setColorSel] = useState(defaults.color);
+  const [customColor, setCustomColor] = useState("");
+  const [costPrice, setCostPrice] = useState(defaults.costPrice);
+  const [salePrice, setSalePrice] = useState(defaults.salePrice);
   const [saving, setSaving] = useState(false);
   const archived = !!savedRef.current.archivedAt;
 
@@ -153,9 +183,17 @@ export function EditProductScreen() {
     );
     setCustomMaterial("");
     setCustomCategory("");
+    setCustomColor("");
     setMaterialsExpanded(false);
     setCategoriesExpanded(false);
     setSkus(skuDrafts(p));
+    setRemoveIds([]);
+    setEditPicker(null);
+    setAddPicker(null);
+    const d = productLevelDefaults(p);
+    setColorSel(d.color);
+    setCostPrice(d.costPrice);
+    setSalePrice(d.salePrice);
     setPickingKey(null);
   }
 
@@ -173,8 +211,72 @@ export function EditProductScreen() {
     return unsub;
   }, [navigation, editing]);
 
-  function patchSku(id: string, patch: Partial<SkuDraft>) {
-    setSkus((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  /** 步进调整某行库存（0 = 该码售罄，允许；不要该码走尺码弹层的删除） */
+  function bumpStock(draftId: string, delta: number) {
+    setSkus((prev) =>
+      prev.map((s) =>
+        s.id === draftId
+          ? { ...s, stock: String(Math.max(0, Math.min(9_999, (Number(s.stock) || 0) + delta))) }
+          : s,
+      ),
+    );
+  }
+
+  function setStockRaw(draftId: string, raw: string) {
+    const digits = raw.replace(/[^0-9]/g, "").slice(0, 4);
+    setSkus((prev) => prev.map((s) => (s.id === draftId ? { ...s, stock: digits } : s)));
+  }
+
+  /** 尺码弹层-保存：改为新选尺码（与其他行查重） */
+  function confirmEditSize() {
+    if (!editPicker) return;
+    const { draftId, pick } = editPicker;
+    if (!pick) {
+      setEditPicker({ ...editPicker, err: "请选择尺码" });
+      return;
+    }
+    if (skus.some((s) => s.id !== draftId && s.size === pick)) {
+      setEditPicker({ ...editPicker, err: `尺码 ${pick} 已存在` });
+      return;
+    }
+    setSkus((prev) => prev.map((s) => (s.id === draftId ? { ...s, size: pick } : s)));
+    setEditPicker(null);
+  }
+
+  /** 尺码弹层-删除：新增行直接移除；既有行记入软删名单（保存才生效） */
+  function removeDraft(draftId: string) {
+    const draft = skus.find((s) => s.id === draftId);
+    setSkus((prev) => prev.filter((s) => s.id !== draftId));
+    if (draft && !draft.isNew) {
+      setRemoveIds((prev) => (prev.includes(draftId) ? prev : [...prev, draftId]));
+    }
+    setEditPicker(null);
+  }
+
+  /** 新增尺码弹层-添加 */
+  function confirmAddSize() {
+    if (!addPicker) return;
+    const { pick, qty } = addPicker;
+    if (!pick) {
+      setAddPicker({ ...addPicker, err: "请选择尺码" });
+      return;
+    }
+    if (skus.some((s) => s.size === pick)) {
+      setAddPicker({ ...addPicker, err: `尺码 ${pick} 已存在` });
+      return;
+    }
+    const stock = Math.max(1, Number(qty) || 1);
+    setSkus((prev) => [
+      ...prev,
+      { id: `new-${Date.now()}`, size: pick, stock: String(stock), isNew: true },
+    ]);
+    setAddPicker(null);
+  }
+
+  function bumpAddQty(delta: number) {
+    if (!addPicker) return;
+    const next = Math.max(1, Math.min(9_999, (Number(addPicker.qty) || 1) + delta));
+    setAddPicker({ ...addPicker, qty: String(next), err: undefined });
   }
 
   async function pickFrom(key: PhotoKey, fromCamera: boolean) {
@@ -235,44 +337,62 @@ export function EditProductScreen() {
       await notice("商品名称有误", `请填写 ${TITLE_MIN}～${TITLE_MAX} 个字`);
       return;
     }
+    // 商品级统一字段：颜色/进价/会员价
+    const nextColor = colorSel.trim();
+    const costCents = yuanToCents(costPrice); // 空输入按 0（选填）
+    const saleCents = yuanToCents(salePrice);
+    if (!nextColor) {
+      await notice("请选择颜色");
+      return;
+    }
+    if (saleCents === null) {
+      await notice("会员价有误");
+      return;
+    }
+
+    if (skus.length === 0) {
+      await notice("至少保留一个尺码");
+      return;
+    }
+    const prevById = new Map(savedRef.current.skus.map((s) => [s.id, s]));
     const skuInputs: UpdateSkuInput[] = [];
+    const addInputs: CreateSkuInput[] = [];
     const specKeys = new Set<string>();
     for (const s of skus) {
-      const color = s.color.trim();
       const size = s.size.trim();
-      if (!color || !size) {
-        await notice("请填写颜色和尺码");
+      if (!size) {
+        await notice("请填写尺码");
         return;
       }
-      const specKey = `${color}\u0000${size}`;
+      const specKey = `${nextColor}\u0000${size}`;
       if (specKeys.has(specKey)) {
-        await notice("规格重复", "同一商品下颜色和尺码不能重复");
+        await notice("尺码重复", `尺码 ${size} 已存在`);
         return;
       }
       specKeys.add(specKey);
-      const cents = yuanToCents(s.salePrice);
-      if (cents === null) {
-        await notice("售价有误", `${color}/${size}`);
-        return;
-      }
-      const costCents = yuanToCents(s.costPrice);
-      if (costCents === null) {
-        await notice("进价有误", `${color}/${size}`);
-        return;
-      }
       const stock = Number(s.stock);
       if (!Number.isInteger(stock) || stock < 0) {
-        await notice("库存有误", `${color}/${size}`);
+        await notice("库存有误", `${size}`);
         return;
       }
-      skuInputs.push({
-        id: s.id,
-        color,
-        size,
-        costPrice: costCents,
-        salePrice: cents,
-        stock,
-      });
+      if (s.isNew) {
+        addInputs.push({
+          color: nextColor,
+          size,
+          costPrice: costCents ?? 0,
+          salePrice: saleCents,
+          initialStock: stock,
+        });
+        continue;
+      }
+      // 既有行：统一颜色/价格与原值不同才下发；尺码/库存始终带
+      const prev = prevById.get(s.id);
+      const input: UpdateSkuInput = { id: s.id, stock };
+      if (size !== prev?.size) input.size = size;
+      if (prev && nextColor !== prev.color) input.color = nextColor;
+      if (prev && costCents !== null && costCents !== prev.costPrice) input.costPrice = costCents;
+      if (prev && saleCents !== prev.salePrice) input.salePrice = saleCents;
+      skuInputs.push(input);
     }
     const images = [photos.front, photos.back, photos.detail].filter((x): x is string =>
       Boolean(x),
@@ -285,6 +405,8 @@ export function EditProductScreen() {
         material: material || null,
         categoryName: category || null,
         skus: skuInputs,
+        addSkus: addInputs.length > 0 ? addInputs : undefined,
+        removeSkuIds: removeIds.length > 0 ? removeIds : undefined,
       });
       savedRef.current = updated;
       hydrate(updated);
@@ -328,6 +450,23 @@ export function EditProductScreen() {
     if (category && !base.includes(category)) base.push(category);
     return base;
   })();
+  /** 颜色单选芯片：预设 + 当前自定义值 */
+  const editColorChips = (() => {
+    const all = [...COLOR_PRESETS];
+    if (colorSel && !all.includes(colorSel)) all.push(colorSel);
+    return all;
+  })();
+  /** 输入中的会员价（分）；只读态与编辑态共用（hydrate 后即 skus[0] 值） */
+  const saleCents = yuanToCents(salePrice);
+  /** 历史多色商品：行标签带颜色前缀；单色商品仅显示尺码 */
+  const singleColor = new Set(savedRef.current.skus.map((s) => s.color)).size <= 1;
+
+  function addCustomColor() {
+    const v = customColor.trim();
+    if (!v) return;
+    setColorSel(v.slice(0, 6));
+    setCustomColor("");
+  }
 
   return (
     <KeyboardAvoidingView
@@ -457,9 +596,37 @@ export function EditProductScreen() {
                   placeholderTextColor={colors.textMuted}
                   value={customCategory}
                   onChangeText={setCustomCategory}
-                  onSubmitEditing={() => addCustomCategory()}
+                  onSubmitEditing={addCustomCategory}
                 />
-                <Pressable style={styles.miniAdd} onPress={() => addCustomCategory()}>
+                <Pressable style={styles.miniAdd} onPress={addCustomCategory}>
+                  <Text style={styles.miniAddText}>+</Text>
+                </Pressable>
+              </View>
+
+              {/* 单颜色模型：颜色为商品级单选，保存时统一应用到全部 SKU */}
+              <View style={styles.pickerHeader}>
+                <Text style={styles.sectionTitle}>颜色（单选）</Text>
+              </View>
+              <View style={styles.chips}>
+                {editColorChips.map((c) => (
+                  <Chip
+                    key={c}
+                    label={c}
+                    active={colorSel === c}
+                    onPress={() => setColorSel(colorSel === c ? "" : c)}
+                  />
+                ))}
+              </View>
+              <View style={styles.addRow}>
+                <TextInput
+                  style={[styles.input, styles.flex1, styles.mini]}
+                  placeholder="自定义颜色"
+                  placeholderTextColor={colors.textMuted}
+                  value={customColor}
+                  onChangeText={setCustomColor}
+                  onSubmitEditing={addCustomColor}
+                />
+                <Pressable style={styles.miniAdd} onPress={addCustomColor}>
                   <Text style={styles.miniAddText}>+</Text>
                 </Pressable>
               </View>
@@ -474,108 +641,283 @@ export function EditProductScreen() {
                 <Text style={styles.infoLabel}>品类</Text>
                 <Text style={styles.infoValue}>{category || "—"}</Text>
               </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>颜色</Text>
+                <Text style={styles.infoValue}>{colorSel || "—"}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>价格</Text>
+                <Text style={styles.infoValue}>
+                  {saleCents === null
+                    ? "—"
+                    : `会员 ${yuan(saleCents)} · 原价 ${yuan(memberPriceToTagPrice(saleCents))}`}
+                </Text>
+              </View>
             </>
           )}
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>规格 · 售价 · 库存</Text>
-          {skus.map((s) => {
-            const cents = yuanToCents(s.salePrice);
-            const colorChips = COLOR_PRESETS.includes(s.color)
-              ? COLOR_PRESETS
-              : [...COLOR_PRESETS, s.color];
-            const sizeChips = (PRESET_SIZES as readonly string[]).includes(s.size)
-              ? [...PRESET_SIZES]
-              : [...PRESET_SIZES, s.size];
-            return editing ? (
-              <View key={s.id} style={styles.skuEdit}>
-                <Text style={styles.skuEditTitle}>
-                  {s.color.trim() || "颜色"} / {s.size.trim() || "尺码"}
+        {/* 价格卡：进价/会员价全商品统一 */}
+        {editing ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>价格</Text>
+            <View style={styles.skuPriceRow}>
+              <View style={styles.fieldGrow}>
+                <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
+                  进价(元)
                 </Text>
-                <Text style={styles.fieldLabel}>颜色</Text>
                 <TextInput
-                  style={styles.input}
-                  value={s.color}
-                  onChangeText={(t) => patchSku(s.id, { color: t })}
-                  maxLength={40}
+                  style={styles.fieldInput}
+                  keyboardType="decimal-pad"
+                  value={costPrice}
+                  onChangeText={setCostPrice}
                 />
-                <View style={styles.chips}>
-                  {colorChips.map((c) => (
-                    <Chip
-                      key={c}
-                      label={c}
-                      active={s.color === c}
-                      onPress={() => patchSku(s.id, { color: c })}
-                    />
-                  ))}
-                </View>
-                <Text style={[styles.fieldLabel, { marginTop: 8 }]}>尺码</Text>
+              </View>
+              <View style={styles.fieldGrow}>
+                <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
+                  会员价(元)
+                </Text>
                 <TextInput
-                  style={styles.input}
-                  value={s.size}
-                  onChangeText={(t) => patchSku(s.id, { size: t })}
-                  maxLength={20}
+                  style={styles.fieldInput}
+                  keyboardType="decimal-pad"
+                  value={salePrice}
+                  onChangeText={setSalePrice}
                 />
-                <View style={styles.chips}>
-                  {sizeChips.map((sz) => (
-                    <Chip
-                      key={sz}
-                      label={sz}
-                      active={s.size === sz}
-                      onPress={() => patchSku(s.id, { size: sz })}
-                    />
-                  ))}
-                </View>
-                <View style={styles.skuPriceRow}>
-                  <View style={styles.fieldGrow}>
-                    <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
-                      进价(元)
-                    </Text>
-                    <TextInput
-                      style={styles.fieldInput}
-                      keyboardType="decimal-pad"
-                      value={s.costPrice}
-                      onChangeText={(t) => patchSku(s.id, { costPrice: t })}
-                    />
-                  </View>
-                  <View style={styles.fieldGrow}>
-                    <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
-                      售价(元)
-                    </Text>
-                    <TextInput
-                      style={styles.fieldInput}
-                      keyboardType="decimal-pad"
-                      value={s.salePrice}
-                      onChangeText={(t) => patchSku(s.id, { salePrice: t })}
-                    />
-                  </View>
-                  <View style={styles.fieldGrow}>
-                    <Text style={styles.fieldLabel} numberOfLines={1} adjustsFontSizeToFit>
-                      库存
-                    </Text>
-                    <TextInput
-                      style={styles.fieldInput}
-                      keyboardType="number-pad"
-                      value={s.stock}
-                      onChangeText={(t) => patchSku(s.id, { stock: t })}
-                    />
-                  </View>
+                <Text style={styles.tagPriceHint} numberOfLines={1}>
+                  原价 {saleCents === null ? "—" : yuan(memberPriceToTagPrice(saleCents))}
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.card}>
+          <View style={styles.sizeHeader}>
+            <Text style={styles.sectionTitle}>尺码与库存</Text>
+            {editing ? (
+              <Pressable
+                style={styles.addSizeBtn}
+                onPress={() => setAddPicker({ pick: "", qty: "1" })}
+                accessibilityRole="button"
+                accessibilityLabel="新增尺码"
+                hitSlop={10}
+              >
+                <Ionicons name="add" size={12} color="#fff" />
+              </Pressable>
+            ) : null}
+          </View>
+          {skus.map((s, idx) =>
+            editing ? (
+              /* 编辑行：尺码按钮（弹层改码/删除）+ 库存步进器，交互与建档一致 */
+              <View
+                key={s.id}
+                style={[styles.skuEditRow, idx === skus.length - 1 && styles.skuEditRowLast]}
+              >
+                <Pressable
+                  style={styles.skuSizeBtn}
+                  onPress={() => setEditPicker({ draftId: s.id, pick: s.size })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`修改尺码 ${s.size}`}
+                >
+                  <Text style={styles.skuSizeBtnText} numberOfLines={1}>
+                    {s.size}
+                  </Text>
+                </Pressable>
+                <View style={styles.qtyStepper}>
+                  <Pressable
+                    style={styles.qtyBtn}
+                    onPress={() => bumpStock(s.id, -1)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`减少 ${s.size} 库存`}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="remove" size={15} color={colors.primary} />
+                  </Pressable>
+                  <TextInput
+                    style={styles.qtyInput}
+                    keyboardType="number-pad"
+                    value={s.stock}
+                    onChangeText={(t) => setStockRaw(s.id, t)}
+                    onBlur={() => setStockRaw(s.id, s.stock || "0")}
+                  />
+                  <Pressable
+                    style={styles.qtyBtn}
+                    onPress={() => bumpStock(s.id, 1)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`增加 ${s.size} 库存`}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="add" size={15} color={colors.primary} />
+                  </Pressable>
                 </View>
               </View>
             ) : (
-              <View key={s.id} style={styles.skuRow}>
-                <Text style={styles.skuSpec}>
-                  {s.color}/{s.size}
-                </Text>
-                <View style={styles.skuViewRight}>
-                  <Text style={styles.skuPrice}>{cents === null ? s.salePrice : yuan(cents)}</Text>
+              savedRef.current.skus.map((s) => (
+                <View key={s.id} style={styles.skuRow}>
+                  <Text style={styles.skuSpec}>
+                    {singleColor ? s.size : `${s.color}/${s.size}`}
+                  </Text>
                   <Text style={styles.skuStock}>库存 {s.stock}</Text>
                 </View>
-              </View>
-            );
-          })}
+              ))
+            ),
+          )}
         </View>
+
+        {/* 尺码编辑弹层：三组+均码单选；保存=改码，删除=删该码（软删），取消 */}
+        <Modal
+          visible={!!editPicker}
+          transparent
+          animationType="none"
+          onRequestClose={() => setEditPicker(null)}
+        >
+          <Pressable style={styles.pickerBackdrop} onPress={() => setEditPicker(null)} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.pickerCenter}
+          >
+            <View style={styles.pickerSheet}>
+              <Text style={styles.pickerTitle}>选择尺码</Text>
+              <ScrollView style={styles.pickerScroll}>
+                <View style={styles.chips}>
+                  <Chip
+                    key="均码"
+                    label="均码"
+                    active={editPicker?.pick === "均码"}
+                    onPress={() =>
+                      editPicker && setEditPicker({ ...editPicker, pick: "均码", err: undefined })
+                    }
+                  />
+                </View>
+                {PRESET_SIZE_GROUPS.map((g) => (
+                  <View key={g.label}>
+                    <Text style={styles.pickerGroupLabel}>{g.label}</Text>
+                    <View style={styles.chips}>
+                      {g.sizes.map((sz) => (
+                        <Chip
+                          key={sz}
+                          label={sz}
+                          active={editPicker?.pick === sz}
+                          onPress={() =>
+                            editPicker && setEditPicker({ ...editPicker, pick: sz, err: undefined })
+                          }
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+              {editPicker?.err ? <Text style={styles.pickerErr}>{editPicker.err}</Text> : null}
+              <View style={styles.pickerActions}>
+                <Pressable
+                  style={styles.pickerDangerBtn}
+                  onPress={() => editPicker && removeDraft(editPicker.draftId)}
+                >
+                  <Text style={styles.pickerDangerText}>删除</Text>
+                </Pressable>
+                <Pressable style={styles.pickerSecondaryBtn} onPress={() => setEditPicker(null)}>
+                  <Text style={styles.pickerSecondaryText}>取消</Text>
+                </Pressable>
+                <Pressable style={styles.pickerPrimaryBtn} onPress={confirmEditSize}>
+                  <Text style={styles.pickerPrimaryText}>保存</Text>
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* 新增尺码弹层：选尺码 + 初始库存；添加/取消 */}
+        <Modal
+          visible={!!addPicker}
+          transparent
+          animationType="none"
+          onRequestClose={() => setAddPicker(null)}
+        >
+          <Pressable style={styles.pickerBackdrop} onPress={() => setAddPicker(null)} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={styles.pickerCenter}
+          >
+            <View style={styles.pickerSheet}>
+              <Text style={styles.pickerTitle}>新增尺码</Text>
+              <ScrollView style={styles.pickerScroll}>
+                <View style={styles.chips}>
+                  <Chip
+                    key="均码"
+                    label="均码"
+                    active={addPicker?.pick === "均码"}
+                    onPress={() =>
+                      addPicker && setAddPicker({ ...addPicker, pick: "均码", err: undefined })
+                    }
+                  />
+                </View>
+                {PRESET_SIZE_GROUPS.map((g) => (
+                  <View key={g.label}>
+                    <Text style={styles.pickerGroupLabel}>{g.label}</Text>
+                    <View style={styles.chips}>
+                      {g.sizes.map((sz) => (
+                        <Chip
+                          key={sz}
+                          label={sz}
+                          active={addPicker?.pick === sz}
+                          onPress={() =>
+                            addPicker && setAddPicker({ ...addPicker, pick: sz, err: undefined })
+                          }
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ))}
+                {/* 初始库存步进（与建档交互一致） */}
+                <View style={styles.addQtyRow}>
+                  <Text style={styles.addQtyLabel}>入库数量</Text>
+                  <View style={styles.qtyStepper}>
+                    <Pressable
+                      style={styles.qtyBtn}
+                      onPress={() => bumpAddQty(-1)}
+                      accessibilityRole="button"
+                      accessibilityLabel="减少数量"
+                      hitSlop={6}
+                    >
+                      <Ionicons name="remove" size={15} color={colors.primary} />
+                    </Pressable>
+                    <TextInput
+                      style={styles.qtyInput}
+                      keyboardType="number-pad"
+                      value={addPicker?.qty ?? "1"}
+                      onChangeText={(t) =>
+                        addPicker &&
+                        setAddPicker({
+                          ...addPicker,
+                          qty: t.replace(/[^0-9]/g, "").slice(0, 4),
+                          err: undefined,
+                        })
+                      }
+                    />
+                    <Pressable
+                      style={styles.qtyBtn}
+                      onPress={() => bumpAddQty(1)}
+                      accessibilityRole="button"
+                      accessibilityLabel="增加数量"
+                      hitSlop={6}
+                    >
+                      <Ionicons name="add" size={15} color={colors.primary} />
+                    </Pressable>
+                  </View>
+                </View>
+              </ScrollView>
+              {addPicker?.err ? <Text style={styles.pickerErr}>{addPicker.err}</Text> : null}
+              <View style={styles.pickerActions}>
+                <Pressable style={styles.pickerSecondaryBtn} onPress={() => setAddPicker(null)}>
+                  <Text style={styles.pickerSecondaryText}>取消</Text>
+                </Pressable>
+                <Pressable style={styles.pickerPrimaryBtn} onPress={confirmAddSize}>
+                  <Text style={styles.pickerPrimaryText}>添加</Text>
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {!editing ? (
           <>
@@ -721,13 +1063,155 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     gap: 4,
   },
+  /** 尺码卡标题行：标题钉在左上角（与其他卡片标题平齐），右侧小圆钮不撑高、不挤占标题；
+   *  marginBottom 让首个尺码行与标题留出呼吸距离 */
+  sizeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  /** 卡片标题行的「+」小圆形图标按钮（新增尺码）；marginTop 与标题文字一致，保证中心对齐 */
+  addSizeBtn: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  /** 编辑态 SKU 行：尺码按钮 + 库存步进器 */
+  skuEditRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    minHeight: 52,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  skuEditRowLast: { borderBottomWidth: 0 },
+  /** 尺码胶囊按键：内容居中，点击弹二级选择（改码/删除） */
+  skuSizeBtn: {
+    minWidth: 64,
+    height: 36,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    backgroundColor: colors.card,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  skuSizeBtnText: { fontSize: font.body, fontWeight: "700", color: colors.text },
+  /** 库存步进器（与建档一致） */
+  qtyStepper: { flexDirection: "row", alignItems: "center", gap: 6 },
+  qtyBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qtyInput: {
+    width: 64,
+    height: 36,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg,
+    textAlign: "center",
+    fontSize: font.body,
+    fontWeight: "700",
+    color: colors.text,
+    paddingVertical: 0,
+    includeFontPadding: false,
+  },
   skuEditTitle: { fontSize: font.body, fontWeight: "700", color: colors.text, marginBottom: 4 },
+  /** 尺码弹层（编辑/新增共用）：遮罩 + 居中卡片 */
+  pickerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(13,22,44,0.45)",
+  },
+  pickerCenter: { flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl },
+  pickerSheet: {
+    width: "100%",
+    maxHeight: "78%",
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    padding: space.lg,
+    gap: space.sm,
+  },
+  pickerTitle: {
+    fontSize: font.title,
+    fontWeight: "800",
+    color: colors.text,
+    textAlign: "center",
+  },
+  pickerScroll: { flexGrow: 0 },
+  pickerGroupLabel: {
+    fontSize: font.caption,
+    color: colors.textMuted,
+    fontWeight: "700",
+    marginTop: space.sm,
+  },
+  pickerErr: {
+    fontSize: font.caption,
+    fontWeight: "700",
+    color: colors.danger,
+    textAlign: "center",
+  },
+  pickerActions: { flexDirection: "row", gap: space.sm, marginTop: space.xs },
+  pickerDangerBtn: {
+    height: 46,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pickerDangerText: { fontSize: font.body, fontWeight: "700", color: colors.danger },
+  pickerSecondaryBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pickerSecondaryText: { fontSize: font.body, fontWeight: "700", color: colors.textMuted },
+  pickerPrimaryBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pickerPrimaryText: { fontSize: font.body, fontWeight: "800", color: "#fff" },
+  /** 新增弹层的入库数量行 */
+  addQtyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: space.md,
+  },
+  addQtyLabel: { fontSize: font.body, fontWeight: "700", color: colors.text },
   skuSpec: { flex: 1, fontSize: font.body, fontWeight: "600", color: colors.text },
   skuViewRight: { alignItems: "flex-end", gap: 2 },
-  skuPrice: { fontSize: font.body, fontWeight: "800", color: colors.primary },
   skuStock: { fontSize: font.caption, color: colors.textMuted },
   skuPriceRow: { flexDirection: "row", gap: 8, marginTop: 8 },
   fieldGrow: { flex: 1, minWidth: 0, gap: 4 },
+  /** 会员价输入框下方的只读原价提示 */
+  tagPriceHint: { fontSize: 11, lineHeight: 14, color: colors.gold, fontWeight: "700" },
   fieldLabel: {
     fontSize: 12,
     lineHeight: 16,

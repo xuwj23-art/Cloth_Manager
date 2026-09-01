@@ -133,7 +133,7 @@ export function ProductsScreen() {
                   <Text style={styles.meta}>
                     {item.skus.length} 个 SKU · 库存 {totalStock}
                   </Text>
-                  <Text style={styles.price}>{yuan(minPrice)} 起</Text>
+                  <Text style={styles.price}>会员价 {yuan(minPrice)} 起</Text>
                 </View>
                 {scope === "archived" && isOwner ? (
                   <Pressable

@@ -11,15 +11,14 @@ const fadeMs = 150;
 type Tab = "zhe" | "total";
 
 /**
- * 整单优惠 Sheet（打折 zhe / 改价 total 两 tab）。
+ * 整单优惠/加价 Sheet（打折 zhe / 改价 total 两 tab）。
  *
- * 第 2 波 Task 4：改用订单级 orderDiscountCents 字段，不再调 distributeOrderTotal
- * 把优惠摊到各行单价。各行 price 保持原价，优惠 = 原价合计 − 目标总价，单独提交。
- *
- * - 打折 tab：输入 9.5 = 9.5 折 → 目标总价 = round(orig * value / 10)
- * - 改价 tab：输入优惠后总价（元）→ 目标总价 = round(value * 100)
- * - 确定：setOrderDiscount(max(0, orig − 目标总价))
- * - 清除优惠：setOrderDiscount(0)
+ * 用订单级 orderDiscountCents 字段，不把差额摊到各行单价。
+ * 各行 price 保持原价，差额 = 原价合计 − 目标总价，单独提交：
+ * - 打折 tab：输入 9.5 = 9.5 折；输入 >10（如 12）= 上浮加价
+ * - 改价 tab：输入目标总价（元），可高于原价合计（= 整单加价）
+ * - 确定：setOrderDiscount(原价合计 − 目标总价)，可为负（负 = 加价）
+ * - 清除：setOrderDiscount(0)
  */
 export function DiscountSheet() {
   const open = useCashierStore((s) => s.activeSheet === "discount");
@@ -40,8 +39,8 @@ export function DiscountSheet() {
   // 以免每次改车后预填被反复覆盖）
   useEffect(() => {
     if (!open) return;
-    if (orderDiscountCents > 0) {
-      // 反推：若有优惠，默认进 total tab，回填优惠后总价
+    if (orderDiscountCents !== 0) {
+      // 反推：若已有优惠/加价，默认进 total tab，回填优惠后总价
       setTab("total");
       setInput(((orig - orderDiscountCents) / 100).toFixed(2));
     } else {
@@ -64,23 +63,21 @@ export function DiscountSheet() {
   function confirm() {
     const n = Number(input);
     if (tab === "zhe") {
-      if (!Number.isFinite(n) || n <= 0 || n >= 10) {
-        setError("折扣需在 0～10 之间");
+      // 允许 >10 折（如 12 = 上浮 20%），只要为正
+      if (!Number.isFinite(n) || n <= 0) {
+        setError("折扣需大于 0");
         return;
       }
-      const target = Math.min(orig, Math.round((orig * n) / 10));
-      setOrderDiscount(Math.max(0, orig - target));
+      const target = Math.round((orig * n) / 10);
+      setOrderDiscount(orig - target);
     } else {
+      // 目标总价可高于原价合计（差额为负 = 整单加价），但不得为负数
       if (!Number.isFinite(n) || n < 0) {
         setError("金额有误");
         return;
       }
       const cents = Math.round(n * 100);
-      if (cents >= orig) {
-        setError("需低于原价");
-        return;
-      }
-      setOrderDiscount(Math.max(0, orig - cents));
+      setOrderDiscount(orig - cents);
     }
     close();
   }
@@ -90,7 +87,7 @@ export function DiscountSheet() {
       <Pressable style={cashierStyles.backdrop} onPress={close} />
       {open ? (
         <Animated.View entering={FadeIn.duration(fadeMs)} style={cashierStyles.centerSheet}>
-          <Text style={cashierStyles.titleText}>整单优惠</Text>
+          <Text style={cashierStyles.titleText}>整单优惠 / 加价</Text>
 
           {/* tab 段控件 */}
           <View style={styles.tabs}>
@@ -146,7 +143,7 @@ export function DiscountSheet() {
             />
             <Text style={styles.unit}>{tab === "zhe" ? "折" : "元"}</Text>
           </View>
-          <Text style={cashierStyles.hint}>原价 {yuan(orig)}</Text>
+          <Text style={cashierStyles.hint}>原价合计 {yuan(orig)}</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
 
           <View style={styles.actions}>
