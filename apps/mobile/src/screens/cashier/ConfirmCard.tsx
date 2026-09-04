@@ -13,7 +13,7 @@ const fadeMs = 200; // motion.cardMs
 
 /**
  * 扫码确认卡：大商品图 + 规格 + 价 + 库存 + 数量步进器 + 加入购物车。
- * 价格展示双档：原价（会员价÷0.7）+ 会员价（salePrice 实价，标注 7 折）。
+ * 价格展示双档：原价（会员价÷0.8）+ 会员价（salePrice 实价，标注 8 折）。
  * 会员态：会员价金色大字、原价划线、加入按会员价；非会员态反之。
  * 入场：纯淡入（无位移/无弹簧，避免"弹"的观感过重）。
  */
@@ -32,7 +32,7 @@ export function ConfirmCard() {
 
   const sku = pendingSku;
   const memberPrice = sku.salePrice; // 会员价 = 实价
-  const tagPrice = memberPriceToTagPrice(memberPrice); // 原价 = 会员价 ÷ 0.7
+  const tagPrice = memberPriceToTagPrice(memberPrice); // 原价 = 会员价 ÷ 0.8
   const basePrice = isMember ? memberPrice : tagPrice; // 当前态进车价
   const already = cart.find((l) => l.skuId === sku.skuId)?.quantity ?? 0;
   const maxAddable = Math.max(sku.stock - already, 0);
@@ -175,14 +175,14 @@ const styles = StyleSheet.create({
   },
   /** 会员态大字金色 */
   priceGold: { color: colors.gold },
-  /** 会员态「会员价 · 7折」金色小标 / 原价划线 */
+  /** 会员态「会员价 · 8 折」金色小标 / 原价划线 */
   priceTag: { fontSize: font.caption, fontWeight: "800", color: colors.gold },
   priceStrike: {
     fontSize: font.caption,
     color: colors.textMuted,
     textDecorationLine: "line-through",
   },
-  /** 非会员态金色会员价提示（推销话术：扫一眼看到 7 折） */
+  /** 非会员态金色会员价提示（推销话术：扫一眼看到 8 折） */
   priceTagGold: { fontSize: font.caption, fontWeight: "700", color: colors.gold },
   row: {
     flexDirection: "row",

@@ -14,11 +14,11 @@ export const Money = z.number().int().nonnegative().max(1_000_000_000);
 export const SignedMoney = z.number().int().min(-1_000_000_000).max(1_000_000_000);
 
 /** 会员折扣率：会员价（=salePrice 实价）= 原价 × MEMBER_RATE */
-export const MEMBER_RATE = 0.7;
+export const MEMBER_RATE = 0.8;
 
 /**
- * 会员价（分）→ 原价（分）：原价 = 会员价 ÷ 0.7，四舍五入到元。
- * 原价仅用于展示与非会员默认售价（顾客看到原价，打 7 折得会员价），
+ * 会员价（分）→ 原价（分）：原价 = 会员价 ÷ 0.8，四舍五入到元。
+ * 原价仅用于展示与非会员默认售价（顾客看到原价，打 8 折得会员价），
  * 纯推导不落库——salePrice 字段本身即会员价（实价）。
  */
 export function memberPriceToTagPrice(memberCents: number): number {

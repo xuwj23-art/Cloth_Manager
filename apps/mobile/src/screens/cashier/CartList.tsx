@@ -88,7 +88,7 @@ const CartRowBase = ({
   onPreview,
 }: CartRowProps) => {
   const edited = line.origPrice != null && line.origPrice !== line.price;
-  /** 原价（吊牌价）= 会员价 ÷ 0.7 取整到元；会员态划线展示 */
+  /** 原价（吊牌价）= 会员价 ÷ 0.8 取整到元；会员态划线展示 */
   const tagPrice = memberPriceToTagPrice(lineMemberPrice(line));
   const thumb = thumbUrl(line.image ?? null);
   return (
@@ -131,7 +131,7 @@ const CartRowBase = ({
             >
               {yuan(line.price)}
             </Text>
-            {/* 会员态恒显划线原价（原价=会员价÷0.7）；非会员仅改价后显示进车基准价 */}
+            {/* 会员态恒显划线原价（原价=会员价÷0.8）；非会员仅改价后显示进车基准价 */}
             {isMember || edited ? (
               <Text style={styles.origPrice} allowFontScaling={false}>
                 {yuan(isMember ? tagPrice : line.origPrice!)}

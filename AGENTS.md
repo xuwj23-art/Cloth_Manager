@@ -214,7 +214,7 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `LoginScreen`                                                  | 登录 / 注册门店                                                                                                                                                             |
 | `HomeScreen`                                                   | 入口（logo + 收银台）、今日营业额；底栏同步与「名·身份」                                                                                                                    |
-| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗；「会员」勾选切会员价（金色，=salePrice 实价；非会员默认收原价=会员价÷0.7 四舍五入到元）；整单优惠/加价（打折可 >10 折、总价改价可高于原价） |
+| `CashierScreen`                                                | 扫码收银、购物车、结算确认弹窗；「会员」勾选切会员价（金色，=salePrice 实价；非会员默认收原价=会员价÷0.8 四舍五入到元）；整单优惠/加价（打折可 >10 折、总价改价可高于原价） |
 | `ProductsScreen` / `CreateProductScreen` / `EditProductScreen` | 商品列表 / 三图+AI/手动双路径建档 / 编辑补图·材质品类                                                                                                                       |
 | `LabelPrintScreen`                                             | 标签打印（蓝牙 / PDF 降级）                                                                                                                                                 |
 | `SalesScreen` / `SaleDetailScreen`                             | 报表流水 / 单据详情·编辑·删除（owner）                                                                                                                                      |
@@ -260,7 +260,7 @@ React Navigation（`@react-navigation/native` + native-stack，`src/navigation/R
 
 ## 8. 共享包 `packages/shared`
 
-前后端共用，改这里同时影响双端（注意 §2 规则 7）。导出：`API_PREFIX`、枚举（`enums.ts`）、鉴权（`auth.ts`）、商品 + `expandSkuMatrix` + 会员价换算 `MEMBER_RATE`/`memberPriceToTagPrice`（原价=会员价÷0.7 四舍五入到元，纯推导不落库）+ `SignedMoney`（整单加价用有符号金额）（`product.ts`）、建档芯片与识图映射（`catalog-presets.ts`：`mapGarmentVision` / `normalizeProductTitle` / `PRESET_SIZE_GROUPS` 三组尺码+均码）、识图 DTO（`garment-vision.ts`）、库存（`inventory.ts`）、销售 DTO/响应（`sale.ts`，`orderDiscountCents` 为 SignedMoney）、购物车纯函数（`cart.ts`：`addToCart/addToCartQty/setQuantity/setLinePrice/cartToSaleInput` + 会员价 `lineMemberPrice/lineBasePrice/rebaseMemberLines`）。购物车与建档逻辑有 vitest 单测。
+前后端共用，改这里同时影响双端（注意 §2 规则 7）。导出：`API_PREFIX`、枚举（`enums.ts`）、鉴权（`auth.ts`）、商品 + `expandSkuMatrix` + 会员价换算 `MEMBER_RATE`/`memberPriceToTagPrice`（原价=会员价÷0.8 四舍五入到元，纯推导不落库）+ `SignedMoney`（整单加价用有符号金额）（`product.ts`）、建档芯片与识图映射（`catalog-presets.ts`：`mapGarmentVision` / `normalizeProductTitle` / `PRESET_SIZE_GROUPS` 三组尺码+均码）、识图 DTO（`garment-vision.ts`）、库存（`inventory.ts`）、销售 DTO/响应（`sale.ts`，`orderDiscountCents` 为 SignedMoney）、购物车纯函数（`cart.ts`：`addToCart/addToCartQty/setQuantity/setLinePrice/cartToSaleInput` + 会员价 `lineMemberPrice/lineBasePrice/rebaseMemberLines`）。购物车与建档逻辑有 vitest 单测。
 
 ---
 

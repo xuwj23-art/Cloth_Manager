@@ -109,7 +109,7 @@ export function lineMemberPrice(line: CartLine): number {
   return line.memberPrice ?? line.price;
 }
 
-/** 行的基准价（分）：会员态 = 会员价；非会员态 = 原价（会员价 ÷ 0.7 四舍五入到元） */
+/** 行的基准价（分）：会员态 = 会员价；非会员态 = 原价（会员价 ÷ 0.8 四舍五入到元） */
 export function lineBasePrice(line: CartLine, isMember: boolean): number {
   const member = lineMemberPrice(line);
   return isMember ? member : memberPriceToTagPrice(member);

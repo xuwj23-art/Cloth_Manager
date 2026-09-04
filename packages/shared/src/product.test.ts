@@ -47,16 +47,16 @@ describe("SignedMoney / 整单加价（负优惠）", () => {
 });
 
 describe("memberPriceToTagPrice（会员价 → 原价，四舍五入到元）", () => {
-  it("除不尽时四舍五入到元：99 元 → 141 元", () => {
-    expect(memberPriceToTagPrice(9900)).toBe(14100);
+  it("除不尽时四舍五入到元：99 元 → 123.75 元 → 124 元", () => {
+    expect(memberPriceToTagPrice(9900)).toBe(12400);
   });
 
-  it("精确整除：70 元 → 100 元", () => {
-    expect(memberPriceToTagPrice(7000)).toBe(10000);
+  it("精确整除：80 元 → 100 元", () => {
+    expect(memberPriceToTagPrice(8000)).toBe(10000);
   });
 
-  it("五入进位：70.5 元 → 100.71 元 → 101 元", () => {
-    expect(memberPriceToTagPrice(7050)).toBe(10100);
+  it("五入进位：70.2 元 → 87.75 元 → 88 元", () => {
+    expect(memberPriceToTagPrice(7020)).toBe(8800);
   });
 
   it("0 → 0", () => {

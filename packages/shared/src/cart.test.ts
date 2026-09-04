@@ -256,27 +256,27 @@ describe("cart 纯函数", () => {
 });
 
 describe("会员价（memberPrice）", () => {
-  // 会员价 70 元（salePrice=7000），原价 = 70/0.7 = 100 元
-  const memberSku: ScannedSku = { ...skuA, price: 10000, memberPrice: 7000 };
+  // 会员价 80 元（salePrice=8000），原价 = 80/0.8 = 100 元
+  const memberSku: ScannedSku = { ...skuA, price: 10000, memberPrice: 8000 };
 
   it("新行携带会员价快照；未提供时回退成交价", () => {
     const c = addToCart([], memberSku);
-    expect(c[0]!.memberPrice).toBe(7000);
+    expect(c[0]!.memberPrice).toBe(8000);
     const fallback = addToCart([], skuA); // 无 memberPrice
     expect(lineMemberPrice(fallback[0]!)).toBe(4900);
   });
 
   it("已有行重扫刷新会员价快照但保留议价单价", () => {
     let c = addToCart([], memberSku);
-    c = setLinePrice(c, "a", 8000); // 议价 80 元
-    c = addToCart(c, { ...memberSku, memberPrice: 6900 }); // 服务端改价后重扫
-    expect(c[0]!.price).toBe(8000); // 议价保留
-    expect(c[0]!.memberPrice).toBe(6900); // 快照刷新
+    c = setLinePrice(c, "a", 8500); // 议价 85 元
+    c = addToCart(c, { ...memberSku, memberPrice: 7900 }); // 服务端改价后重扫
+    expect(c[0]!.price).toBe(8500); // 议价保留
+    expect(c[0]!.memberPrice).toBe(7900); // 快照刷新
   });
 
-  it("lineBasePrice：会员态=会员价，非会员态=原价（÷0.7 取整到元）", () => {
+  it("lineBasePrice：会员态=会员价，非会员态=原价（÷0.8 取整到元）", () => {
     const c = addToCart([], memberSku);
-    expect(lineBasePrice(c[0]!, true)).toBe(7000);
+    expect(lineBasePrice(c[0]!, true)).toBe(8000);
     expect(lineBasePrice(c[0]!, false)).toBe(10000);
   });
 
@@ -285,12 +285,12 @@ describe("会员价（memberPrice）", () => {
     c = setLinePrice(c, "a", 9000); // 议价 90 元
     const out = rebaseMemberLines(c, true);
     expect(out[0]!.price).toBe(9000); // 手动改价保留
-    expect(out[0]!.origPrice).toBe(7000); // 基准价对齐会员态
+    expect(out[0]!.origPrice).toBe(8000); // 基准价对齐会员态
   });
 
   it("rebaseMemberLines 切回非会员：会员价进车的行重置为原价", () => {
-    const memberEntry: ScannedSku = { ...skuA, price: 7000, memberPrice: 7000 };
-    const c = addToCart([], memberEntry); // 会员态进车 70 元
+    const memberEntry: ScannedSku = { ...skuA, price: 8000, memberPrice: 8000 };
+    const c = addToCart([], memberEntry); // 会员态进车 80 元
     const out = rebaseMemberLines(c, false);
     expect(out[0]!.price).toBe(10000); // 重置为原价
     expect(out[0]!.origPrice).toBe(10000);
@@ -300,6 +300,6 @@ describe("会员价（memberPrice）", () => {
     expect(rebaseMemberLines([], true)).toEqual([]);
     const plain = addToCart([], skuA); // 无 memberPrice（回退 price）
     const out = rebaseMemberLines(plain, false);
-    expect(out[0]!.price).toBe(Math.round(4900 / 0.7 / 100) * 100); // 70 元
+    expect(out[0]!.price).toBe(Math.round(4900 / 0.8 / 100) * 100); // 61 元
   });
 });

@@ -389,7 +389,7 @@ export function CreateProductScreen() {
         : []),
     ]),
   ];
-  // 会员价输入实时推导原价（÷0.7 四舍五入到元）；空输入/非法输入显示 —
+  // 会员价输入实时推导原价（÷0.8 四舍五入到元）；空输入/非法输入显示 —
   // （toCents("") 会因 Number("")===0 返回 0，须先排除空串）
   const saleCents = salePrice.trim() === "" ? NaN : toCents(salePrice);
   const tagPriceText = Number.isNaN(saleCents)
@@ -486,7 +486,7 @@ export function CreateProductScreen() {
                     if (fieldErr?.field === "price") setFieldErr(null);
                   }}
                 />
-                {/* 原价只读自动推导：原价 = 会员价 ÷ 0.7（四舍五入到元），顾客看原价、会员打 7 折 */}
+                {/* 原价只读自动推导：原价 = 会员价 ÷ 0.8（四舍五入到元），顾客看原价、会员打 8 折 */}
                 <Text style={styles.tagPriceHint} numberOfLines={1}>
                   {tagPriceText}
                 </Text>
@@ -829,7 +829,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     includeFontPadding: false,
   },
-  /** 会员价输入框下方的只读原价（自动推导 ÷0.7） */
+  /** 会员价输入框下方的只读原价（自动推导 ÷0.8） */
   tagPriceHint: {
     fontSize: font.caption,
     lineHeight: 16,

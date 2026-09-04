@@ -44,7 +44,7 @@ export interface CashierState {
   orderDiscountCents: number;
   /**
    * 会员态：true = 按「会员价」（salePrice 实价）收银，购物车价格金色展示；
-   * false = 按「原价」（会员价÷0.7 四舍五入到元）收银。结算后复位 false。
+   * false = 按「原价」（会员价÷0.8 四舍五入到元）收银。结算后复位 false。
    */
   isMember: boolean;
   /** 顶部提示文案 */
@@ -103,7 +103,7 @@ export const useCashierStore = create<CashierState>((set, get) => ({
   confirmAdd: () => {
     const { pendingSku, pendingQty, isMember } = get();
     if (!pendingSku) return;
-    // 会员价 = salePrice（实价）；非会员默认收原价（会员价 ÷ 0.7 取整到元）
+    // 会员价 = salePrice（实价）；非会员默认收原价（会员价 ÷ 0.8 取整到元）
     const memberPrice = pendingSku.salePrice;
     const basePrice = isMember ? memberPrice : memberPriceToTagPrice(memberPrice);
     const scanned: ScannedSku = {
